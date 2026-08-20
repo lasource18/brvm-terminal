@@ -20,6 +20,8 @@ from brvm.models import DailyBar
 from brvm.sources import sikafinance
 from brvm.store import quotes as quotes_repo
 
+_INDEX_SOURCE = "index_levels"
+
 log = get(__name__)
 
 TTL_S = 15 * 60
@@ -37,6 +39,39 @@ def _security_country(ticker: str) -> str | None:
             "SELECT country FROM securities WHERE ticker = ?", (ticker,)
         ).fetchone()
     return r["country"] if r else None
+
+
+def _security_kind(ticker: str) -> str | None:
+    with connect(_db_path()) as conn:
+        r = conn.execute(
+            "SELECT kind FROM securities WHERE ticker = ?", (ticker,)
+        ).fetchone()
+    return r["kind"] if r else None
+
+
+def _load_index_levels(ticker: str) -> list[DailyBar]:
+    """Load index levels as level-only bars (close = level, no OHLC)."""
+    from datetime import date as _date
+
+    with connect(_db_path()) as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, session_date, level
+            FROM index_levels
+            WHERE ticker = ?
+            ORDER BY session_date DESC
+            """,
+            (ticker,),
+        ).fetchall()
+    return [
+        DailyBar(
+            ticker=r["ticker"],
+            session_date=_date.fromisoformat(r["session_date"]),
+            close=r["level"],
+            source=_INDEX_SOURCE,
+        )
+        for r in rows
+    ]
 
 
 def _load_from_db(ticker: str) -> list[DailyBar]:
@@ -69,7 +104,11 @@ def _load_from_db(ticker: str) -> list[DailyBar]:
 
 
 def get_history(ticker: str, country: str | None = None) -> list[DailyBar]:
-    """Return daily bars newest-first, hitting cache -> DB -> network."""
+    """Return daily bars newest-first, hitting cache -> DB -> network.
+
+    Indices are served from `index_levels` (no OHLCV, close = level) and
+    never trigger a per-ticker network fetch.
+    """
     ticker = ticker.upper()
     now = time.time()
 
@@ -78,6 +117,12 @@ def get_history(ticker: str, country: str | None = None) -> list[DailyBar]:
     if cached and now - cached[0] < TTL_S:
         log.debug("history cache hit ticker=%s age=%.1fs", ticker, now - cached[0])
         return cached[1]
+
+    if _security_kind(ticker) == "index":
+        bars = _load_index_levels(ticker)
+        with _lock:
+            _cache[ticker] = (now, bars)
+        return bars
 
     # Cache miss: try DB first — no I/O if we already have anything.
     db_bars = _load_from_db(ticker)

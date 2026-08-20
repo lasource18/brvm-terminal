@@ -37,10 +37,14 @@ def security_tab(request: Request, ticker: str, tab: str):
     sec = market.get_security(ticker)
     if sec is None:
         raise HTTPException(status_code=404, detail=f"unknown ticker: {ticker}")
+    if sec.kind in spec.hidden_for_kinds:
+        raise HTTPException(
+            status_code=404, detail=f"tab {tab!r} not available for {sec.kind}"
+        )
     ctx = {
         **base_ctx(),
         "sec": sec,
-        "tabs": tabs.TABS,
+        "tabs": tabs.visible_for(sec.kind),
         "active_tab": spec.key,
         "tab": spec,
         "tab_template": spec.template,

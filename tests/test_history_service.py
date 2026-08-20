@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from brvm.db import connect, ensure_migrations_table
-from brvm.models import DailyBar, Security
+from brvm.models import DailyBar, IndexLevel, Security
+from brvm.store import quotes as quotes_repo
 from brvm.store import securities as sec_repo
 
 
@@ -15,8 +16,13 @@ def _init(db_path: Path) -> None:
         conn.executescript((root / "migrations" / "0001_init.sql").read_text())
         conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
         conn.commit()
-        sec_repo.upsert(conn, [Security(ticker="SNTS", name="SONATEL",
-                                        kind="equity", country="SN")])
+        sec_repo.upsert(
+            conn,
+            [
+                Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN"),
+                Security(ticker="BRVMC", name="BRVM COMPOSITE", kind="index"),
+            ],
+        )
 
 
 @pytest.fixture
@@ -79,8 +85,6 @@ def test_cache_populates_on_miss_and_hits_on_second_call(history_env, monkeypatc
 def test_falls_back_to_db_when_fetch_fails_and_db_has_rows(history_env, monkeypatch):
     import httpx
 
-    from brvm.store import quotes as quotes_repo
-
     with connect(history_env._db_path()) as conn:
         quotes_repo.upsert_daily_bars(conn, _fake_bars(3))
 
@@ -96,3 +100,32 @@ def test_falls_back_to_db_when_fetch_fails_and_db_has_rows(history_env, monkeypa
 
     bars = history_env.get_history("SNTS", "SN")
     assert len(bars) == 3
+
+
+def test_indices_load_from_index_levels_and_skip_network(history_env, monkeypatch):
+    from datetime import timedelta
+
+    def boom(*a, **kw):  # would fire if the code path attempted the fetch
+        raise AssertionError("fetch_historique should not be called for indices")
+
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique", boom)
+
+    base = date(2026, 8, 18)
+    levels = [
+        IndexLevel(
+            ticker="BRVMC",
+            session_date=base - timedelta(days=i),
+            level=300.0 + i,
+            change_pct=0.1 * i,
+            source="sikafinance",
+        )
+        for i in range(4)
+    ]
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_index_levels(conn, levels)
+
+    history_env.clear_cache()
+    bars = history_env.get_history("BRVMC")
+    # newest-first: 2026-08-18 (i=0, level=300) → 2026-08-15 (i=3, level=303)
+    assert [b.close for b in bars] == [300.0, 301.0, 302.0, 303.0]
+    assert all(b.open is None and b.high is None and b.volume is None for b in bars)
