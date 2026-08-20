@@ -31,3 +31,5 @@ def test_scheduler_builds():
     ids = {j.id for j in sched.get_jobs()}
     assert "snapshot_market_hours" in ids
     assert "snapshot_hourly_outside" in ids
+    assert "news_market_hours" in ids
+    assert "news_hourly_outside" in ids

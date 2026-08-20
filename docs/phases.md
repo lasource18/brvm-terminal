@@ -10,7 +10,9 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 1 | Reference data + quotes | done | 2026-08-19 |
 | 2 | Web UI v1 (HTMX) | done | 2026-08-19 |
 | 2.5 | Search + directory + company tab shell | done | 2026-08-19 |
-| 3 | News + corporate actions | not started | — |
+| 3a | News + corporate actions — ingest | done | 2026-08-20 |
+| 3b | News + corporate actions — Haiku tagging ($1/day cap) | not started | — |
+| 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | not started | — |
 | 4 | Fundamentals (financials, ownership, segments) | not started | — |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
@@ -231,16 +233,95 @@ project charter and `README.md` for the current "Try it" quickstart.
 
 ---
 
-## Phase 3 — News + corporate actions — not started
+## Phase 3a — News + corporate actions — ingest (done 2026-08-20)
 
-Planned scope per CLAUDE.md, unchanged:
-- Pollers for sikafinance news + communiqués and brvm.org announcements,
-  with URL+title hash dedupe.
-- LLM tagging pipeline (Haiku, strict JSON out) writing
-  `{tickers, relevance, category, summary_fr, summary_en}`.
-- News feed page filterable by ticker/category; dividends & AGM calendar.
-- Also populates the `News` and `Corporate actions` tabs on
-  `/s/{ticker}` (shells built in Phase 2.5).
+**Delivered**
+- Migration `0003_news.sql`: `news_items` (source, kind,
+  url, url_hash UNIQUE, title, chapeau, issuer_name, ticker_hint,
+  published_at, fetched_utc + nullable LLM-tag columns for 3b);
+  `corporate_actions` (ticker FK, kind, ex_date, pay_date, amount,
+  currency, yield_pct, note, source, source_url); `llm_spend` (day
+  PRIMARY KEY, calls, tokens, usd_cents) — created now so 3b's budget
+  counter has a home without another migration.
+- Sikafinance parsers (fixtures captured 2026-08-20):
+  - `parse_news_feed` — `ul.news-feed > li.news-item` (title, chapeau,
+    `time[datetime]` → ISO-8601 UTC, Africa/Abidjan being UTC+0).
+  - `parse_communiques` — `table.tbl100_6` PDF rows, splits
+    `"COMPANY : TITLE"` into `issuer_name` + `title`.
+  - `parse_dividendes` — `table#tbdDiv` upcoming dividend calendar
+    (ticker via `/marches/cotation_TICKER.cc` link, amount, yield;
+    "A préciser" rows keep `ex_date=NULL` with the raw string in `note`).
+- `sources/_dedupe.news_hash(url, title)` — sha256 over normalized URL
+  (lowercased, query/fragment/trailing-slash stripped) + collapsed title.
+  Same helper is reused by the future brvm.org / afx parsers.
+- `store/news.py`: `upsert_news_items` (INSERT ... ON CONFLICT DO NOTHING
+  keyed on `url_hash`, so LLM-tagged fields set later are never
+  clobbered), `upsert_corporate_actions` (pre-check + branch, because
+  SQLite's UNIQUE lets duplicate NULL `ex_date` rows through), plus
+  `list_news(ticker=…)` matching both `ticker_hint` and CSV
+  `tickers_llm`, and `list_corporate_actions_upcoming(days=30)`.
+- `services/news.poll_all()` — one-shot fetch of feed + communiqués +
+  dividends, resolves `ticker_hint` best-effort against
+  `securities.name`, drops dividend rows for unknown tickers (FK safety)
+  and logs the skip. Returns row-count dict for scheduler / demo.
+- Scheduler adds `news_market_hours` (mon-fri, 09-14 Abidjan, every 15
+  min) and `news_hourly_outside` jobs alongside the existing snapshot
+  jobs.
+- `jobs/news_poll.py` + `just news-poll` — one-shot poll that also
+  prints the 5 latest news items and the next-30-day corporate-actions
+  calendar (mirrors the Phase 1 `just snapshot` demo shape).
+
+**Definition of Done — met**
+- `just migrate` picks up `0003_news.sql` idempotently.
+- `just news-poll` against live sikafinance: ingested 10 news + 30
+  communiqués + 11 dividends first pass; re-run reports 0 new, 10/30
+  duplicates and 11 dividend updates (idempotent).
+- 143 tests green (23 new): sikafinance news parsers, `_dedupe`
+  normalization, news repo dedupe / corporate-actions upsert / upcoming
+  window / ticker filter, services poll_all end-to-end + unknown-ticker
+  degradation, scheduler wiring.
+- Ruff clean.
+
+**Notes / follow-ups**
+- brvm.org `/en/actualites` is a static Drupal welcome page, not a
+  structured feed — deferred until we find (or ask the user for) a real
+  BRVM.org announcements URL. sikafinance already covers news +
+  communiqués + dividends end-to-end.
+- Dividend-calendar rows with ex_date "A préciser" (~half the fixture)
+  land as `ex_date NULL` and are deduped by a pre-check because SQLite
+  UNIQUE(ticker, kind, ex_date) treats each NULL as distinct.
+- `dividends_updated` counts all rows on every poll — we don't diff
+  before UPDATE. Fine at this volume (~10 rows / poll); revisit if it
+  ever becomes chatty for change-tracking.
+- Ticker resolution on communiqués is exact-name-match against
+  `securities`; ~half of common issuers resolve (SGBCI, TOTAL CI, SAPH
+  CI, ETI TG). Everything else stays `ticker_hint=NULL` and will be
+  attributed by the 3b LLM tagger writing `tickers_llm`.
+
+---
+
+## Phase 3b — News + corporate actions — Haiku tagging — not started
+
+Planned scope:
+- `services/llm.py` thin Anthropic client (`claude-haiku-4-5-20251001`
+  per charter) with strict JSON schema output and retry-on-parse-failure.
+- Daily spend cap enforced against `llm_spend`: **hard limit $1/day**;
+  worker no-ops with a warning once the day's `usd_cents` crosses 100.
+- Backfill script + incremental worker (only `news_items` with
+  `tagged_utc IS NULL`); writes `tickers_llm` CSV, `relevance` (0-10),
+  `category_llm`, `summary_fr`, `summary_en`.
+- Batch prompts where the API allows to keep per-item cost minimal.
+
+## Phase 3c — News + corporate actions — UI — not started
+
+Planned scope:
+- `/news` page: filter by ticker + category + date, HTMX pagination.
+- Fill `News` tab on `/s/{ticker}` (per-ticker feed) and `Corporate
+  actions` tab (upcoming dividends / AGMs for that ticker).
+- **Next-30-days corporate-actions strip on `/`** (small, dense —
+  right rail or a fourth panel next to gainers/losers/turnover).
+- No dedicated `/calendar` global page (per user; per-ticker + overview
+  strip is enough).
 
 ---
 

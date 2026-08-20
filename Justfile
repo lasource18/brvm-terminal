@@ -36,3 +36,7 @@ refresh-fixtures:
 # Phase 1 demo: refresh securities + one snapshot cycle, print top-10 by turnover
 snapshot:
     uv run python -m brvm.jobs.quote_snapshot --once
+
+# Phase 3a demo: fetch news feed + communiqués + upcoming dividends, print summary
+news-poll:
+    uv run python -m brvm.jobs.news_poll --once

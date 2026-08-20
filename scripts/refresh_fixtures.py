@@ -65,6 +65,18 @@ def _targets() -> list[Target]:
             f"{sika}/marches/secteur/SNTS.sn",
             FIXTURES / "sikafinance" / "secteur_SNTS.html",
         ),
+        Target(
+            f"{sika}/marches/actualites_bourse_brvm",
+            FIXTURES / "sikafinance" / "actualites_brvm.html",
+        ),
+        Target(
+            f"{sika}/marches/communiques_brvm",
+            FIXTURES / "sikafinance" / "communiques_brvm.html",
+        ),
+        Target(
+            f"{sika}/marches/dividendes",
+            FIXTURES / "sikafinance" / "dividendes.html",
+        ),
         Target(f"{afx}/brvm/", FIXTURES / "afx" / "index.html"),
         Target(f"{afx}/brvm/snts.html", FIXTURES / "afx" / "snts.html"),
         Target(

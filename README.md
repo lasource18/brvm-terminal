@@ -13,7 +13,9 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 1 — reference data + quotes
 - [x] Phase 2 — web UI v1
 - [x] Phase 2.5 — search + directory + company tab shell
-- [ ] Phase 3 — news + corporate actions
+- [x] Phase 3a — news + corporate actions (ingest)
+- [ ] Phase 3b — news + corporate actions (Haiku tagging, $1/day cap)
+- [ ] Phase 3c — news + corporate actions (UI: `/news`, tabs, 30-day strip)
 - [ ] Phase 4 — fundamentals (financials, ownership, segments)
 - [ ] Phase 5 — TUI
 - [ ] Phase 6 — alerts + daily brief + analyst-note synthesis
@@ -61,6 +63,23 @@ Available pages:
 - `/watchlists` — create and manage named watchlists
 - `/watchlists/{slug}` — quote board for one list, add/remove tickers inline
 - `/health` — JSON liveness
+
+## Try it (Phase 3a demo)
+
+After `just migrate`, run one news+communiqués+dividends poll:
+
+```bash
+just news-poll
+```
+
+Prints the row-count summary (news / communiqués inserted vs deduped,
+dividend-calendar rows inserted vs updated), the 5 latest news items,
+and the next-30-day corporate-actions calendar. Second run against the
+same fixtures reports 0 new rows — dedupe on `url_hash` for news, and
+`(ticker, kind, ex_date)` pre-check for corporate actions.
+
+The web UI still shows the Phase 2.5 shell tabs ("Coming in Phase 3");
+the news/actions tabs light up in Phase 3c.
 
 ## Try it (Phase 1 demo)
 
