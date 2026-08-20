@@ -1,0 +1,10 @@
+{% if watchlists %}
+  <ul class="wl-list">
+    {% for wl in watchlists %}
+      <li><a href="/watchlists/{{ wl.slug }}">{{ wl.name }}</a>
+        <span class="dim">/ {{ wl.slug }}</span></li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <div class="dim">No watchlists yet.</div>
+{% endif %}

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}brvm-terminal{% endblock %}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="/static/app.js" defer></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand"><a href="/">brvm-terminal</a></span>
+    <nav>
+      <a href="/">Overview</a>
+      <a href="/directory">Directory</a>
+      <a href="/watchlists">Watchlists</a>
+    </nav>
+    <div class="search-wrap">
+      <input id="search-input"
+             type="text"
+             placeholder="Search ticker or name…"
+             autocomplete="off"
+             spellcheck="false"
+             hx-get="/_frag/search"
+             hx-trigger="keyup changed delay:150ms"
+             hx-target="#search-results"
+             hx-swap="innerHTML"
+             name="q">
+      <div id="search-results" class="search-results"></div>
+    </div>
+    <span class="spacer"></span>
+    <span class="clock">{{ abidjan_now }}</span>
+    {% if market_open %}
+      <span class="badge open">MARKET OPEN</span>
+    {% else %}
+      <span class="badge closed">MARKET CLOSED</span>
+    {% endif %}
+  </div>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

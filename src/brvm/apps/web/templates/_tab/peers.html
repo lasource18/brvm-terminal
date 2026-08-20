@@ -1,0 +1,37 @@
+<div class="panel">
+  <h2>
+    Peers
+    {% if peers.sector %}<span class="dim" style="font-weight: normal;">/ {{ peers.sector }}</span>{% endif %}
+  </h2>
+  {% if peers.peers %}
+    <table class="quotes">
+      <thead>
+        <tr>
+          <th>TICKER</th><th>LAST</th><th>DAY%</th><th>YTD%</th><th>VOLUME</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in peers.peers %}
+          <tr>
+            <td><a href="/s/{{ p.ticker }}">{{ p.ticker }}</a>
+                <span class="dim">{{ p.name[:24] }}</span></td>
+            <td>{% if p.last is not none %}{{ "{:,.0f}".format(p.last) }}{% else %}—{% endif %}</td>
+            <td class="{% if p.change_day_pct and p.change_day_pct > 0 %}pos{% elif p.change_day_pct and p.change_day_pct < 0 %}neg{% else %}zero{% endif %}">
+              {% if p.change_day_pct is not none %}{{ "%+.2f"|format(p.change_day_pct) }}%{% else %}—{% endif %}
+            </td>
+            <td class="{% if p.change_ytd_pct and p.change_ytd_pct > 0 %}pos{% elif p.change_ytd_pct and p.change_ytd_pct < 0 %}neg{% else %}zero{% endif %}">
+              {% if p.change_ytd_pct is not none %}{{ "%+.2f"|format(p.change_ytd_pct) }}%{% else %}—{% endif %}
+            </td>
+            <td>{% if p.volume is not none %}{{ "{:,}".format(p.volume) }}{% else %}—{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="dim" style="padding: 16px;">No peers data available.</div>
+  {% endif %}
+</div>
+<div class="dim" style="margin-top: 8px;">
+  source: {{ peers.source }}
+  · market cap column will land in Phase 4 once we ingest a stable per-ticker market cap.
+</div>

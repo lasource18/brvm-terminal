@@ -1,0 +1,13 @@
+{% if hits %}
+  <ul class="search-hits" role="listbox">
+    {% for h in hits %}
+      <li role="option">
+        <a href="/s/{{ h.ticker }}">
+          <span class="hit-ticker">{{ h.ticker }}</span>
+          <span class="hit-name">{{ h.name }}</span>
+          <span class="hit-meta">{% if h.country %}{{ h.country }} · {% endif %}{{ h.kind }}</span>
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

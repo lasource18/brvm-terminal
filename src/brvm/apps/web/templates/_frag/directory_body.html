@@ -1,0 +1,27 @@
+<div id="dir-body" class="panel" style="margin-top: 12px;">
+  <table class="quotes dir-table">
+    <thead>
+      <tr>
+        <th>TICKER</th><th>NAME</th><th>KIND</th><th>COUNTRY</th><th>SECTOR</th><th>LAST</th><th>CHG%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="/s/{{ r.ticker }}">{{ r.ticker }}</a></td>
+          <td>{{ r.name }}</td>
+          <td class="dim">{{ r.kind }}</td>
+          <td>{{ r.country or "—" }}</td>
+          <td class="dim">{{ r.sector or "—" }}</td>
+          <td>{% if r.last is not none %}{{ "{:,.0f}".format(r.last) }}{% else %}—{% endif %}</td>
+          <td class="{% if r.change_pct and r.change_pct > 0 %}pos{% elif r.change_pct and r.change_pct < 0 %}neg{% else %}zero{% endif %}">
+            {% if r.change_pct is not none %}{{ "%+.2f"|format(r.change_pct) }}%{% else %}—{% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="dim" style="text-align: center; padding: 20px;">No matches.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="dim" style="padding: 6px 10px;">{{ rows|length }} securities</div>
+</div>

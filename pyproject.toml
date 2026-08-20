@@ -1,0 +1,67 @@
+[project]
+name = "brvm-terminal"
+version = "0.1.0"
+description = "Lightweight Bloomberg-style terminal for the BRVM (Bourse Régionale des Valeurs Mobilières, WAEMU)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "cmguinan", email = "cmguinan@yahoo.fr" }]
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "httpx>=0.28",
+    "selectolax>=0.3.28",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "apscheduler>=3.10",
+    "python-dateutil>=2.9",
+    "sqlalchemy>=2.0",
+    "pypdf>=5.1",
+    "python-multipart>=0.0.20",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-httpx>=0.35",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "freezegun>=1.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/brvm"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]  # line-length handled by formatter
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "pdf: parses a PDF fixture (fragile if source layout shifts)",
+    "network: hits the live network (skipped in default runs)",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+ignore_missing_imports = true
+files = ["src"]

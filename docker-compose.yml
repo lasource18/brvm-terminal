@@ -1,0 +1,30 @@
+# Skeleton compose file for the eventual Hetzner CX22 deploy.
+# NOT wired to run yet; kept for shape review during Phase 0.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    expose:
+      - "8765"
+    mem_limit: 384m
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    mem_limit: 64m
+
+volumes:
+  caddy_data:
+  caddy_config:

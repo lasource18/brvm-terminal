@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ wl.name }} · Watchlist · brvm-terminal{% endblock %}
+{% block content %}
+  <h2 style="color: var(--accent); font-size: 14px; margin: 0 0 12px; text-transform: uppercase;">
+    {{ wl.name }} <span class="dim">/ {{ wl.slug }}</span>
+  </h2>
+
+  <form class="wl-actions"
+        hx-post="/_frag/watchlists/{{ wl.slug }}/items"
+        hx-target="#wl-body"
+        hx-swap="outerHTML">
+    <input name="ticker" placeholder="Ticker (e.g. SNTS)" required
+           style="text-transform: uppercase;">
+    <button type="submit">Add</button>
+    <span class="dim">— tickers must exist in the securities table (run <code>just snapshot</code> first)</span>
+  </form>
+
+  {% set market_open = market_open %}
+  {% set generated_utc = generated_utc %}
+  <div class="panel" style="margin-top: 12px;">
+    {% include "_frag/watchlist.html" %}
+  </div>
+{% endblock %}
