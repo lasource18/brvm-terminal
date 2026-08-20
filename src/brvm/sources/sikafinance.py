@@ -30,7 +30,15 @@ from urllib.parse import urlparse
 import httpx
 from selectolax.parser import HTMLParser, Node
 
-from brvm.models import DailyBar, IndexLevel, Quote, Security
+from brvm.models import (
+    CorporateAction,
+    DailyBar,
+    IndexLevel,
+    NewsItem,
+    Quote,
+    Security,
+)
+from brvm.sources._dedupe import news_hash
 from brvm.sources._http import make_client
 from brvm.sources._num import parse_number
 
@@ -522,3 +530,232 @@ def canonical_url(ticker: str, country: str | None) -> str:
 def is_cotation_url(url: str) -> bool:
     p = urlparse(url)
     return bool(_COTATION_RE.match(p.path))
+
+
+# ---------- news feed / communiqués / dividends calendar ----------
+
+
+def _absolute(href: str) -> str:
+    if href.startswith("http://") or href.startswith("https://"):
+        return href
+    if not href.startswith("/"):
+        href = "/" + href
+    return f"{BASE}{href}"
+
+
+def _parse_dt_abidjan(iso_local: str) -> str | None:
+    """Sikafinance datetime attrs are Africa/Abidjan wall clock (UTC+0, no DST).
+
+    Return an ISO-8601 UTC string, or None if unparseable.
+    """
+    try:
+        dt = datetime.fromisoformat(iso_local)
+    except ValueError:
+        return None
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _parse_ddmmyyyy(s: str) -> date | None:
+    try:
+        return datetime.strptime(s.strip(), "%d/%m/%Y").date()
+    except ValueError:
+        return None
+
+
+def parse_news_feed(html: str) -> list[NewsItem]:
+    """Parse `/marches/actualites_bourse_brvm`.
+
+    Structure: `ul.news-feed > li.news-item` with `a.news-title`,
+    `div.news-chapeau`, `time.news-date[datetime="ISO"]`.
+    """
+    tree = HTMLParser(html)
+    items: list[NewsItem] = []
+    seen: set[str] = set()
+
+    feed = tree.css_first("ul.news-feed")
+    if feed is None:
+        return items
+
+    for li in feed.css("li.news-item"):
+        a = li.css_first("a.news-title")
+        if a is None:
+            continue
+        href = _href(a) or ""
+        title = a.text(strip=True)
+        if not href or not title:
+            continue
+        url = _absolute(href)
+        h = news_hash(url, title)
+        if h in seen:
+            continue
+        seen.add(h)
+
+        chapeau_el = li.css_first("div.news-chapeau")
+        chapeau = chapeau_el.text(strip=True) if chapeau_el is not None else None
+
+        published_at: str | None = None
+        t = li.css_first("time.news-date")
+        if t is not None:
+            iso = t.attributes.get("datetime")
+            if iso:
+                published_at = _parse_dt_abidjan(iso)
+
+        items.append(
+            NewsItem(
+                source=SOURCE_NAME,
+                kind="news",
+                url=url,
+                url_hash=h,
+                title=title,
+                chapeau=chapeau or None,
+                published_at=published_at,
+            )
+        )
+    return items
+
+
+_COMMUNIQUE_ISSUER_RE = re.compile(r"^\s*(?P<issuer>[^:]+?)\s*:\s*(?P<title>.+?)\s*$")
+
+
+def parse_communiques(html: str) -> list[NewsItem]:
+    """Parse `/marches/communiques_brvm`.
+
+    Structure: `table.tbl100_6.tablesorter > tbody > tr` with two cells:
+    date (DD/MM/YYYY) and an anchor to a /docs/*.pdf whose link text is
+    `COMPANY NAME : TITLE`.
+    """
+    tree = HTMLParser(html)
+    items: list[NewsItem] = []
+    seen: set[str] = set()
+
+    tbl = tree.css_first("table.tbl100_6")
+    if tbl is None:
+        return items
+
+    for tr in tbl.css("tbody tr"):
+        tds = tr.css("td")
+        if len(tds) < 2:
+            continue
+        d = _parse_ddmmyyyy(tds[0].text(strip=True))
+        a = tds[1].css_first("a")
+        if a is None:
+            continue
+        href = _href(a) or ""
+        raw_title = a.text(strip=True)
+        if not href or not raw_title:
+            continue
+
+        m = _COMMUNIQUE_ISSUER_RE.match(raw_title)
+        issuer = m.group("issuer").strip() if m else None
+        title = m.group("title").strip() if m else raw_title
+
+        url = _absolute(href)
+        h = news_hash(url, raw_title)
+        if h in seen:
+            continue
+        seen.add(h)
+
+        published_at = f"{d.isoformat()}T00:00:00Z" if d else None
+        items.append(
+            NewsItem(
+                source=SOURCE_NAME,
+                kind="communique",
+                url=url,
+                url_hash=h,
+                title=title,
+                issuer_name=issuer,
+                published_at=published_at,
+            )
+        )
+    return items
+
+
+def parse_dividendes(html: str) -> list[CorporateAction]:
+    """Parse `/marches/dividendes` upcoming table (id=`tbdDiv`).
+
+    Columns: Date détachement (DD/MM/YYYY or "A préciser"), Nom (anchor to
+    /marches/cotation_TICKER.cc), Montant, Rendement (with %).
+    """
+    tree = HTMLParser(html)
+    out: list[CorporateAction] = []
+
+    tbl = tree.css_first("table#tbdDiv")
+    if tbl is None:
+        return out
+
+    for tr in tbl.css("tbody tr"):
+        tds = tr.css("td")
+        if len(tds) < 4:
+            continue
+        raw_date = tds[0].text(strip=True)
+        ex_date = _parse_ddmmyyyy(raw_date)  # None for "A préciser"
+
+        a = tds[1].css_first("a")
+        if a is None:
+            continue
+        href = _href(a) or ""
+        try:
+            ticker, _cc = _ticker_from_href(href)
+        except ValueError:
+            continue
+
+        try:
+            amount = parse_number(tds[2].text(strip=True))
+        except ValueError:
+            amount = None
+        try:
+            yield_pct = parse_number(tds[3].text(strip=True))
+        except ValueError:
+            yield_pct = None
+
+        note = None if ex_date else raw_date or None
+        out.append(
+            CorporateAction(
+                ticker=ticker,
+                kind="dividend",
+                ex_date=ex_date,
+                amount=amount,
+                currency="XOF",
+                yield_pct=yield_pct,
+                note=note,
+                source=SOURCE_NAME,
+                source_url=f"{BASE}/marches/dividendes",
+            )
+        )
+    return out
+
+
+def fetch_news_feed(client: httpx.Client | None = None) -> list[NewsItem]:
+    close = client is None
+    client = client or make_client()
+    try:
+        r = client.get(f"{BASE}/marches/actualites_bourse_brvm")
+        r.raise_for_status()
+        return parse_news_feed(r.text)
+    finally:
+        if close:
+            client.close()
+
+
+def fetch_communiques(client: httpx.Client | None = None) -> list[NewsItem]:
+    close = client is None
+    client = client or make_client()
+    try:
+        r = client.get(f"{BASE}/marches/communiques_brvm")
+        r.raise_for_status()
+        return parse_communiques(r.text)
+    finally:
+        if close:
+            client.close()
+
+
+def fetch_dividendes(client: httpx.Client | None = None) -> list[CorporateAction]:
+    close = client is None
+    client = client or make_client()
+    try:
+        r = client.get(f"{BASE}/marches/dividendes")
+        r.raise_for_status()
+        return parse_dividendes(r.text)
+    finally:
+        if close:
+            client.close()
