@@ -1,7 +1,9 @@
+from datetime import date
+
 import pytest
 
 from brvm.db import connect, ensure_migrations_table
-from brvm.models import Quote, Security
+from brvm.models import IndexLevel, Quote, Security
 from brvm.store import quotes as quotes_repo
 from brvm.store import securities as sec_repo
 
@@ -45,6 +47,18 @@ def dir_env(monkeypatch, tmp_path):
                 Quote(ticker="ORAC", source="sikafinance", last=19000, change_pct=-0.5),
             ],
         )
+        quotes_repo.upsert_index_levels(
+            conn,
+            [
+                IndexLevel(
+                    ticker="BRVMC",
+                    session_date=date(2026, 8, 20),
+                    level=307.42,
+                    change_pct=0.53,
+                    source="sikafinance",
+                ),
+            ],
+        )
     yield dir_mod
     importlib.reload(cfg)
     importlib.reload(dir_mod)
@@ -86,3 +100,9 @@ def test_row_carries_latest_quote(dir_env):
     rows = dir_env.list_directory(q="SNTS")
     assert rows[0].last == 32500
     assert rows[0].change_pct == 1.88
+
+
+def test_row_carries_latest_index_level(dir_env):
+    rows = dir_env.list_directory(q="BRVMC")
+    assert rows[0].last == pytest.approx(307.42)
+    assert rows[0].change_pct == pytest.approx(0.53)
