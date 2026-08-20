@@ -63,3 +63,29 @@ def list_by_kind(conn: sqlite3.Connection, kind: str) -> list[sqlite3.Row]:
             (kind,),
         ).fetchall()
     )
+
+
+def list_missing_sector(
+    conn: sqlite3.Connection, kind: str = "equity"
+) -> list[sqlite3.Row]:
+    """Active securities of the given kind whose sector is NULL or empty."""
+    return list(
+        conn.execute(
+            """
+            SELECT ticker, name, country
+            FROM securities
+            WHERE kind = ?
+              AND active = 1
+              AND (sector IS NULL OR TRIM(sector) = '')
+            ORDER BY ticker
+            """,
+            (kind,),
+        ).fetchall()
+    )
+
+
+def update_sector(conn: sqlite3.Connection, ticker: str, sector: str) -> None:
+    conn.execute(
+        "UPDATE securities SET sector = ? WHERE ticker = ?", (sector, ticker)
+    )
+    conn.commit()
