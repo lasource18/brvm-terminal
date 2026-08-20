@@ -76,12 +76,28 @@ def test_history_api_returns_ascending_bars(client, monkeypatch):
 
     r = client.get("/api/history/SNTS")
     assert r.status_code == 200
-    bars = r.json()
+    payload = r.json()
+    assert payload["kind"] == "equity"
+    bars = payload["bars"]
     assert len(bars) == 5
     # Ascending by time
     dates = [b["time"] for b in bars]
     assert dates == sorted(dates)
     assert bars[0].keys() >= {"time", "open", "high", "low", "close", "volume"}
+
+
+def test_history_api_index_returns_line_bars(client):
+    """Indices are served from index_levels with kind='index' and close-only bars."""
+    r = client.get("/api/history/BRVMC")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["kind"] == "index"
+    bars = payload["bars"]
+    # Seeded fixture has one index level for BRVMC.
+    assert len(bars) >= 1
+    assert bars[0]["close"] is not None
+    assert bars[0]["open"] is None
+    assert bars[0]["volume"] is None
 
 
 def test_history_api_404_unknown_ticker(client):

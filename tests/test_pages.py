@@ -108,6 +108,23 @@ def test_security_unknown_ticker_404(client):
     assert r.status_code == 404
 
 
+def test_index_chart_tab_renders(client):
+    r = client.get("/s/BRVMC/chart")
+    assert r.status_code == 200
+    body = r.text
+    assert "BRVM COMPOSITE" in body
+    assert 'data-ticker="BRVMC"' in body
+    # Description tab is hidden for indices.
+    assert 'href="/s/BRVMC/description"' not in body
+    # Chart / Peers / News etc still appear.
+    assert 'href="/s/BRVMC/chart"' in body
+
+
+def test_index_description_tab_404(client):
+    r = client.get("/s/BRVMC/description")
+    assert r.status_code == 404
+
+
 def test_directory_renders_all(client):
     r = client.get("/directory")
     assert r.status_code == 200

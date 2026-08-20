@@ -19,15 +19,18 @@ def history_endpoint(ticker: str):
     # Lightweight Charts wants oldest -> newest.
     bars_asc = sorted(bars, key=lambda b: b.session_date)
     return JSONResponse(
-        [
-            {
-                "time": b.session_date.isoformat(),
-                "open": b.open,
-                "high": b.high,
-                "low": b.low,
-                "close": b.close,
-                "volume": b.volume,
-            }
-            for b in bars_asc
-        ]
+        {
+            "kind": sec.kind,
+            "bars": [
+                {
+                    "time": b.session_date.isoformat(),
+                    "open": b.open,
+                    "high": b.high,
+                    "low": b.low,
+                    "close": b.close,
+                    "volume": b.volume,
+                }
+                for b in bars_asc
+            ],
+        }
     )
