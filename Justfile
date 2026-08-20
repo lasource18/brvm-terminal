@@ -40,3 +40,7 @@ snapshot:
 # Phase 3a demo: fetch news feed + communiqués + upcoming dividends, print summary
 news-poll:
     uv run python -m brvm.jobs.news_poll --once
+
+# Backfill securities.sector by scraping sikafinance/afx per equity
+sector-enrich:
+    uv run python -m brvm.jobs.sector_enrich --once
