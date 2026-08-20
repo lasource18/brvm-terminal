@@ -55,17 +55,26 @@ def list_directory(
     where = " AND ".join(clauses)
 
     sql = f"""
-    WITH latest AS (
+    WITH latest_q AS (
         SELECT ticker, MAX(captured_utc) AS captured_utc
         FROM quote_snapshots
         GROUP BY ticker
+    ),
+    latest_i AS (
+        SELECT ticker, MAX(session_date) AS session_date
+        FROM index_levels
+        GROUP BY ticker
     )
     SELECT s.ticker, s.name, s.kind, s.country, s.sector,
-           qs.last, qs.change_pct
+           COALESCE(qs.last, il.level)              AS last,
+           COALESCE(qs.change_pct, il.change_pct)   AS change_pct
     FROM securities s
-    LEFT JOIN latest l USING (ticker)
+    LEFT JOIN latest_q lq USING (ticker)
     LEFT JOIN quote_snapshots qs
-        ON qs.ticker = l.ticker AND qs.captured_utc = l.captured_utc
+        ON qs.ticker = lq.ticker AND qs.captured_utc = lq.captured_utc
+    LEFT JOIN latest_i li USING (ticker)
+    LEFT JOIN index_levels il
+        ON il.ticker = li.ticker AND il.session_date = li.session_date
     WHERE {where}
     ORDER BY s.kind DESC, s.country IS NULL, s.country, s.ticker
     """
