@@ -1,6 +1,6 @@
 // Search box + chart bootstrapper.
 // Depends on the global `LightweightCharts` (loaded per-page from CDN when
-// the Overview tab is active). HTMX handles the actual dropdown swap.
+// the Chart tab is active). HTMX handles the actual dropdown swap.
 
 (function () {
   // --- Enter-in-search: navigate to the first result if any. ---
@@ -26,7 +26,7 @@
     });
   }
 
-  // --- Chart bootstrapper (only present on the security Overview tab). ---
+  // --- Chart bootstrapper (only present on the security Chart tab). ---
   const el = document.getElementById("chart");
   if (!el) return;
   const ticker = el.dataset.ticker;

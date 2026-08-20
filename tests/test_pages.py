@@ -19,21 +19,21 @@ def test_index_renders_overview(client):
     assert "SPHC" in body
 
 
-def test_security_bare_url_redirects_to_overview(client):
+def test_security_bare_url_redirects_to_chart(client):
     r = client.get("/s/SNTS", follow_redirects=False)
     assert r.status_code == 307
-    assert r.headers["location"] == "/s/SNTS/overview"
+    assert r.headers["location"] == "/s/SNTS/chart"
 
 
-def test_security_overview_tab_renders_chart(client):
-    r = client.get("/s/SNTS/overview")
+def test_security_chart_tab_renders_chart(client):
+    r = client.get("/s/SNTS/chart")
     assert r.status_code == 200
     body = r.text
     assert "SONATEL" in body
     assert 'data-ticker="SNTS"' in body
     assert "32,500" in body
     # Tab bar present with the eight tab keys
-    for label in ("Overview", "Description", "Peers", "News", "Financials"):
+    for label in ("Chart", "Description", "Peers", "News", "Financials"):
         assert label in body
 
 
@@ -104,7 +104,7 @@ def test_security_unknown_tab_404(client):
 
 
 def test_security_unknown_ticker_404(client):
-    r = client.get("/s/ZZZZ/overview")
+    r = client.get("/s/ZZZZ/chart")
     assert r.status_code == 404
 
 
