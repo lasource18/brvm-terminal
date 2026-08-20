@@ -18,7 +18,7 @@ class TabSpec:
 
 
 TABS: tuple[TabSpec, ...] = (
-    TabSpec("overview", "Overview", "_tab/overview.html"),
+    TabSpec("chart", "Chart", "_tab/chart.html"),
     TabSpec("description", "Description", "_tab/description.html"),
     TabSpec("peers", "Peers", "_tab/peers.html"),
     TabSpec("news", "News", "_tab/placeholder.html", phase="Phase 3"),

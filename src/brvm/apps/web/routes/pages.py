@@ -25,8 +25,8 @@ def index(request: Request):
 
 @router.get("/s/{ticker}", response_class=HTMLResponse)
 def security_root(ticker: str):
-    # Deep-link stability: redirect the bare URL to the Overview tab.
-    return RedirectResponse(url=f"/s/{ticker}/overview", status_code=307)
+    # Deep-link stability: redirect the bare URL to the Chart tab.
+    return RedirectResponse(url=f"/s/{ticker}/chart", status_code=307)
 
 
 @router.get("/s/{ticker}/{tab}", response_class=HTMLResponse)
