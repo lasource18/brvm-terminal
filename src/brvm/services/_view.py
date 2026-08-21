@@ -31,11 +31,27 @@ class QuoteRow(BaseModel):
     captured_utc: str | None = None
 
 
+class CorporateActionRow(BaseModel):
+    id: int
+    ticker: str
+    name: str | None = None      # joined from securities.name for display
+    kind: str
+    ex_date: date | None = None
+    pay_date: date | None = None
+    amount: float | None = None
+    currency: str | None = None
+    yield_pct: float | None = None
+    note: str | None = None
+    source: str | None = None
+    source_url: str | None = None
+
+
 class Overview(BaseModel):
     indices: list[IndexTile] = Field(default_factory=list)
     gainers: list[QuoteRow] = Field(default_factory=list)
     losers: list[QuoteRow] = Field(default_factory=list)
     turnover_leaders: list[QuoteRow] = Field(default_factory=list)
+    upcoming_actions: list[CorporateActionRow] = Field(default_factory=list)
     generated_utc: str
     market_open: bool
     last_snapshot_utc: str | None = None
@@ -123,3 +139,57 @@ class PeersView(BaseModel):
     sector: str | None = None
     source: str
     peers: list[PeerRow] = Field(default_factory=list)
+
+
+class NewsRow(BaseModel):
+    """One news / communiqué row as rendered by the UI.
+
+    `tickers` is the union of `ticker_hint` (fast pre-filter) and
+    `tickers_llm` (LLM attribution), deduped in insertion order — the
+    template only cares about the display set.
+    """
+
+    id: int
+    source: str
+    kind: str          # 'news' | 'communique'
+    url: str
+    title: str
+    chapeau: str | None = None
+    issuer_name: str | None = None
+    tickers: list[str] = Field(default_factory=list)
+    relevance: int | None = None
+    category: str | None = None
+    summary_fr: str | None = None
+    summary_en: str | None = None
+    published_at: str | None = None
+    fetched_utc: str | None = None
+
+    @property
+    def is_tagged(self) -> bool:
+        return self.category is not None or bool(self.tickers) or self.relevance is not None
+
+
+class NewsFeed(BaseModel):
+    items: list[NewsRow] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 25
+    offset: int = 0
+    filters: dict = Field(default_factory=dict)
+
+    @property
+    def has_more(self) -> bool:
+        return self.offset + len(self.items) < self.total
+
+    @property
+    def next_offset(self) -> int:
+        return self.offset + self.limit
+
+    @property
+    def page(self) -> int:
+        return (self.offset // self.limit) + 1 if self.limit else 1
+
+    @property
+    def total_pages(self) -> int:
+        if not self.limit:
+            return 1
+        return max(1, (self.total + self.limit - 1) // self.limit)

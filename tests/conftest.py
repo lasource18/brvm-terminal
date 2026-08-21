@@ -15,6 +15,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 # Modules that capture `settings` at import time; reloading them is how we
 # point the app at a per-test tmp SQLite file.
 _RELOADABLE = (
+    "brvm.services.news",
     "brvm.services.market",
     "brvm.services.history",
     "brvm.services.watchlist",

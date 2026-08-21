@@ -12,7 +12,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 2.5 | Search + directory + company tab shell | done | 2026-08-19 |
 | 3a | News + corporate actions — ingest | done | 2026-08-20 |
 | 3b | News + corporate actions — Haiku tagging ($1/day cap) | done | 2026-08-21 |
-| 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | not started | — |
+| 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | done | 2026-08-21 |
 | 4 | Fundamentals (financials, ownership, segments) | not started | — |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
@@ -372,11 +372,17 @@ project charter and `README.md` for the current "Try it" quickstart.
 
 **Notes / follow-ups**
 - The dev sandbox this phase was built in has no `ANTHROPIC_API_KEY` and
-  its proxy blocks sikafinance and api.anthropic.com, so the run above
-  used the committed fixtures and a scripted stand-in for the SDK. Every
-  layer up to the HTTP boundary is exercised; the **first real Haiku
-  call still needs to be made on the Mac** (`just news-tag`) before 3b is
-  proven against the live API. Expect ~$0.03 for a 40-item backfill.
+  its proxy blocks sikafinance and api.anthropic.com, so the initial run
+  used the committed fixtures and a scripted stand-in for the SDK.
+  **Proven live on the Mac on 2026-08-21**: `just news-tag` tagged 50
+  items across 7 batches, `pending_after=0`, cost **$0.0444** for the
+  pass. Two live-only issues surfaced and were fixed in-flight:
+  - The Anthropic `output_config` schema validator rejects `minimum` /
+    `maximum` on integer types. Dropped from `_RESULT_SCHEMA`; the
+    local `_validate` still clamps `relevance` to `[0, 10]`, so the
+    invariant is preserved end-to-end.
+  - The Mac's DB predated 0004; `just migrate` now applies it. Nothing
+    to change in code — the on-disk schema just needed to catch up.
 - The system prompt (instructions + the 69-row ticker universe) is
   ~3.7k chars / ~1.2k tokens — just over the 1024-token minimum, so the
   `cache_control` breakpoint on it should actually engage after the first
@@ -403,16 +409,87 @@ project charter and `README.md` for the current "Try it" quickstart.
 
 ---
 
-## Phase 3c — News + corporate actions — UI — not started
+## Phase 3c — News + corporate actions — UI (done 2026-08-21)
 
-Planned scope:
-- `/news` page: filter by ticker + category + date, HTMX pagination.
-- Fill `News` tab on `/s/{ticker}` (per-ticker feed) and `Corporate
-  actions` tab (upcoming dividends / AGMs for that ticker).
-- **Next-30-days corporate-actions strip on `/`** (small, dense —
-  right rail or a fourth panel next to gainers/losers/turnover).
-- No dedicated `/calendar` global page (per user; per-ticker + overview
-  strip is enough).
+**Delivered**
+- **Read side of `services/news.py`** — `list_feed(...)` (filters:
+  ticker, category, date_from/to, min_relevance; paginated) returning
+  a typed `NewsFeed`, and `list_upcoming_actions(ticker=…, days=…)`
+  which joins `securities.name` for display. New view models
+  `NewsRow`, `NewsFeed`, `CorporateActionRow` in `services/_view.py`;
+  `Overview` gained an `upcoming_actions` field.
+- **Store filters** — `store/news.list_news` / `count_news` share one
+  WHERE builder (`_news_filter_clause`) so a filter change can't make
+  the page count and page contents disagree. Adds category, source,
+  date_from/to, min_relevance. Date bounds compare on the same
+  `COALESCE(published_at, fetched_utc)` expression the ORDER BY uses,
+  and `date_to='YYYY-MM-DD'` is auto-extended to end-of-day so a
+  same-day filter isn't off-by-one against ISO-8601 timestamps.
+- **Per-ticker `News` tab** at `/s/{ticker}/news` → uses `ticker_hint`
+  OR `tickers_llm` (already wired in `store/news.list_news`). Renders
+  category chip, relevance, ticker chips, EN + FR summaries when the
+  Haiku tagger has stamped the row; falls back to the sikafinance
+  chapeau when it hasn't. Deep-link to "Open in full news view →"
+  passes the ticker through as a query filter.
+- **Per-ticker `Corporate actions` tab** at
+  `/s/{ticker}/corporate-actions` (equity-only) → 90-day upcoming
+  table (ex-date, kind, amount + currency, yield %, pay date, note,
+  source link). "TBD" rendered explicitly for `ex_date NULL`.
+- **Global `/news` page** — filter form (ticker / category /
+  date range / min-relevance) + HTMX pagination. Filters submit as
+  `hx-get` against `/_frag/news` with `hx-swap="outerHTML"` on the
+  feed div, so a change reloads only the list. Pagination replaces the
+  same div with the next/prev page (25 rows per page — user's call).
+  "Reset" is a plain `<a href="/news">` — no JS needed.
+- **Overview 4th panel** — "Calendar · next 30d" next to
+  gainers/losers/turnover on `/`. Shows up to 10 rows (date · ticker ·
+  kind · amount) with a "+N more" tail; ticker cell deep-links to the
+  per-ticker Corporate-actions tab. Grid switches from 3-col to 4-col
+  and collapses to 2- / 1-col at narrower breakpoints.
+- **Topbar** — new `News` link between Directory and Watchlists.
+- **Tabs registry** — the `news` and `corporate-actions` entries no
+  longer point at `_tab/placeholder.html`; the "Phase 3" marker is
+  gone. `_tab/placeholder.html` still serves the Phase-4 tabs.
+
+**Definition of Done — met**
+- `just test` → 202 tests green (12 new: repo filters for
+  category/relevance/date-range, service pagination + ticker-case
+  handling + bogus-category tolerance, upcoming-actions join,
+  News tab renders summary + ticker chips + full-view link, CA tab
+  renders + hidden for indices, `/news` page filter form + narrow +
+  empty state, fragment pagination round-trip, overview strip
+  presence + link, topbar News link).
+- Ruff clean.
+- Live sanity on the Mac: `/` shows the calendar panel with SGBC /
+  SPHC / TTLC / NTLC / ABJC upcoming; `/news` renders 48 ingested
+  items (many un-tagged since `just news-tag` hasn't run against the
+  real API yet); `/news?ticker=SNTS` narrows; `/s/SGBC/corporate-actions`
+  shows the 2026-08-21 dividend row.
+
+**Notes / follow-ups**
+- **First real `just news-tag` on the Mac is still pending.** Once it
+  runs, the /news feed will start showing category chips, LLM-inferred
+  ticker chips, EN + FR summaries, and the min-relevance filter will
+  do something visible. Until then the UI degrades to the raw
+  sikafinance chapeau, which is by design.
+- The News tab and the Corporate-actions tab load their data
+  synchronously inside the tab route rather than as HTMX fragments —
+  simpler, and the query is a couple of ms on this volume. If the news
+  volume ever grows past a page or two the tab can be split into a
+  lazy `hx-get` shell without touching the service layer.
+- Pagination uses classic Prev/Next page replacement rather than
+  "Load more" (which would need a second fragment or an append swap
+  strategy). Fits the terminal aesthetic and keeps the URL bar honest.
+- Filter changes on `/news` don't currently push into the browser URL
+  bar — swap-only. If we want shareable filtered links, wire
+  `hx-push-url="true"` on the form. Not done here because the reset
+  link + the `?ticker=…` deep-link already cover the common case.
+- `services/market.overview()` imports `services/news` lazily to keep
+  the import graph shallow (news → sikafinance → httpx — no need to
+  drag those into every market call).
+- `_RELOADABLE` in `tests/conftest.py` gained `brvm.services.news`
+  because `market` now imports it. Still trending toward the
+  15-module refactor threshold flagged in 2.5's notes.
 
 ---
 

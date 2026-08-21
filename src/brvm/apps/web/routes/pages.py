@@ -10,6 +10,7 @@ from brvm.apps.web import tabs
 from brvm.apps.web._common import base_ctx, templates
 from brvm.clock import is_market_open, utc_iso
 from brvm.services import company, directory, market, watchlist
+from brvm.services import news as news_svc
 
 router = APIRouter()
 
@@ -53,7 +54,43 @@ def security_tab(request: Request, ticker: str, tab: str):
         ctx["profile"] = company.get_description(sec.ticker)
     elif spec.key == "peers":
         ctx["peers"] = company.get_peers(sec.ticker)
+    elif spec.key == "news":
+        # Per-ticker feed: matches ticker_hint OR the LLM-tagged CSV.
+        ctx["feed"] = news_svc.list_feed(ticker=sec.ticker, limit=25)
+    elif spec.key == "corporate-actions":
+        ctx["actions"] = news_svc.list_upcoming_actions(ticker=sec.ticker, days=90)
     return templates.TemplateResponse(request, "security.html", ctx)
+
+
+@router.get("/news", response_class=HTMLResponse)
+def news_page(
+    request: Request,
+    ticker: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    date_from: str | None = Query(default=None),
+    date_to: str | None = Query(default=None),
+    min_relevance: int | None = Query(default=None, ge=0, le=10),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    feed = news_svc.list_feed(
+        ticker=ticker or None,
+        category=category or None,
+        date_from=date_from or None,
+        date_to=date_to or None,
+        min_relevance=min_relevance,
+        limit=limit,
+        offset=offset,
+    )
+    return templates.TemplateResponse(
+        request,
+        "news.html",
+        {
+            **base_ctx(),
+            "feed": feed,
+            "categories": news_svc.CATEGORIES,
+        },
+    )
 
 
 @router.get("/directory", response_class=HTMLResponse)

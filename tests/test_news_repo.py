@@ -225,3 +225,48 @@ def test_ingest_never_clobbers_existing_tags(tmp_db_path: Path):
         assert (ins, dupe) == (0, 1)
         row = news_repo.list_news(conn)[0]
         assert row["tickers_llm"] == "SNTS" and row["relevance"] == 9
+
+
+def test_list_news_category_and_relevance_filters(tmp_db_path: Path):
+    _init(tmp_db_path)
+    items = [
+        _mk_news("https://x/a", "earnings hit"),
+        _mk_news("https://x/b", "macro backdrop"),
+        _mk_news("https://x/c", "boring update"),
+    ]
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(conn, items)
+        # Look up by title so the test doesn't depend on list_news' sort order.
+        id_by_title = {
+            r["title"]: r["id"]
+            for r in conn.execute("SELECT id, title FROM news_items").fetchall()
+        }
+        news_repo.apply_tags(
+            conn, id_by_title["earnings hit"], tickers=["SNTS"],
+            relevance=9, category="earnings",
+        )
+        news_repo.apply_tags(
+            conn, id_by_title["macro backdrop"], tickers=[],
+            relevance=7, category="macro",
+        )
+        # "boring update" stays untagged: relevance NULL, category NULL.
+
+        by_cat = news_repo.list_news(conn, category="earnings")
+        assert [r["title"] for r in by_cat] == ["earnings hit"]
+        assert news_repo.count_news(conn, category="earnings") == 1
+
+        # min_relevance filter excludes untagged rows (NULL is not >= n).
+        highrel = news_repo.list_news(conn, min_relevance=8)
+        assert [r["title"] for r in highrel] == ["earnings hit"]
+        assert news_repo.count_news(conn, min_relevance=8) == 1
+
+
+def test_list_news_date_range_uses_published_or_fetched(tmp_db_path: Path):
+    _init(tmp_db_path)
+    a = _mk_news("https://x/a", "old", published_at="2026-08-10T09:00:00Z")
+    b = _mk_news("https://x/b", "recent", published_at="2026-08-20T09:00:00Z")
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(conn, [a, b])
+        got = news_repo.list_news(conn, date_from="2026-08-15", date_to="2026-08-21")
+        assert [r["title"] for r in got] == ["recent"]
+        assert news_repo.count_news(conn, date_from="2026-08-15") == 1

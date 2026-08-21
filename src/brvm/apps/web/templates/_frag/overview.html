@@ -19,7 +19,7 @@
     {% endfor %}
   </div>
 
-  <div class="panels">
+  <div class="panels panels-4">
     {% for title, rows in [("Turnover leaders", overview.turnover_leaders), ("Gainers", overview.gainers), ("Losers", overview.losers)] %}
       <div class="panel">
         <h2>{{ title }}</h2>
@@ -47,6 +47,33 @@
         {% endif %}
       </div>
     {% endfor %}
+    <div class="panel">
+      <h2>Calendar · next 30d</h2>
+      {% if overview.upcoming_actions %}
+        <table class="quotes calendar">
+          <thead>
+            <tr><th>DATE</th><th>TICKER</th><th>KIND</th><th>AMOUNT</th></tr>
+          </thead>
+          <tbody>
+            {% for a in overview.upcoming_actions[:10] %}
+              <tr>
+                <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">TBD</span>{% endif %}</td>
+                <td><a href="/s/{{ a.ticker }}/corporate-actions">{{ a.ticker }}</a></td>
+                <td class="dim">{{ a.kind }}</td>
+                <td>{% if a.amount is not none %}{{ "{:,.0f}".format(a.amount) }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if overview.upcoming_actions|length > 10 %}
+          <div class="dim" style="padding: 6px 12px;">
+            +{{ overview.upcoming_actions|length - 10 }} more
+          </div>
+        {% endif %}
+      {% else %}
+        <div class="dim" style="padding: 12px;">No upcoming actions.</div>
+      {% endif %}
+    </div>
   </div>
 
   <div class="dim" style="margin-top: 12px;">
