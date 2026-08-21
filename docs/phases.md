@@ -13,9 +13,32 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 3a | News + corporate actions — ingest | done | 2026-08-20 |
 | 3b | News + corporate actions — Haiku tagging ($1/day cap) | done | 2026-08-21 |
 | 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | done | 2026-08-21 |
-| 4 | Fundamentals (financials, ownership, segments) | not started | — |
+| 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
+| 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | not started | — |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
+
+**Backlog** (raised during earlier phases; each becomes its own mini-phase
+when we pick it up):
+- **Bond ingestion.** Equities + indices auto-appear on the AAZ page and
+  are picked up by `sources/sikafinance.parse_aaz` — bonds are on a
+  different page and no parser exists yet. `SecurityKind` already allows
+  `"bond"`; needs a source survey + parser + `kind="bond"` branch. Flag
+  raised in Phase 1's notes.
+- **OCR / scanned-PDF handling.** Phase 4a records `is_scanned=NULL`;
+  4b will probe and set it, and skip scanned reports with a warning
+  rather than paying to send an image-only PDF to Haiku. A real OCR
+  pass (tesseract via `ocrmypdf`, then re-extract) is deferred.
+- **Interim / quarterly report extraction.** 4a downloads H1, Q1, Q3
+  filings but 4b only extracts annual reports (a manageable universe of
+  ~50/year). Adding interim extraction is a straight repeat of 4b once
+  we've proven the annual path.
+- **Palmarès parser + BOC row extraction.** Deferred from Phase 1.
+- **`hx-push-url` on the `/news` filter form** so filtered views become
+  shareable links. Small polish, not currently needed.
+- **Refactor `_RELOADABLE` in `tests/conftest.py` toward
+  dependency-injected settings** once it crosses ~15 modules
+  (currently 13).
 
 ---
 
@@ -493,29 +516,144 @@ project charter and `README.md` for the current "Try it" quickstart.
 
 ---
 
-## Phase 4 — Fundamentals (financials, ownership, segments) — not started
+## Phase 4a — Fundamentals — filings corpus + storage (done 2026-08-21)
 
-New phase covering the PDF-driven parts of the Bloomberg-style company
-page. These are absent from public BRVM data as structured feeds — only
-available as annual-report / états-financiers PDFs, mostly in French.
+Ships the download + storage half of the fundamentals pipeline so 4b
+can focus on extraction and UI without also having to bring up a PDF
+corpus. **No UI change, no LLM call, no extraction.**
+
+**Delivered**
+- **Migration `0005_filings.sql`** — three new tables:
+  - `filings` — one row per PDF: ticker (FK), issuer_name, doc_type,
+    period_kind, period_year, period_label, source, source_url,
+    `url_hash UNIQUE`, published_date, file_path, size_bytes, sha256,
+    page_count, `is_scanned` (NULL until 4b probes), fetched_utc,
+    `extracted_utc` (NULL until 4b writes). Partial index on unresolved
+    `extracted_utc IS NULL` for the 4b worker.
+  - `filing_source_slugs` — persisted `(source, slug) → ticker`.
+    `PRIMARY KEY (source, slug)`; `ticker` may be NULL to record
+    "resolver has seen this slug and cannot map it" so fuzzy matching
+    isn't retried every poll. Manual `UPDATE` overrides survive
+    subsequent polls (the upsert only overwrites `ticker` with a
+    non-NULL incoming value).
+  - `filings_spend` — separate daily counter for the 4b extractor,
+    same micros-precision shape as `llm_spend` after 0004. Ready for
+    the $2/day cap without a further migration.
+- **`Filing` model** in `brvm.models`, with typed `FilingDocType`
+  (etats_financiers · rapport_annuel · rapport_activites · resultats ·
+  rse · assemblee · autre) and `FilingPeriodKind`
+  (annual · H1 · Q1 · Q3 · other).
+- **Config knobs** (env-configurable, defaults noted in `env.example`):
+  `LLM_EXTRACT_DAILY_CAP_CENTS=200`, `EXTRACT_MAX_PDF_MB=25`,
+  `FILINGS_ROOT=./data/filings`.
+- **`sources/brvm_org_filings.py`** — parsers:
+  - `parse_issuers_index(html)` → list of `IssuerIndexEntry(slug,
+    display_name)` from `<a href="/fr/rapports-societe-cotes/…">`
+    anchors. `fetch_issuers_index()` auto-paginates
+    (`?page=0..N`) and stops at the first fully-seen page.
+  - `parse_issuer_page(html)` → list of `ParsedFiling` — each row has
+    a `<strong>ISSUER : Title</strong>` and a `<a>` PDF link. Most of
+    the structured metadata (`published_date`, `doc_type`,
+    `period_kind`, `period_year`) comes from the strict filename
+    convention (`YYYYMMDD_-_type_-_period_-_ticker_cc.pdf`) rather
+    than HTML — much sturdier against Drupal template shifts.
+  - Doc-type classifier order matters (specific-first: rapport_annuel
+    before rapport_activites, etats_financiers before bare-year
+    fallback). `\brse\b` is *not* useful here — Python's `\b` treats
+    `_` as a word character, so snake_case filenames need explicit
+    lookarounds (fixed in-flight during 4a).
+- **`store/spend.py` generalized** — one `SpendTable` Literal now
+  reuses the same schema for both `llm_spend` and `filings_spend`
+  without a second module. Existing callers unchanged (default
+  `table="llm_spend"`).
+- **`store/filings.py`** — `upsert_filings` (dedupe on `url_hash`),
+  `exists_url_hash`, `list_by_ticker(doc_type=…)`,
+  `list_needing_extraction(doc_types=("etats_financiers",
+  "rapport_annuel"))` — the last is the 4b entry point.
+- **`store/slugs.py`** — `get`, `get_ticker`, `remember(ticker=None)`
+  (persists unresolved so we don't fuzzy-match every poll), and
+  `list_unresolved(source)` for the operator report.
+- **`services/filings.py`** — `resolve_ticker(source, slug,
+  display_name)` builds two indexes on demand: full-name → ticker
+  (matches the news resolver) plus `(root, ISO country) → ticker`.
+  The second index bridges the brvm.org / sikafinance disagreement on
+  country codes (brvm.org writes `BN`/`NG` where sikafinance has
+  `BJ`/`NE`) and on suffixes (`BANK OF AFRICA BN` vs
+  `BANK OF AFRICA BENIN`).
+- **Downloader** — streams each PDF to
+  `<FILINGS_ROOT>/<ticker>/<published>_<doc_type>_<period>.pdf`,
+  enforces the size cap mid-stream (never keeps a partial), computes
+  `sha256` while streaming, drops files < 1 KB where pypdf can't read
+  a single page (almost certainly HTML masquerading as `.pdf`). One
+  broken filing logs a warning and moves on — a single hiccup does
+  not abort the pass.
+- **`jobs/filings_pull.py` + `just filings-pull`** — one-shot demo,
+  supports `MAX_ISSUERS=<n> just filings-pull` for smoke runs. Prints
+  the pull counts, the 10 latest filings, and any unresolved slugs so
+  the operator can hand-map them.
+
+**Definition of Done — met**
+- `just migrate` picks up `0005` idempotently.
+- `just test` → 217 tests green (14 new: parsers on 2 committed
+  fixtures, `_classify_period` parametrized cases, filings + slugs
+  repo dedupe/upsert, slug-resolution hit/miss/persisted-NULL, country
+  code bridging for BOAB/BOABF/BOAN/BOAC, `pull_all` end-to-end
+  round-trip with stubbed HTTP + a tiny 2-page PDF fixture, and
+  unresolved-issuer path). Ruff clean.
+- Live smoke on the Mac: `MAX_ISSUERS=6 just filings-pull` walked 6
+  brvm.org issuers, resolved 5 (all four BOA subsidiaries + one
+  more), downloaded 100 PDFs across ~5 years to
+  `data/filings/BOAN/…`, correctly refused to map `air-liquide-ci`
+  (not listed in `securities`). Re-run would be a full no-op.
+
+**Notes / follow-ups**
+- Sikafinance-communiqué fallback ingestion (promoting
+  `news_items[kind=communique]` rows to `filings` when the title
+  matches an annual/H1 report pattern) is not landed in 4a — it was
+  in the plan, but brvm.org alone covered 5/6 of the smoke sample
+  and 4b can hit `filings_repo.list_needing_extraction` today. Kept
+  as a small backlog item; adding it is a repo + regex change with
+  no schema move.
+- pypdf spams `Multiple definitions in dictionary at byte 0x…for
+  key /Info` warnings on some BOA PDFs. Cosmetic; pypdf still returns
+  the right page count.
+- `air-liquide-ci` and any other brvm.org issuer not in `securities`
+  are recorded as unresolved slugs. The auto-discovery machinery for
+  new equity listings runs on the sikafinance AAZ page (see
+  `sources/sikafinance.parse_aaz`); an issuer that's on brvm.org but
+  not on AAZ probably means it's a bond/warrant/OPCVM. Bond
+  ingestion is on the backlog.
+- `pull_all` currently walks every issuer serially with a 0.5 s
+  sleep between requests. On the full 75-issuer universe that's
+  ~40 s just for pacing, plus HTTP time. Perfectly fine for daily
+  scheduled runs; if it needs to be a foreground command more often
+  we can parallelize per-issuer.
+
+---
+
+## Phase 4b — Fundamentals — extraction + Financials/Ownership/Segments — not started
+
+Consumes the 4a corpus to fill the three placeholder tabs on
+`/s/{ticker}`.
 
 Planned scope:
-- **PDF corpus**: crawl sikafinance communiqués + brvm.org filings for
-  documents tagged "états financiers" / "rapport annuel". Store PDFs
-  under `data/filings/<ticker>/` with a `filings` table for metadata.
-- **Extraction pipeline**: pypdf for structural parsing, Haiku for
-  structured extraction — schema like `{period, currency, revenue,
-  operating_income, net_income, total_assets, total_equity,
-  segments: [{name, revenue, share}], geo: [{country, revenue}],
-  ownership: [{holder, pct}]}`.
-- New tables `financials`, `financial_segments`, `ownership`.
-- Fills the `Financials`, `Ownership`, `Segments / Revenue breakdown`
-  tabs on `/s/{ticker}`.
-- Best-effort: coverage varies wildly by company; UI must render
+- **Pre-flight cost estimate** — for each candidate filing, count PDF
+  tokens with tiktoken/pypdf before calling; if the estimate would
+  push the day's `filings_spend` over the $2 cap, queue the filing for
+  the next UTC day and stop the pass. Annual reports are infrequent
+  enough that this queue rarely gets deep.
+- **Extraction pipeline** — pypdf for structural parsing, Haiku for
+  structured JSON extraction: `{period, currency, revenue,
+  operating_income, net_income, total_assets, total_equity, segments:
+  [{name, revenue, share}], geo: [{country, revenue}], ownership:
+  [{holder, pct}]}`. Structured output + local validation the same
+  way 3b does it.
+- **New tables**: `financials`, `financial_segments`, `ownership`.
+- **UI**: fills the `Financials`, `Ownership`, `Segments` tabs. Best-
+  effort: coverage varies wildly by company; render "no data yet"
   gracefully when a section is missing.
-
-Explicit non-goals: sell-side analyst estimates (moved to Phase 6),
-intraday tick data (out of scope for the product).
+- Only extract **annual** filings in 4b's first pass (interim reports
+  stay in the backlog).
 
 ---
 

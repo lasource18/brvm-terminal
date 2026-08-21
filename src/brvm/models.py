@@ -103,3 +103,45 @@ class CorporateAction(BaseModel):
     note: str | None = None
     source: str
     source_url: str | None = None
+
+
+# Deliberately loose: brvm.org filenames + sikafinance titles carry a mix of
+# labels ("Etats financiers", "Rapport d'activités annuel", etc.) and we
+# want a Small classifier here rather than a leaky Literal that has to grow
+# every time a new title shape shows up.
+FilingDocType = Literal[
+    "etats_financiers",     # États financiers (annual or interim)
+    "rapport_annuel",       # Rapport annuel / Rapport d'activités annuel
+    "rapport_activites",    # Rapport d'activités (quarter, semester)
+    "resultats",            # "Résultats", "Communiqué de résultats"
+    "rse",                  # Rapport RSE
+    "assemblee",            # Convocations, projets de résolutions, procurations
+    "autre",
+]
+
+FilingPeriodKind = Literal["annual", "H1", "Q1", "Q3", "other"]
+
+
+class Filing(BaseModel):
+    """One PDF report ingested from a public source.
+
+    Storage-shape only — the view layer gets a separate model in Phase 4b.
+    `url_hash` is the dedupe key so we never re-download; `sha256` is the
+    hash of the actual bytes and lets us notice if the same URL later serves
+    different content.
+    """
+
+    ticker: str
+    issuer_name: str | None = None
+    doc_type: FilingDocType = "autre"
+    period_kind: FilingPeriodKind | None = None
+    period_year: int | None = None
+    period_label: str | None = None
+    source: str                              # 'brvm_org' | 'sikafinance'
+    source_url: str
+    url_hash: str
+    published_date: date | None = None
+    file_path: str                           # relative to project root
+    size_bytes: int
+    sha256: str
+    page_count: int | None = None

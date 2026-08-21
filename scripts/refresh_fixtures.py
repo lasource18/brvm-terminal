@@ -84,6 +84,15 @@ def _targets() -> list[Target]:
             FIXTURES / "brvm_org" / "boc_landing.html",
         ),
         Target(f"{brvm}/en/cours-actions/0", FIXTURES / "brvm_org" / "cours-actions-0.html"),
+        # Phase 4a: filings corpus source.
+        Target(
+            f"{brvm}/fr/rapports-societes-cotees",
+            FIXTURES / "brvm_org" / "rapports_societes_cotees.html",
+        ),
+        Target(
+            f"{brvm}/fr/rapports-societe-cotes/sonatel",
+            FIXTURES / "brvm_org" / "rapports_societe_cotes_sonatel.html",
+        ),
     ]
 
 
