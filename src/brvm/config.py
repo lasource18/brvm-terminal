@@ -21,7 +21,20 @@ class Settings(BaseSettings):
     brvm_api_base: str = ""
     brvm_api_key: str = ""
 
+    # --- LLM (news tagging, Phase 3b) ---
     anthropic_api_key: str = ""
+    # Charter pins Haiku for high-volume tagging. Dated snapshot so a silent
+    # alias re-point can't change tagging behaviour (or cost) under us.
+    anthropic_model: str = "claude-haiku-4-5-20251001"
+    # Hard daily ceiling, USD cents. The tagging worker no-ops once the day's
+    # accumulated spend crosses this (see store/spend.py).
+    llm_daily_cap_cents: int = 100
+    # News items per Haiku request. Bigger batches amortize the system prompt;
+    # too big and one bad item costs the whole batch on a retry.
+    llm_batch_size: int = 8
+    llm_max_output_tokens: int = 4096
+    # Give up on a tagging pass after this many consecutive failed batches.
+    llm_max_consecutive_failures: int = 3
 
     http_user_agent: str = Field(default="brvm-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
@@ -29,6 +42,10 @@ class Settings(BaseSettings):
     @property
     def has_api_provider(self) -> bool:
         return bool(self.brvm_api_base and self.brvm_api_key)
+
+    @property
+    def has_llm(self) -> bool:
+        return bool(self.anthropic_api_key)
 
 
 settings = Settings()

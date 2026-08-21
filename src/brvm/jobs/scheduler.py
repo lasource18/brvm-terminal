@@ -15,6 +15,7 @@ from brvm.logging import get
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.news import poll_all as poll_news
 from brvm.services.quotes import snapshot_once
+from brvm.services.tagging import tag_pending
 
 log = get(__name__)
 
@@ -36,6 +37,18 @@ def _news_job() -> None:
         log.info("scheduled news poll ok: %s", counts)
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled news poll failed: %s", e)
+
+
+def _tag_job() -> None:
+    """Tag freshly-polled news with Haiku. No-ops (with a warning) when
+    ANTHROPIC_API_KEY is unset or the day's $1 budget is spent, so this is
+    safe to register unconditionally."""
+    log.info("scheduled news tagging start")
+    try:
+        counts = tag_pending()
+        log.info("scheduled news tagging ok: %s", counts)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled news tagging failed: %s", e)
 
 
 def _sector_enrich_job() -> None:
@@ -74,6 +87,20 @@ def build_scheduler() -> BackgroundScheduler:
         _news_job,
         CronTrigger(hour="*", minute="23", timezone=str(ABIDJAN)),
         id="news_hourly_outside",
+        replace_existing=True,
+    )
+    # News tagging: trails each news poll by ~7 min so the freshly-ingested
+    # rows are picked up in the same cycle (poll runs at */15 and :23).
+    sched.add_job(
+        _tag_job,
+        CronTrigger(day_of_week="mon-fri", hour="9-14", minute="7-59/15", timezone=str(ABIDJAN)),
+        id="news_tag_market_hours",
+        replace_existing=True,
+    )
+    sched.add_job(
+        _tag_job,
+        CronTrigger(hour="*", minute="31", timezone=str(ABIDJAN)),
+        id="news_tag_hourly_outside",
         replace_existing=True,
     )
     # Sector backfill: weekly (Sun 04:00 Abidjan). Sikafinance sector rarely

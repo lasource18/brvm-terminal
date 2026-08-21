@@ -5,20 +5,18 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
-from brvm.db import connect, ensure_migrations_table
+from brvm.db import connect
 from brvm.models import Security
 from brvm.sources import sikafinance
 from brvm.store import news as news_repo
 from brvm.store import securities as sec_repo
 
+from .conftest import apply_migrations
+
 
 def _seed_db(db_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        for name in ("0001_init.sql", "0002_watchlists.sql", "0003_news.sql"):
-            conn.executescript((root / "migrations" / name).read_text())
-        conn.commit()
+        apply_migrations(conn)
         sec_repo.upsert(
             conn,
             [
@@ -108,12 +106,8 @@ def test_poll_all_survives_ticker_miss(monkeypatch, tmp_path, fixtures_dir):
     importlib.reload(svc)
 
     # Seed no securities at all -> nothing to match against.
-    root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        for name in ("0001_init.sql", "0002_watchlists.sql", "0003_news.sql"):
-            conn.executescript((root / "migrations" / name).read_text())
-        conn.commit()
+        apply_migrations(conn)
 
     # Only feed news + communiqués -- dividends need securities (FK).
     news_html = (fixtures_dir / "sikafinance" / "actualites_brvm.html").read_text(encoding="utf-8")

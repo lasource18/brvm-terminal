@@ -11,7 +11,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 2 | Web UI v1 (HTMX) | done | 2026-08-19 |
 | 2.5 | Search + directory + company tab shell | done | 2026-08-19 |
 | 3a | News + corporate actions — ingest | done | 2026-08-20 |
-| 3b | News + corporate actions — Haiku tagging ($1/day cap) | not started | — |
+| 3b | News + corporate actions — Haiku tagging ($1/day cap) | done | 2026-08-21 |
 | 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | not started | — |
 | 4 | Fundamentals (financials, ownership, segments) | not started | — |
 | 5 | TUI (Textual) | not started | — |
@@ -300,17 +300,108 @@ project charter and `README.md` for the current "Try it" quickstart.
 
 ---
 
-## Phase 3b — News + corporate actions — Haiku tagging — not started
+## Phase 3b — News + corporate actions — Haiku tagging (done 2026-08-21)
 
-Planned scope:
-- `services/llm.py` thin Anthropic client (`claude-haiku-4-5-20251001`
-  per charter) with strict JSON schema output and retry-on-parse-failure.
-- Daily spend cap enforced against `llm_spend`: **hard limit $1/day**;
-  worker no-ops with a warning once the day's `usd_cents` crosses 100.
-- Backfill script + incremental worker (only `news_items` with
-  `tagged_utc IS NULL`); writes `tickers_llm` CSV, `relevance` (0-10),
-  `category_llm`, `summary_fr`, `summary_en`.
-- Batch prompts where the API allows to keep per-item cost minimal.
+**Delivered**
+- `services/llm.py` — thin Anthropic client for one call shape only:
+  tag a batch of news items.
+  - Model `claude-haiku-4-5-20251001` (charter), overridable via
+    `ANTHROPIC_MODEL`. Dated snapshot on purpose so an alias re-point
+    can't change tagging behaviour or cost under us.
+  - **Structured output** via `output_config.format` + a JSON schema
+    (`{results: [{id, tickers[], relevance 0-10, category enum,
+    summary_fr, summary_en}]}`), so there is no fenced-block /
+    regex-extraction step. Shape is guaranteed by the schema; *meaning*
+    is still validated locally — hallucinated ids dropped, tickers
+    filtered against the live universe, relevance clamped, unknown
+    category coerced to `other`.
+  - **Retry-on-parse-failure**: one corrective retry that feeds the bad
+    reply back. A `max_tokens` truncation or a refusal raises instead —
+    a verbatim retry can't fix either.
+  - `LLMResponseError` carries the `Usage` billed so far, so a failed
+    batch still lands in the budget counter.
+  - Exact cost accounting: per-model price table ($1/$5 per MTok for
+    Haiku 4.5), cache reads at 0.1x and writes at 1.25x.
+  - The `anthropic` import is lazy — the web app imports the scheduler
+    on every boot and shouldn't pay for the SDK unless a pass runs.
+- `services/tagging.py` — the incremental worker. `tag_pending()` pulls
+  `tagged_utc IS NULL` rows, batches them (default 8), checks the budget
+  before every batch, records real cost straight after every call, and
+  writes `tickers_llm` / `relevance` / `category_llm` / `summary_fr` /
+  `summary_en`. Returns a counts dict; never raises for the operational
+  cases (no key, budget spent, API down).
+- `store/spend.py` — the daily counter. `add_usage` / `spent_micros` /
+  `remaining_micros`.
+- Migration `0004_llm_spend_micros.sql` — adds `llm_spend.usd_micros`.
+  0003's `usd_cents` alone is too coarse: one batch costs well under a
+  cent, so integer-cent accumulation rounds every call to 0 and the cap
+  never sees any spend. `usd_cents` is kept as a rounded mirror.
+- `store/news.py` — `list_untagged`, `count_untagged`, `apply_tags`
+  (normalizes + dedupes the ticker CSV so `list_news(ticker=…)` matches).
+- `jobs/news_tag.py` + `just news-tag` / `just news-tag-dry`.
+- Scheduler: `news_tag_market_hours` (mon-fri 09-14 Abidjan, `7-59/15`)
+  and `news_tag_hourly_outside` (:31) — trailing each news poll by ~7
+  min so a cycle ingests then tags.
+- Settings: `ANTHROPIC_MODEL`, `LLM_DAILY_CAP_CENTS` (100),
+  `LLM_BATCH_SIZE` (8), `LLM_MAX_OUTPUT_TOKENS`,
+  `LLM_MAX_CONSECUTIVE_FAILURES`; `settings.has_llm`.
+- `tests/_fake_anthropic.py` — scripted stand-in for the SDK so the whole
+  pipeline is testable offline.
+
+**Two invariants the tests pin**
+1. **Never re-process an article.** Every item in a successful call gets
+   `tagged_utc` stamped — including ones the model returned nothing for
+   (they land with NULL tags). Otherwise one item the model keeps
+   ignoring is billed on every pass, forever.
+2. **Hard $1/day cap.** Checked before each batch against accumulated
+   `llm_spend.usd_micros`, and the real cost of each call is committed
+   immediately, so a crash mid-pass can't lose spend. Once crossed the
+   worker no-ops with a warning until UTC midnight.
+
+**Definition of Done — met**
+- `just migrate` picks up `0004` idempotently (second run skips it).
+- End-to-end over the committed fixtures (40 real news + communiqué rows
+  from the 2026-08-20 capture): 5 batches, 40 tagged, `pending_after=0`,
+  spend recorded in `llm_spend`; a second `just news-tag` reports
+  "nothing to do" and makes no API call. `list_news(ticker="SGBC")` now
+  resolves through `tickers_llm`.
+- `just news-tag-dry` reports the batch plan and spends nothing.
+- 190 tests green (47 new: llm prompt/pricing/validation/retry, spend
+  repo, tagging worker, news repo tag round-trip, config, scheduler
+  wiring). Ruff clean.
+
+**Notes / follow-ups**
+- The dev sandbox this phase was built in has no `ANTHROPIC_API_KEY` and
+  its proxy blocks sikafinance and api.anthropic.com, so the run above
+  used the committed fixtures and a scripted stand-in for the SDK. Every
+  layer up to the HTTP boundary is exercised; the **first real Haiku
+  call still needs to be made on the Mac** (`just news-tag`) before 3b is
+  proven against the live API. Expect ~$0.03 for a 40-item backfill.
+- The system prompt (instructions + the 69-row ticker universe) is
+  ~3.7k chars / ~1.2k tokens — just over the 1024-token minimum, so the
+  `cache_control` breakpoint on it should actually engage after the first
+  batch of a pass. Worth confirming `usage.cache_read_input_tokens` is
+  non-zero on the first real run; if it isn't, the universe table is the
+  thing to grow or the breakpoint isn't worth keeping.
+- `llm_spend.input_tokens` sums plain + cache-read + cache-write input
+  tokens into one counter. Fine as a volume signal; the authoritative
+  number for the cap is `usd_micros`, which prices each class correctly.
+- Batch size 8 is a guess. If truncation (`stop_reason=max_tokens`) ever
+  shows up in the logs, the fix is a smaller `LLM_BATCH_SIZE` — the code
+  deliberately does not auto-split, because silently re-sending a
+  half-billed batch is worse than a visible failure.
+- Tests now apply **all** migrations via `tests/conftest.apply_migrations`
+  instead of naming files, so migration 0005 won't need a sweep through
+  the suite.
+- Pre-existing mypy errors in `sources/sikafinance.py` and
+  `sources/afx_kwayisi.py` (5, selectolax `Node | None` narrowing) are
+  untouched — not introduced here, not in scope.
+- Corporate actions are still un-tagged: they arrive already structured
+  (ticker, kind, ex_date, amount) so there is nothing for the LLM to add.
+  If we later ingest AGM convocations as free text, they become tagging
+  input too.
+
+---
 
 ## Phase 3c — News + corporate actions — UI — not started
 

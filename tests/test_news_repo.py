@@ -5,20 +5,18 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-from brvm.db import connect, ensure_migrations_table
+from brvm.db import connect
 from brvm.models import CorporateAction, NewsItem, Security
 from brvm.sources._dedupe import news_hash
 from brvm.store import news as news_repo
 from brvm.store import securities as sec_repo
 
+from .conftest import apply_migrations
+
 
 def _init(tmp_db_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
     with connect(tmp_db_path) as conn:
-        ensure_migrations_table(conn)
-        for name in ("0001_init.sql", "0002_watchlists.sql", "0003_news.sql"):
-            conn.executescript((root / "migrations" / name).read_text())
-        conn.commit()
+        apply_migrations(conn)
 
 
 def _mk_news(url: str, title: str, **extra) -> NewsItem:
@@ -162,3 +160,68 @@ def test_list_news_ticker_filter_matches_hint_and_llm(tmp_db_path: Path):
 
         none = news_repo.list_news(conn, ticker="NOPE")
         assert none == []
+
+
+def test_list_untagged_only_returns_unstamped_rows(tmp_db_path: Path):
+    _init(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(
+            conn, [_mk_news("https://x/1", "One"), _mk_news("https://x/2", "Two")]
+        )
+        assert news_repo.count_untagged(conn) == 2
+
+        first_id = news_repo.list_untagged(conn)[0]["id"]
+        news_repo.apply_tags(conn, first_id, tickers=["SNTS"], relevance=6, category="earnings")
+
+        left = news_repo.list_untagged(conn)
+        assert news_repo.count_untagged(conn) == 1
+        assert first_id not in {r["id"] for r in left}
+
+
+def test_apply_tags_writes_csv_that_the_ticker_filter_matches(tmp_db_path: Path):
+    _init(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(conn, [_mk_news("https://x/1", "Sonatel et Orange")])
+        item_id = news_repo.list_untagged(conn)[0]["id"]
+        news_repo.apply_tags(
+            conn,
+            item_id,
+            tickers=["snts", "ORAC", "SNTS"],  # normalized + deduped on write
+            relevance=8,
+            category="earnings",
+            summary_fr="Résumé.",
+            summary_en="Summary.",
+        )
+        row = news_repo.list_news(conn)[0]
+        assert row["tickers_llm"] == "SNTS,ORAC"
+        assert row["relevance"] == 8
+        assert row["tagged_utc"]
+        assert len(news_repo.list_news(conn, ticker="ORAC")) == 1
+        assert len(news_repo.list_news(conn, ticker="CFAC")) == 0
+
+
+def test_apply_tags_with_no_tickers_stores_null(tmp_db_path: Path):
+    _init(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(conn, [_mk_news("https://x/1", "BCEAO")])
+        item_id = news_repo.list_untagged(conn)[0]["id"]
+        news_repo.apply_tags(conn, item_id, tickers=[], relevance=4, category="macro")
+        row = news_repo.list_news(conn)[0]
+        assert row["tickers_llm"] is None
+        # ...and an empty CSV must not make the LIKE filter match everything.
+        assert news_repo.list_news(conn, ticker="SNTS") == []
+
+
+def test_ingest_never_clobbers_existing_tags(tmp_db_path: Path):
+    """Re-polling the same article must not wipe what the tagger wrote."""
+    _init(tmp_db_path)
+    item = _mk_news("https://x/1", "Sonatel")
+    with connect(tmp_db_path) as conn:
+        news_repo.upsert_news_items(conn, [item])
+        item_id = news_repo.list_untagged(conn)[0]["id"]
+        news_repo.apply_tags(conn, item_id, tickers=["SNTS"], relevance=9, category="earnings")
+
+        ins, dupe = news_repo.upsert_news_items(conn, [item])
+        assert (ins, dupe) == (0, 1)
+        row = news_repo.list_news(conn)[0]
+        assert row["tickers_llm"] == "SNTS" and row["relevance"] == 9
