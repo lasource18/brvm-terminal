@@ -18,16 +18,23 @@ class TabSpec:
     hidden_for_kinds: tuple[str, ...] = ()  # security kinds where this tab is not shown
 
 
+_EQUITY_ONLY = ("index",)
+
 TABS: tuple[TabSpec, ...] = (
     TabSpec("chart", "Chart", "_tab/chart.html"),
     TabSpec("description", "Description", "_tab/description.html",
-            hidden_for_kinds=("index",)),
-    TabSpec("peers", "Peers", "_tab/peers.html"),
+            hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("peers", "Peers", "_tab/peers.html",
+            hidden_for_kinds=_EQUITY_ONLY),
     TabSpec("news", "News", "_tab/placeholder.html", phase="Phase 3"),
-    TabSpec("corporate-actions", "Corporate actions", "_tab/placeholder.html", phase="Phase 3"),
-    TabSpec("financials", "Financials", "_tab/placeholder.html", phase="Phase 4"),
-    TabSpec("ownership", "Ownership", "_tab/placeholder.html", phase="Phase 4"),
-    TabSpec("segments", "Segments", "_tab/placeholder.html", phase="Phase 4"),
+    TabSpec("corporate-actions", "Corporate actions", "_tab/placeholder.html",
+            phase="Phase 3", hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("financials", "Financials", "_tab/placeholder.html",
+            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("ownership", "Ownership", "_tab/placeholder.html",
+            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("segments", "Segments", "_tab/placeholder.html",
+            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
 )
 
 _BY_KEY = {t.key: t for t in TABS}
