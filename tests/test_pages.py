@@ -114,15 +114,19 @@ def test_index_chart_tab_renders(client):
     body = r.text
     assert "BRVM COMPOSITE" in body
     assert 'data-ticker="BRVMC"' in body
-    # Description tab is hidden for indices.
-    assert 'href="/s/BRVMC/description"' not in body
-    # Chart / Peers / News etc still appear.
+    # Only Chart + News tabs are shown for indices.
     assert 'href="/s/BRVMC/chart"' in body
+    assert 'href="/s/BRVMC/news"' in body
+    for hidden in ("description", "peers", "corporate-actions",
+                   "financials", "ownership", "segments"):
+        assert f'href="/s/BRVMC/{hidden}"' not in body
 
 
-def test_index_description_tab_404(client):
-    r = client.get("/s/BRVMC/description")
-    assert r.status_code == 404
+def test_index_hidden_tabs_return_404(client):
+    for hidden in ("description", "peers", "corporate-actions",
+                   "financials", "ownership", "segments"):
+        r = client.get(f"/s/BRVMC/{hidden}")
+        assert r.status_code == 404, hidden
 
 
 def test_directory_renders_all(client):
