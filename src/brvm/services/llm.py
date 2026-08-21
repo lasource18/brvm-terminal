@@ -283,7 +283,10 @@ _RESULT_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "id": {"type": "integer"},
                     "tickers": {"type": "array", "items": {"type": "string"}},
-                    "relevance": {"type": "integer", "minimum": 0, "maximum": 10},
+                    # Anthropic's output_config schema validator rejects
+                    # `minimum` / `maximum` on integer types. The [0, 10]
+                    # invariant is still enforced locally by `_validate`.
+                    "relevance": {"type": "integer"},
                     "category": {"type": "string", "enum": list(CATEGORIES)},
                     "summary_fr": {"type": "string"},
                     "summary_en": {"type": "string"},
