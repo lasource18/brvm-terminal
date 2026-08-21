@@ -182,3 +182,64 @@ def list_corporate_actions_upcoming(
 
 def count_corporate_actions(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM corporate_actions").fetchone()[0]
+
+
+def list_untagged(conn: sqlite3.Connection, *, limit: int = 100) -> list[sqlite3.Row]:
+    """News rows the LLM tagger hasn't seen yet, newest first.
+
+    `tagged_utc IS NULL` is the only gate — the worker stamps it on every
+    item it processes (even low-relevance ones), so an article is never
+    re-sent to the API. See the partial index `ix_news_items_untagged`.
+    """
+    return list(
+        conn.execute(
+            """
+            SELECT id, source, kind, url, title, chapeau, issuer_name,
+                   ticker_hint, published_at
+            FROM news_items
+            WHERE tagged_utc IS NULL
+            ORDER BY COALESCE(published_at, fetched_utc) DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    )
+
+
+def count_untagged(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM news_items WHERE tagged_utc IS NULL"
+    ).fetchone()[0]
+
+
+def apply_tags(
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    tickers: Iterable[str] = (),
+    relevance: int | None = None,
+    category: str | None = None,
+    summary_fr: str | None = None,
+    summary_en: str | None = None,
+    tagged_utc: str | None = None,
+    commit: bool = True,
+) -> None:
+    """Write one item's LLM tags. `tickers` is stored as a CSV string so
+    `list_news(ticker=...)` can do a `',' || tickers_llm || ','` LIKE match.
+    """
+    csv = ",".join(dict.fromkeys(t.strip().upper() for t in tickers if t.strip())) or None
+    conn.execute(
+        """
+        UPDATE news_items SET
+            tickers_llm  = ?,
+            relevance    = ?,
+            category_llm = ?,
+            summary_fr   = ?,
+            summary_en   = ?,
+            tagged_utc   = ?
+        WHERE id = ?
+        """,
+        (csv, relevance, category, summary_fr, summary_en, tagged_utc or utc_iso(), item_id),
+    )
+    if commit:
+        conn.commit()

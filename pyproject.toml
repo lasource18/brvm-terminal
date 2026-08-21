@@ -19,6 +19,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pypdf>=5.1",
     "python-multipart>=0.0.20",
+    "anthropic>=0.69",
 ]
 
 [dependency-groups]

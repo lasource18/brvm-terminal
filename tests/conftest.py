@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pytest
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 # Modules that capture `settings` at import time; reloading them is how we
 # point the app at a per-test tmp SQLite file.
@@ -21,11 +22,23 @@ _RELOADABLE = (
     "brvm.services.company",
     "brvm.services.search",
     "brvm.services.directory",
+    "brvm.services.tagging",
     "brvm.apps.web.routes.pages",
     "brvm.apps.web.routes.fragments",
     "brvm.apps.web.routes.api",
     "brvm.apps.web.main",
 )
+
+
+def apply_migrations(conn) -> None:
+    """Apply every migration in order. Tests use this instead of naming
+    files so a new migration doesn't need a sweep through the suite."""
+    from brvm.db import ensure_migrations_table
+
+    ensure_migrations_table(conn)
+    for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        conn.executescript(f.read_text(encoding="utf-8"))
+    conn.commit()
 
 
 @pytest.fixture
@@ -47,17 +60,13 @@ def _reload_all() -> None:
 
 
 def _seed(db_path: Path) -> None:
-    from brvm.db import connect, ensure_migrations_table
+    from brvm.db import connect
     from brvm.models import IndexLevel, Quote, Security
     from brvm.store import quotes as quotes_repo
     from brvm.store import securities as sec_repo
 
-    root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        conn.executescript((root / "migrations" / "0001_init.sql").read_text())
-        conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
-        conn.commit()
+        apply_migrations(conn)
         sec_repo.upsert(
             conn,
             [

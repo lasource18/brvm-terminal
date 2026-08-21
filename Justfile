@@ -44,3 +44,11 @@ news-poll:
 # Backfill securities.sector by scraping sikafinance/afx per equity
 sector-enrich:
     uv run python -m brvm.jobs.sector_enrich --once
+
+# Phase 3b demo: tag untagged news items with Haiku (respects the $1/day cap)
+news-tag:
+    uv run python -m brvm.jobs.news_tag --once
+
+# Same, without spending anything: shows batch shape + prompt size only
+news-tag-dry:
+    uv run python -m brvm.jobs.news_tag --once --dry-run

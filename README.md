@@ -14,7 +14,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 2 — web UI v1
 - [x] Phase 2.5 — search + directory + company tab shell
 - [x] Phase 3a — news + corporate actions (ingest)
-- [ ] Phase 3b — news + corporate actions (Haiku tagging, $1/day cap)
+- [x] Phase 3b — news + corporate actions (Haiku tagging, $1/day cap)
 - [ ] Phase 3c — news + corporate actions (UI: `/news`, tabs, 30-day strip)
 - [ ] Phase 4 — fundamentals (financials, ownership, segments)
 - [ ] Phase 5 — TUI
@@ -38,6 +38,10 @@ just migrate               # create data/brvm.sqlite with initial schema
 just test                  # offline fixture-based tests
 just dev                   # http://127.0.0.1:8765
 ```
+
+`ANTHROPIC_API_KEY` in `.env` is the only key that changes behaviour
+today — it turns on the Phase 3b news tagger. Leave it blank and
+everything else still works; news is simply stored untagged.
 
 ## Try it (Phase 2)
 
@@ -81,6 +85,61 @@ same fixtures reports 0 new rows — dedupe on `url_hash` for news, and
 The web UI still shows the Phase 2.5 shell tabs ("Coming in Phase 3");
 the news/actions tabs light up in Phase 3c.
 
+## Try it (Phase 3b demo — news tagging)
+
+Tags every news item ingested by `just news-poll` with Claude Haiku:
+tickers, relevance 0-10, category, and a 1-2 sentence summary in both
+French and English.
+
+```bash
+cp env.example .env         # then set ANTHROPIC_API_KEY=sk-ant-...
+just news-poll              # ingest first (Phase 3a)
+just news-tag-dry           # see the batch plan; spends nothing
+just news-tag               # tag for real
+```
+
+Sample output:
+
+```
+news tagging:
+   pending_before = 40
+          batches = 5
+           tagged = 40
+       unanswered = 0
+   failed_batches = 0
+   skipped_budget = 0
+    pending_after = 0
+    cost this run = $0.0295
+      spend today = $0.0295 / $1.0000 cap
+
+llm_spend 2026-08-21: calls=5 in=7000 out=4500 ($0.0295)
+```
+
+(Batch counts are from a real 40-item pass over the committed fixtures;
+the token/cost figures are indicative — actual usage depends on how much
+of the ~1.2k-token system prefix comes back as a cache read.)
+
+What it guarantees:
+
+- **Hard $1/day cap.** Real per-call cost is written to `llm_spend` in
+  micro-dollars right after every call, and the budget is re-checked
+  before each batch. Once the day is spent the worker no-ops with a
+  warning until UTC midnight. Change the ceiling with
+  `LLM_DAILY_CAP_CENTS`.
+- **Never re-processed.** Every item handed to a successful call gets
+  `tagged_utc` stamped, so re-running `just news-tag` costs nothing.
+- **Degrades quietly.** No `ANTHROPIC_API_KEY`, an exhausted budget, or a
+  failing API all end in counts + a log line, never a crash — the
+  scheduled job is safe to leave on.
+
+Tagging also runs on the scheduler (7 minutes behind each news poll:
+`*/15` during market hours, hourly otherwise), so `just dev` keeps the
+feed tagged on its own.
+
+The tagged fields (`tickers_llm`, `relevance`, `category_llm`,
+`summary_fr`, `summary_en`) are what Phase 3c's `/news` page and the
+per-ticker News tab will render.
+
 ## Try it (Phase 1 demo)
 
 After `just migrate`, run one live snapshot cycle and print the top-10
@@ -117,6 +176,10 @@ The `BRVM_API_*` env vars are still recognised so a future paid feed
 (EODHD, ICE) can be dropped in behind `services/providers.py` without
 touching the service layer.
 
+The news intelligence layer calls the Anthropic API with
+`claude-haiku-4-5-20251001` (override with `ANTHROPIC_MODEL`). It is the
+only outbound non-scraping call the app makes.
+
 ## Layout
 
 ```
@@ -130,8 +193,11 @@ src/brvm/
 
 ## Testing
 
-All scraper tests run offline against committed HTML/PDF fixtures in
-`tests/fixtures/`. Refresh them (dev-only, hits the network) with:
+All tests run offline: scrapers against committed HTML/PDF fixtures in
+`tests/fixtures/`, and the tagging pipeline against a fake Anthropic
+client (`tests/_fake_anthropic.py`) — `just test` never spends a cent or
+touches the network. Refresh the fixtures (dev-only, hits the network)
+with:
 
 ```bash
 just refresh-fixtures
