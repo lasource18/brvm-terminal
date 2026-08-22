@@ -119,14 +119,18 @@ def upsert_corporate_actions(
     return inserted, updated
 
 
-def list_news(
-    conn: sqlite3.Connection,
+def _news_filter_clause(
     *,
-    ticker: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> list[sqlite3.Row]:
-    where = []
+    ticker: str | None,
+    category: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    min_relevance: int | None,
+    source: str | None,
+) -> tuple[str, list[object]]:
+    """Shared WHERE builder for list_news + count_news so a filter change
+    can never make the count and list disagree."""
+    where: list[str] = []
     params: list[object] = []
     if ticker:
         where.append(
@@ -134,7 +138,45 @@ def list_news(
             "AND (',' || tickers_llm || ',') LIKE ?))"
         )
         params.extend([ticker, f"%,{ticker},%"])
+    if category:
+        where.append("category_llm = ?")
+        params.append(category)
+    if source:
+        where.append("source = ?")
+        params.append(source)
+    if date_from:
+        # Compare on the same expression the ORDER BY uses so items with no
+        # `published_at` fall back to their fetch time.
+        where.append("COALESCE(published_at, fetched_utc) >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("COALESCE(published_at, fetched_utc) <= ?")
+        # Inclusive end-of-day so a `date_to='YYYY-MM-DD'` matches all rows
+        # from that day regardless of the time component in ISO-8601.
+        params.append(date_to + "T23:59:59Z" if len(date_to) == 10 else date_to)
+    if min_relevance is not None:
+        where.append("relevance IS NOT NULL AND relevance >= ?")
+        params.append(min_relevance)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    return where_sql, params
+
+
+def list_news(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_relevance: int | None = None,
+    source: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    where_sql, params = _news_filter_clause(
+        ticker=ticker, category=category, date_from=date_from, date_to=date_to,
+        min_relevance=min_relevance, source=source,
+    )
     params.extend([limit, offset])
     return list(
         conn.execute(
@@ -149,8 +191,23 @@ def list_news(
     )
 
 
-def count_news(conn: sqlite3.Connection) -> int:
-    return conn.execute("SELECT COUNT(*) FROM news_items").fetchone()[0]
+def count_news(
+    conn: sqlite3.Connection,
+    *,
+    ticker: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_relevance: int | None = None,
+    source: str | None = None,
+) -> int:
+    where_sql, params = _news_filter_clause(
+        ticker=ticker, category=category, date_from=date_from, date_to=date_to,
+        min_relevance=min_relevance, source=source,
+    )
+    return conn.execute(
+        f"SELECT COUNT(*) FROM news_items {where_sql}", params
+    ).fetchone()[0]
 
 
 def list_corporate_actions_upcoming(

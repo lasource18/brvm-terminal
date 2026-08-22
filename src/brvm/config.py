@@ -36,6 +36,19 @@ class Settings(BaseSettings):
     # Give up on a tagging pass after this many consecutive failed batches.
     llm_max_consecutive_failures: int = 3
 
+    # --- Filings extractor (Phase 4b) — settings land now so 4a can round-trip
+    # the corpus + spend counter without a config bump later. ---
+    # Separate daily cap from `llm_daily_cap_cents` because an annual report
+    # is ~30-50k input tokens per call, i.e. orders of magnitude bigger than
+    # a news-tagging batch. Charter's news budget stays untouched.
+    llm_extract_daily_cap_cents: int = 200
+    # Refuse to download PDFs bigger than this — protects the VPS disk and
+    # cuts off obvious junk (scanned corpuses, marketing decks).
+    extract_max_pdf_mb: int = 25
+    # Where downloaded filings land. Relative paths resolve from the project
+    # root at write time; absolute paths are honoured as-is.
+    filings_root: str = "./data/filings"
+
     http_user_agent: str = Field(default="brvm-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 

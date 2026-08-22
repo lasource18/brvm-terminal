@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from brvm.apps.web._common import templates
 from brvm.clock import is_market_open, utc_iso
 from brvm.services import directory, market, search, watchlist
+from brvm.services import news as news_svc
 
 
 def _wl_ctx(slug: str) -> dict:
@@ -77,6 +78,33 @@ def search_frag(request: Request, q: str = ""):
     hits = search.search(q, limit=8)
     return templates.TemplateResponse(
         request, "_frag/search_results.html", {"hits": hits}
+    )
+
+
+@router.get("/news", response_class=HTMLResponse)
+def news_frag(
+    request: Request,
+    ticker: str | None = None,
+    category: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    min_relevance: int | None = None,
+    limit: int = 25,
+    offset: int = 0,
+):
+    feed = news_svc.list_feed(
+        ticker=ticker or None,
+        category=category or None,
+        date_from=date_from or None,
+        date_to=date_to or None,
+        min_relevance=min_relevance,
+        limit=max(1, min(100, limit)),
+        offset=max(0, offset),
+    )
+    return templates.TemplateResponse(
+        request,
+        "_frag/news_feed.html",
+        {"feed": feed, "feed_url": "/_frag/news"},
     )
 
 

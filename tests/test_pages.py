@@ -93,9 +93,10 @@ def test_security_peers_tab(client, monkeypatch):
 
 
 def test_security_placeholder_tab(client):
-    r = client.get("/s/SNTS/news")
+    # Only Phase-4 tabs are still placeholders.
+    r = client.get("/s/SNTS/financials")
     assert r.status_code == 200
-    assert "Phase 3" in r.text
+    assert "Phase 4" in r.text
 
 
 def test_security_unknown_tab_404(client):

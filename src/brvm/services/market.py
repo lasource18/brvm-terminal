@@ -124,11 +124,16 @@ def last_snapshot_utc() -> str | None:
 
 
 def overview(limit: int = 10) -> Overview:
+    # Local import so the market service stays free of a hard dep on news
+    # (keeps import order simple; there's no cycle risk).
+    from brvm.services import news as news_svc
+
     return Overview(
         indices=indices_tiles(),
         gainers=gainers(limit),
         losers=losers(limit),
         turnover_leaders=top_by_turnover(limit),
+        upcoming_actions=news_svc.list_upcoming_actions(days=30),
         generated_utc=utc_iso(),
         market_open=is_market_open(),
         last_snapshot_utc=last_snapshot_utc(),

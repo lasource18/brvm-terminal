@@ -52,3 +52,8 @@ news-tag:
 # Same, without spending anything: shows batch shape + prompt size only
 news-tag-dry:
     uv run python -m brvm.jobs.news_tag --once --dry-run
+
+# Phase 4a demo: walk brvm.org issuers + download new filing PDFs to data/filings/
+# Optional MAX_ISSUERS=<n> just filings-pull   → limit issuers walked (smoke run)
+filings-pull:
+    uv run python -m brvm.jobs.filings_pull --once {{ if env_var_or_default("MAX_ISSUERS", "") == "" { "" } else { "--max-issuers " + env_var("MAX_ISSUERS") } }}

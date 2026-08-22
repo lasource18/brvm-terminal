@@ -258,6 +258,88 @@ table.kv th, table.kv td { padding: 4px 10px; border-bottom: 1px solid var(--bor
 table.kv th { text-align: left; color: var(--muted); font-weight: normal; width: 40%; text-transform: uppercase; font-size: 11px; }
 table.kv tr:last-child th, table.kv tr:last-child td { border-bottom: 0; }
 
+/* --- news feed --- */
+.panels-4 { grid-template-columns: 1.1fr 1.1fr 1.1fr 1fr; }
+@media (max-width: 1200px) { .panels-4 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 700px) { .panels-4 { grid-template-columns: 1fr; } }
+
+.news-feed { }
+.news-list { list-style: none; margin: 0; padding: 0; }
+.news-list .news-item {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.news-list .news-item:last-child { border-bottom: 0; }
+.news-list .news-hd {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.news-hd .kind {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.news-hd .cat {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.news-hd .cat-earnings, .news-hd .cat-dividend { color: var(--green); border-color: var(--green); }
+.news-hd .cat-governance, .news-hd .cat-capital_action { color: var(--blue); border-color: var(--blue); }
+.news-hd .cat-macro { color: var(--accent); border-color: var(--accent); }
+.news-hd .rel { color: var(--dim); }
+.news-hd .tk {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-weight: bold;
+}
+.news-hd .tk:hover { background: var(--bg-hover); }
+.news-hd .ts { margin-left: auto; color: var(--dim); }
+.news-title a {
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 13px;
+}
+.news-title a:hover { color: var(--accent); }
+.news-sum { color: var(--fg); font-size: 12px; margin-top: 4px; }
+.news-sum-fr { font-size: 12px; margin-top: 2px; font-style: italic; }
+.news-meta { margin-top: 4px; }
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+.pager-buttons button, .load-more {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 4px 12px;
+  margin-left: 6px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pager-buttons button:hover, .load-more:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Compact calendar table in the 4th overview panel. */
+table.calendar th, table.calendar td { padding: 3px 8px; font-size: 12px; }
+
 /* --- lists index --- */
 .wl-list { list-style: none; padding: 0; margin: 0; }
 .wl-list li { padding: 6px 0; border-bottom: 1px solid var(--border); }

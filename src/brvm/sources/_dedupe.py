@@ -30,3 +30,13 @@ def news_hash(url: str, title: str) -> str:
     """sha256(normalized_url + '|' + normalized_title) as a hex string."""
     payload = f"{_normalize_url(url)}|{_normalize_title(title)}".encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def url_hash(url: str) -> str:
+    """sha256(normalized_url) as hex — dedupe key for filings.
+
+    Filings have no free-text title we'd want to include (the PDF URL is
+    the canonical identity, and the same PDF can be linked from multiple
+    pages with different anchor text).
+    """
+    return hashlib.sha256(_normalize_url(url).encode()).hexdigest()

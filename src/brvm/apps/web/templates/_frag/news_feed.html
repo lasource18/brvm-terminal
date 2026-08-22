@@ -1,0 +1,70 @@
+{#
+  Shared news list fragment. Rendered inline on full-page loads and
+  swapped in on HTMX pagination. `feed` is a NewsFeed; `feed_url`
+  (optional) is the endpoint pagination buttons hit — defaults to
+  /_frag/news, which is what the global /news page uses.
+#}
+{% set feed_url = feed_url|default('/_frag/news') %}
+<div class="news-feed"
+     id="{{ feed_id|default('news-feed') }}"
+     data-total="{{ feed.total }}">
+{% if feed.items %}
+  <ul class="news-list">
+    {% for it in feed.items %}
+      <li class="news-item">
+        <div class="news-hd">
+          <span class="kind">{{ it.kind }}</span>
+          {% if it.category %}<span class="cat cat-{{ it.category }}">{{ it.category }}</span>{% endif %}
+          {% if it.relevance is not none %}<span class="rel">rel {{ it.relevance }}/10</span>{% endif %}
+          {% for t in it.tickers %}
+            <a class="tk" href="/s/{{ t }}/news">{{ t }}</a>
+          {% endfor %}
+          <span class="ts">{{ (it.published_at or it.fetched_utc or '')[:16].replace('T', ' ') }}</span>
+        </div>
+        <div class="news-title">
+          <a href="{{ it.url }}" target="_blank" rel="noopener">{{ it.title }}</a>
+        </div>
+        {% if it.summary_en %}
+          <div class="news-sum">{{ it.summary_en }}</div>
+        {% elif it.chapeau %}
+          <div class="news-sum dim">{{ it.chapeau }}</div>
+        {% endif %}
+        {% if it.summary_fr %}
+          <div class="news-sum-fr dim">{{ it.summary_fr }}</div>
+        {% endif %}
+        <div class="news-meta dim">
+          source: {{ it.source }}
+          {% if it.issuer_name %} · {{ it.issuer_name }}{% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ul>
+  {# Pagination controls. Query string is rebuilt from `feed.filters` so
+     they persist across page navigation. #}
+  {% set base_qs = [] %}
+  {% for k, v in feed.filters.items() if v %}{% set _ = base_qs.append(k ~ '=' ~ v) %}{% endfor %}
+  {% set _ = base_qs.append('limit=' ~ feed.limit) %}
+  <div class="pager">
+    <span class="dim">
+      Showing {{ feed.offset + 1 }}–{{ feed.offset + feed.items|length }}
+      of {{ feed.total }} · page {{ feed.page }}/{{ feed.total_pages }}
+    </span>
+    <span class="pager-buttons">
+      {% if feed.offset > 0 %}
+        {% set prev_qs = base_qs + ['offset=' ~ ((feed.offset - feed.limit)|int if (feed.offset - feed.limit) > 0 else 0)] %}
+        <button hx-get="{{ feed_url }}?{{ prev_qs|join('&') }}"
+                hx-target="#{{ feed_id|default('news-feed') }}"
+                hx-swap="outerHTML">‹ Prev</button>
+      {% endif %}
+      {% if feed.has_more %}
+        {% set next_qs = base_qs + ['offset=' ~ feed.next_offset] %}
+        <button hx-get="{{ feed_url }}?{{ next_qs|join('&') }}"
+                hx-target="#{{ feed_id|default('news-feed') }}"
+                hx-swap="outerHTML">Next ›</button>
+      {% endif %}
+    </span>
+  </div>
+{% else %}
+  <div class="dim" style="padding: 12px;">No news matches these filters.</div>
+{% endif %}
+</div>
