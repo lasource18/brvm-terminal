@@ -92,11 +92,80 @@ def test_security_peers_tab(client, monkeypatch):
     assert "TELECOMMUNICATIONS" in r.text
 
 
-def test_security_placeholder_tab(client):
-    # Only Phase-4 tabs are still placeholders.
+def test_security_fundamentals_tabs_empty_state(client):
+    # No financials extracted for the seeded ticker yet; the three
+    # fundamentals tabs must still render 200 with graceful copy.
+    for tab, needle in (
+        ("financials", "No extracted financials"),
+        ("ownership", "No ownership data extracted"),
+        ("segments", "No segment breakdown"),
+    ):
+        r = client.get(f"/s/SNTS/{tab}")
+        assert r.status_code == 200, tab
+        assert needle in r.text, tab
+
+
+def test_security_fundamentals_tabs_render_extracted_data(client):
+    """Seed a full fundamentals triple and check the three tabs render
+    the real values, not the empty-state copy."""
+    from datetime import date
+
+    from brvm.config import settings
+    from brvm.db import connect
+    from brvm.models import Filing
+    from brvm.store import filings as filings_repo
+    from brvm.store import financials as fin_repo
+
+    filing = Filing(
+        ticker="SNTS",
+        issuer_name="SONATEL",
+        doc_type="rapport_annuel",
+        period_kind="annual",
+        period_year=2024,
+        source="brvm_org",
+        source_url="https://brvm.org/sonatel/2024.pdf",
+        url_hash="hash-snts-2024",
+        published_date=date(2025, 3, 15),
+        file_path="data/filings/SNTS/2024.pdf",
+        size_bytes=1024,
+        sha256="deadbeef",
+        page_count=100,
+    )
+    with connect(settings.db_path) as conn:
+        filings_repo.upsert_filings(conn, [filing])
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS",
+                period_year=2024,
+                revenue=1_500_000_000,
+                net_income=300_000_000,
+            ),
+            segments=[
+                fin_repo.SegmentRow(name="Mobile Money", segment_kind="business", share_pct=25.5),
+            ],
+            ownership=[
+                fin_repo.OwnershipRow(holder="SONATEL SA", share_pct=42.3),
+            ],
+        )
+
     r = client.get("/s/SNTS/financials")
     assert r.status_code == 200
-    assert "Phase 4" in r.text
+    assert "2024" in r.text
+    assert "1,500,000,000" in r.text
+    assert "No extracted financials" not in r.text
+
+    r = client.get("/s/SNTS/ownership")
+    assert r.status_code == 200
+    assert "SONATEL SA" in r.text
+    assert "42.30%" in r.text
+
+    r = client.get("/s/SNTS/segments")
+    assert r.status_code == 200
+    assert "Mobile Money" in r.text
+    assert "25.5%" in r.text
 
 
 def test_security_unknown_tab_404(client):

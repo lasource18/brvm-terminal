@@ -29,12 +29,12 @@ TABS: tuple[TabSpec, ...] = (
     TabSpec("news", "News", "_tab/news.html"),
     TabSpec("corporate-actions", "Corporate actions", "_tab/corporate_actions.html",
             hidden_for_kinds=_EQUITY_ONLY),
-    TabSpec("financials", "Financials", "_tab/placeholder.html",
-            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
-    TabSpec("ownership", "Ownership", "_tab/placeholder.html",
-            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
-    TabSpec("segments", "Segments", "_tab/placeholder.html",
-            phase="Phase 4", hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("financials", "Financials", "_tab/financials.html",
+            hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("ownership", "Ownership", "_tab/ownership.html",
+            hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("segments", "Segments", "_tab/segments.html",
+            hidden_for_kinds=_EQUITY_ONLY),
 )
 
 _BY_KEY = {t.key: t for t in TABS}

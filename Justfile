@@ -57,3 +57,12 @@ news-tag-dry:
 # Optional MAX_ISSUERS=<n> just filings-pull   → limit issuers walked (smoke run)
 filings-pull:
     uv run python -m brvm.jobs.filings_pull --once {{ if env_var_or_default("MAX_ISSUERS", "") == "" { "" } else { "--max-issuers " + env_var("MAX_ISSUERS") } }}
+
+# Phase 4b: extract structured fundamentals from unprocessed annual filings.
+# Respects the $2/day cap (LLM_EXTRACT_DAILY_CAP_CENTS).
+fundamentals-extract:
+    uv run python -m brvm.jobs.fundamentals_extract --once
+
+# Same, without spending anything: shows what would be sent and the estimated cost.
+fundamentals-extract-dry:
+    uv run python -m brvm.jobs.fundamentals_extract --once --dry-run
