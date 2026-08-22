@@ -1,0 +1,59 @@
+{# Segments tab — business + geographic revenue split for the latest period. #}
+{% set seg = segments %}
+{% macro segment_table(rows, currency) -%}
+  <table class="quotes">
+    <thead>
+      <tr>
+        <th>NAME</th>
+        <th>REVENUE</th>
+        <th>SHARE</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td>
+            {% if r.revenue is not none %}
+              {{ "{:,.0f}".format(r.revenue) }} {{ currency }}
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if r.share_pct is not none %}
+              {{ "%.1f"|format(r.share_pct) }}%
+            {% else %}
+              <span class="dim">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{%- endmacro %}
+
+{% if seg.has_data %}
+  <div class="panels desc-panels">
+    {% if seg.business %}
+      <div class="panel">
+        <h2>By business · {{ seg.period_year }}</h2>
+        {{ segment_table(seg.business, seg.currency) }}
+      </div>
+    {% endif %}
+    {% if seg.geo %}
+      <div class="panel">
+        <h2>By geography · {{ seg.period_year }}</h2>
+        {{ segment_table(seg.geo, seg.currency) }}
+      </div>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="panel">
+    <h2>Segments · {{ sec.ticker }}</h2>
+    <div class="dim" style="padding: 12px;">
+      No segment breakdown extracted yet for {{ sec.ticker }}. Not every issuer
+      publishes a business or geographic split.
+    </div>
+  </div>
+{% endif %}

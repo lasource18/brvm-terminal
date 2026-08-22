@@ -1,0 +1,56 @@
+{# Financials tab — 5-year annual series, most recent year on the left.
+   Currency is per-issuer (usually XOF; a few report in EUR or USD comparatives). #}
+{% set fin = financials %}
+{% set metric_labels = [
+     ('revenue',            'Revenue'),
+     ('operating_income',   'Operating income'),
+     ('net_income',         'Net income'),
+     ('total_assets',       'Total assets'),
+     ('total_equity',       'Total equity'),
+     ('eps',                'EPS'),
+     ('dividend_per_share', 'Dividend / share'),
+   ] %}
+<div class="panel">
+  <h2>Financials · {{ sec.ticker }}</h2>
+  {% if fin.has_data %}
+    <div class="dim" style="margin-bottom: 8px;">
+      Annual · amounts in {{ fin.currency }} · extracted from filings
+    </div>
+    <table class="quotes">
+      <thead>
+        <tr>
+          <th>METRIC</th>
+          {% for y in fin.periods %}<th>{{ y }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for key, label in metric_labels %}
+          {% set values = fin.metrics.get(key, []) %}
+          {# Skip rows the extractor never populated for any year — keeps
+             the table dense for issuers where a metric is never reported. #}
+          {% if values|select("ne", none)|list %}
+            <tr>
+              <td>{{ label }}</td>
+              {% for v in values %}
+                <td>
+                  {% if v is none %}
+                    <span class="dim">—</span>
+                  {% elif key in ('eps', 'dividend_per_share') %}
+                    {{ "{:,.2f}".format(v) }}
+                  {% else %}
+                    {{ "{:,.0f}".format(v) }}
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="dim" style="padding: 12px;">
+      No extracted financials yet for {{ sec.ticker }}. Runs after the daily
+      <code>fundamentals-extract</code> job processes an annual filing.
+    </div>
+  {% endif %}
+</div>

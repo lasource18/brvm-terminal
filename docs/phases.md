@@ -14,7 +14,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 3b | News + corporate actions — Haiku tagging ($1/day cap) | done | 2026-08-21 |
 | 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | done | 2026-08-21 |
 | 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
-| 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | not started | — |
+| 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
 
@@ -631,29 +631,101 @@ corpus. **No UI change, no LLM call, no extraction.**
 
 ---
 
-## Phase 4b — Fundamentals — extraction + Financials/Ownership/Segments — not started
+## Phase 4b — Fundamentals — extraction + Financials/Ownership/Segments (done 2026-08-22)
 
-Consumes the 4a corpus to fill the three placeholder tabs on
-`/s/{ticker}`.
+Consumes the 4a corpus to fill the three placeholder tabs on `/s/{ticker}`.
 
-Planned scope:
-- **Pre-flight cost estimate** — for each candidate filing, count PDF
-  tokens with tiktoken/pypdf before calling; if the estimate would
-  push the day's `filings_spend` over the $2 cap, queue the filing for
-  the next UTC day and stop the pass. Annual reports are infrequent
-  enough that this queue rarely gets deep.
-- **Extraction pipeline** — pypdf for structural parsing, Haiku for
-  structured JSON extraction: `{period, currency, revenue,
-  operating_income, net_income, total_assets, total_equity, segments:
-  [{name, revenue, share}], geo: [{country, revenue}], ownership:
-  [{holder, pct}]}`. Structured output + local validation the same
-  way 3b does it.
-- **New tables**: `financials`, `financial_segments`, `ownership`.
-- **UI**: fills the `Financials`, `Ownership`, `Segments` tabs. Best-
-  effort: coverage varies wildly by company; render "no data yet"
-  gracefully when a section is missing.
-- Only extract **annual** filings in 4b's first pass (interim reports
-  stay in the backlog).
+**Delivered**
+- **Migration `0006_fundamentals.sql`** — three tables, all keyed on
+  `(ticker, period_year, period_kind)` so a re-extraction of the same
+  period overwrites cleanly:
+  - `financials` — P&L core (revenue, operating_income, net_income,
+    EPS, dividend/share) + balance-sheet (total_assets, total_equity)
+    + currency. `filing_id` FK for the audit trail.
+  - `financial_segments` — business / geographic revenue split,
+    `share_pct` in `[0, 100]`.
+  - `ownership` — top shareholders, `share_pct` + optional absolute
+    share count when the report gives one.
+- **`services/extraction.py`** — pypdf → text (empty output ⇒
+  `is_scanned=1`, skip forever), a chars/4 pre-flight cost estimate so
+  a filing that would breach `filings_spend` is deferred before we
+  spend, Haiku call using the same shape as 3b's `services/llm.py`
+  (structured `json_schema` output + local validation, one corrective
+  retry, `LLMResponseError` carries the usage billed so far). Text sent
+  to the model is capped at 120k chars ≈ 30k input tokens so a huge
+  RSE annex can't blow one filing past the cap on its own.
+- **`services/fundamentals.py`** — the worker (`extract_pending`) plus
+  the read helpers the UI consumes (`get_financials_series` /
+  `get_segments` / `get_ownership`). Same two invariants as the
+  news-tagger keep it from becoming a money pit:
+  1. **Never re-process a filing.** Every filing handed to a
+     successful (or parse-failed) call gets `filings.extracted_utc`
+     stamped. Only a pre-flight refusal (budget exhausted, empty text,
+     file missing) leaves the row alone for a future pass.
+  2. **Hard $2/day cap.** Checked against `filings_spend` before every
+     call; the real cost is committed straight after so a crash
+     mid-pass can't lose spend.
+- **`store/financials.py`** — `replace_period` atomically clears the
+  triple then re-inserts, deduping repeated segments/holders inside a
+  single call so the model's occasional "Autres" repeat doesn't
+  violate the composite PK.
+- **`store/filings.mark_extracted`** — the stamper the worker calls
+  after every extraction attempt, with optional `is_scanned` update.
+- **UI** — the three placeholder tabs now render real views:
+  - **Financials** — 6-year annual table, currency labelled, empty
+    rows collapsed. XOF-native but respects the extractor's per-row
+    currency for issuers with EUR/USD comparatives.
+  - **Ownership** — top holders + % (+ absolute share count when known)
+    for the latest extracted period.
+  - **Segments** — side-by-side business + geographic split for the
+    latest period. Only the buckets the extractor found are rendered.
+- **`jobs/fundamentals_extract.py`** + `just fundamentals-extract` /
+  `just fundamentals-extract-dry` — one-shot demo. Scheduler adds
+  `fundamentals_extract_daily` (03:00 Abidjan, well after close +
+  before the sector job).
+- **Corpus insight from the dry-run.** Against the BOA sub-corpus (5
+  tickers, ~100 filings) the pre-flight reports ~17/20 of the recent
+  filings as scanned — French annual reports lean heavily on
+  image-only PDFs. `is_scanned=1` short-circuits those without an
+  LLM call, so the effective spend surface is much smaller than the
+  filings count suggests. OCR is on the backlog.
+
+**Definition of Done — met**
+- `just migrate` picks up `0006` idempotently; the three new tables
+  land on a fresh DB.
+- `just fundamentals-extract-dry` reports pending/scanned/would-extract
+  counts and spends nothing.
+- `just test` → 248 tests green (31 new: extraction preflight / prompt
+  / retry / clamps, financials repo replace + overwrite + read helpers,
+  worker end-to-end via a scripted `FakeAnthropic` covering happy path
+  + budget cap + scanned + missing file + failed call + empty payload +
+  no-key + dry-run read-only + read helpers, scheduler wiring, page
+  render for both empty state and populated state). Ruff clean.
+
+**Notes / follow-ups**
+- **First real `just fundamentals-extract` on the Mac is still pending.**
+  Once run, spend lands in `filings_spend` (separate from `llm_spend`)
+  and the Financials / Ownership / Segments tabs on `/s/{ticker}`
+  populate for whichever issuers had a text-extractable annual report.
+- Char/4 heuristic for the pre-flight matches Anthropic's public rule
+  of thumb; it slightly over-estimates for filings full of numeric
+  tables (digits tokenize dense) which is the safe direction for a
+  budget gate. If actual bills consistently underrun the estimate we
+  can loosen the divisor.
+- Batch size is deliberately 1: an annual report is 30-50k input tokens
+  on its own, and mixing filings would risk cross-report contamination
+  in the model's output. Prompt caching still amortizes the system
+  prompt across the day's pass.
+- The **retry-on-parse** billing is exactly the tagger's model: both
+  attempts count against the daily cap, and the filing is stamped so
+  a permanently-broken extract doesn't cost 2× on every subsequent
+  pass. The tests pin both invariants.
+- `_RELOADABLE` in `tests/conftest.py` gained `extraction` +
+  `fundamentals` (14 modules; the 15-module refactor threshold from
+  Phase 2.5's notes is one phase away).
+- Interim (H1/Q1/Q3) extraction stays on the backlog — a straight
+  repeat of 4b's path once we've proven the annual pipeline against
+  real Anthropic bills.
 
 ---
 

@@ -13,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from brvm.clock import ABIDJAN, is_market_open
 from brvm.logging import get
 from brvm.services.enrichment import enrich_sectors
+from brvm.services.fundamentals import extract_pending
 from brvm.services.news import poll_all as poll_news
 from brvm.services.quotes import snapshot_once
 from brvm.services.tagging import tag_pending
@@ -58,6 +59,18 @@ def _sector_enrich_job() -> None:
         log.info("scheduled sector enrichment ok: %s", counts)
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled sector enrichment failed: %s", e)
+
+
+def _fundamentals_extract_job() -> None:
+    """Extract structured fundamentals from unprocessed annual filings.
+    No-ops (with a warning) when ANTHROPIC_API_KEY is unset or the day's
+    $2 budget is spent, so this is safe to register unconditionally."""
+    log.info("scheduled fundamentals extraction start")
+    try:
+        counts = extract_pending()
+        log.info("scheduled fundamentals extraction ok: %s", counts.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled fundamentals extraction failed: %s", e)
 
 
 def build_scheduler() -> BackgroundScheduler:
@@ -109,6 +122,15 @@ def build_scheduler() -> BackgroundScheduler:
         _sector_enrich_job,
         CronTrigger(day_of_week="sun", hour="4", minute="0", timezone=str(ABIDJAN)),
         id="sector_enrichment_weekly",
+        replace_existing=True,
+    )
+    # Fundamentals extraction: daily at 03:00 Abidjan (well after market
+    # close, before the sector job) so the $2 budget lands on the same UTC
+    # day as `filings_spend` accounting.
+    sched.add_job(
+        _fundamentals_extract_job,
+        CronTrigger(hour="3", minute="0", timezone=str(ABIDJAN)),
+        id="fundamentals_extract_daily",
         replace_existing=True,
     )
     return sched
