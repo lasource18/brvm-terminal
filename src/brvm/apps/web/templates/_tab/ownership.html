@@ -1,0 +1,44 @@
+{# Ownership tab — top shareholders as of the latest extracted period. #}
+{% set own = ownership %}
+<div class="panel">
+  <h2>Ownership · {{ sec.ticker }}</h2>
+  {% if own.has_data %}
+    <div class="dim" style="margin-bottom: 8px;">
+      As of {{ own.period_year }} ({{ own.period_kind }})
+    </div>
+    <table class="quotes">
+      <thead>
+        <tr>
+          <th>HOLDER</th>
+          <th>%</th>
+          <th>SHARES</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in own.holders %}
+          <tr>
+            <td>{{ h.holder }}</td>
+            <td>
+              {% if h.share_pct is not none %}
+                {{ "%.2f"|format(h.share_pct) }}%
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if h.shares is not none %}
+                {{ "{:,}".format(h.shares) }}
+              {% else %}
+                <span class="dim">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="dim" style="padding: 12px;">
+      No ownership data extracted yet for {{ sec.ticker }}.
+    </div>
+  {% endif %}
+</div>

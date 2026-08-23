@@ -122,3 +122,32 @@ def list_needing_extraction(
 
 def count_all(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM filings").fetchone()[0]
+
+
+def mark_extracted(
+    conn: sqlite3.Connection,
+    filing_id: int,
+    *,
+    is_scanned: bool | None = None,
+    commit: bool = True,
+) -> None:
+    """Stamp `extracted_utc` (and optionally `is_scanned`).
+
+    Always called after an extraction attempt — even a failed one — so
+    the 4b worker never bills the same PDF twice. `is_scanned=True`
+    tells the next pass to skip this filing entirely (see
+    `list_needing_extraction`'s `is_scanned = 0` guard)."""
+    from brvm.clock import utc_iso
+
+    if is_scanned is None:
+        conn.execute(
+            "UPDATE filings SET extracted_utc = ? WHERE id = ?",
+            (utc_iso(), filing_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE filings SET extracted_utc = ?, is_scanned = ? WHERE id = ?",
+            (utc_iso(), 1 if is_scanned else 0, filing_id),
+        )
+    if commit:
+        conn.commit()

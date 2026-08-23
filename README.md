@@ -15,8 +15,9 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 2.5 — search + directory + company tab shell
 - [x] Phase 3a — news + corporate actions (ingest)
 - [x] Phase 3b — news + corporate actions (Haiku tagging, $1/day cap)
-- [ ] Phase 3c — news + corporate actions (UI: `/news`, tabs, 30-day strip)
-- [ ] Phase 4 — fundamentals (financials, ownership, segments)
+- [x] Phase 3c — news + corporate actions (UI: `/news`, tabs, 30-day strip)
+- [x] Phase 4a — fundamentals (filings corpus + storage)
+- [x] Phase 4b — fundamentals (Haiku extraction + Financials/Ownership/Segments tabs)
 - [ ] Phase 5 — TUI
 - [ ] Phase 6 — alerts + daily brief + analyst-note synthesis
 
@@ -60,10 +61,12 @@ Available pages:
 - `/directory` — full securities table with country / sector / kind /
   text filters (HTMX)
 - Topbar **search** — type ticker or name; Enter jumps to the first hit
-- `/s/{TICKER}` — single security page with tabs: Overview (Lightweight
-  Charts price history) · Description (profile + shareholders) · Peers
-  (sector peer table). News / Corporate actions / Financials / Ownership /
-  Segments tabs are stubs that fill in Phases 3 & 4.
+- `/s/{TICKER}` — single security page with tabs: Chart (Lightweight
+  Charts price history) · Description · Peers · News · Corporate actions ·
+  Financials · Ownership · Segments. Tabs with no data yet render a
+  graceful empty state.
+- `/news` — filterable news feed (ticker / category / date / min-relevance)
+  with HTMX pagination
 - `/watchlists` — create and manage named watchlists
 - `/watchlists/{slug}` — quote board for one list, add/remove tickers inline
 - `/health` — JSON liveness
@@ -137,8 +140,48 @@ Tagging also runs on the scheduler (7 minutes behind each news poll:
 feed tagged on its own.
 
 The tagged fields (`tickers_llm`, `relevance`, `category_llm`,
-`summary_fr`, `summary_en`) are what Phase 3c's `/news` page and the
-per-ticker News tab will render.
+`summary_fr`, `summary_en`) power the `/news` page and the per-ticker
+News tab that Phase 3c wired up.
+
+## Try it (Phase 4a / 4b demo — filings + fundamentals extraction)
+
+Phase 4a pulls annual/interim PDFs from `brvm.org` into `data/filings/`
+and records one row per PDF in `filings`; Phase 4b extracts structured
+fundamentals from those PDFs with Haiku and fills the Financials /
+Ownership / Segments tabs on `/s/{TICKER}`.
+
+```bash
+MAX_ISSUERS=6 just filings-pull       # walk 6 issuers, download PDFs
+just fundamentals-extract-dry         # see the plan + estimated cost
+just fundamentals-extract             # extract for real ($2/day cap)
+just dev                              # /s/BOAC/financials etc.
+```
+
+`just fundamentals-extract-dry` is read-only — it probes each PDF with
+pypdf, reports which are scanned (skipped by 4b — real OCR is on the
+backlog) and how much a full pass would cost, without spending a cent or
+mutating the DB. `just fundamentals-extract` writes to the fundamentals
+tables and to `filings_spend` (its own daily counter, separate from
+`llm_spend` — an annual report is orders of magnitude bigger than a news
+batch, so extraction has its own $2/day ceiling via
+`LLM_EXTRACT_DAILY_CAP_CENTS`).
+
+What it guarantees:
+
+- **Hard $2/day cap.** Same shape as 3b: real cost accounted in
+  `filings_spend` micros right after every call, budget re-checked
+  before every filing, worker no-ops with a warning until UTC midnight
+  once crossed.
+- **Never re-processed.** Every filing handed to a call (successful,
+  failed, or empty) gets `filings.extracted_utc` stamped so a re-run
+  costs nothing. Scanned PDFs also get `is_scanned=1` so pypdf never
+  probes them again.
+- **Degrades quietly.** No `ANTHROPIC_API_KEY`, an exhausted budget, a
+  missing PDF on disk, or a failing API all end in counts + a log line,
+  never a crash.
+
+Extraction also runs daily on the scheduler at 03:00 Africa/Abidjan
+(`fundamentals_extract_daily`), well after market close.
 
 ## Try it (Phase 1 demo)
 

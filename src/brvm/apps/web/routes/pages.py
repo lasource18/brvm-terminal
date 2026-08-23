@@ -9,7 +9,7 @@ from brvm import __version__
 from brvm.apps.web import tabs
 from brvm.apps.web._common import base_ctx, templates
 from brvm.clock import is_market_open, utc_iso
-from brvm.services import company, directory, market, watchlist
+from brvm.services import company, directory, fundamentals, market, watchlist
 from brvm.services import news as news_svc
 
 router = APIRouter()
@@ -59,6 +59,12 @@ def security_tab(request: Request, ticker: str, tab: str):
         ctx["feed"] = news_svc.list_feed(ticker=sec.ticker, limit=25)
     elif spec.key == "corporate-actions":
         ctx["actions"] = news_svc.list_upcoming_actions(ticker=sec.ticker, days=90)
+    elif spec.key == "financials":
+        ctx["financials"] = fundamentals.get_financials_series(sec.ticker)
+    elif spec.key == "ownership":
+        ctx["ownership"] = fundamentals.get_ownership(sec.ticker)
+    elif spec.key == "segments":
+        ctx["segments"] = fundamentals.get_segments(sec.ticker)
     return templates.TemplateResponse(request, "security.html", ctx)
 
 
