@@ -37,3 +37,7 @@ def test_scheduler_builds():
     assert "news_tag_hourly_outside" in ids
     assert "sector_enrichment_weekly" in ids
     assert "fundamentals_extract_daily" in ids
+    # Phase 6a jobs.
+    assert "alerts_evaluate_market_hours" in ids
+    assert "alerts_evaluate_hourly_outside" in ids
+    assert "alerts_deliver_every_5min" in ids

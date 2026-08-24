@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import Filing, Security
 from brvm.store import filings as filings_repo
@@ -68,15 +68,9 @@ def _setup(monkeypatch, tmp_path: Path, *, n_filings: int = 1):
     Returns the reloaded (config-aware) worker module."""
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-
-    import brvm.config as cfg
-
-    importlib.reload(cfg)
-    import brvm.services.extraction as ext_mod
-    import brvm.services.fundamentals as svc
-
-    importlib.reload(ext_mod)
-    importlib.reload(svc)
+    reset_settings_cache()
+    from brvm.services import extraction as ext_mod
+    from brvm.services import fundamentals as svc
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -215,7 +209,8 @@ def test_empty_extract_stamps_but_counts_as_empty(monkeypatch, tmp_path):
 
 def test_no_api_key_is_a_warning_not_a_crash(monkeypatch, tmp_path):
     _db, svc = _setup(monkeypatch, tmp_path, n_filings=1)
-    monkeypatch.setattr(svc.settings, "anthropic_api_key", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    reset_settings_cache()
 
     counts = svc.extract_pending(project_root=tmp_path)
 

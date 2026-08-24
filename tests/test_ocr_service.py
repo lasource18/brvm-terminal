@@ -14,12 +14,12 @@ we're pinning is the invariants:
 
 from __future__ import annotations
 
-import importlib
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import Filing, Security
 from brvm.store import filings as filings_repo
@@ -34,12 +34,8 @@ def _fresh(monkeypatch, tmp_path):
     filings_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("FILINGS_ROOT", str(filings_dir))
-
-    import brvm.config as cfg
-    import brvm.services.ocr as ocr_svc
-
-    importlib.reload(cfg)
-    importlib.reload(ocr_svc)
+    reset_settings_cache()
+    from brvm.services import ocr as ocr_svc
     return ocr_svc, db_path, filings_dir
 
 
@@ -219,9 +215,7 @@ def test_page_cap_filters_out_pathological_scans(monkeypatch, tmp_path):
     _seed_scanned_filing(db_path, filings_dir, fname="ok.pdf", page_count=42)
     _seed_scanned_filing(db_path, filings_dir, fname="huge.pdf", page_count=300, migrate=False)
 
-    import brvm.config as cfg
-    importlib.reload(cfg)
-    importlib.reload(ocr)
+    reset_settings_cache()
 
     calls: list[str] = []
 

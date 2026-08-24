@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -11,30 +10,6 @@ import pytest
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-
-# Modules that capture `settings` at import time; reloading them is how we
-# point the app at a per-test tmp SQLite file.
-_RELOADABLE = (
-    "brvm.services.news",
-    "brvm.services.market",
-    "brvm.services.history",
-    "brvm.services.watchlist",
-    "brvm.services.quotes",
-    "brvm.services.company",
-    "brvm.services.search",
-    "brvm.services.directory",
-    "brvm.services.tagging",
-    "brvm.services.extraction",
-    "brvm.services.fundamentals",
-    "brvm.services.filings",
-    "brvm.services.ocr",
-    "brvm.services.ratios",
-    "brvm.services.company_facts",
-    "brvm.apps.web.routes.pages",
-    "brvm.apps.web.routes.fragments",
-    "brvm.apps.web.routes.api",
-    "brvm.apps.web.main",
-)
 
 
 def apply_migrations(conn) -> None:
@@ -48,6 +23,40 @@ def apply_migrations(conn) -> None:
     conn.commit()
 
 
+def reset_module_state() -> None:
+    """Drop process-wide state that would leak across tests.
+
+    Phase 6a replaced the old `importlib.reload` sweep with a lazy
+    settings proxy (`config.reset_settings_cache`) — no module reloads
+    needed because every `settings.X` reference is a proxy lookup, not
+    a captured value. What's left is service-owned state (TTL caches,
+    lazily-built LLM client) that a settings change or a fresh DB path
+    should invalidate.
+    """
+    from brvm.config import reset_settings_cache
+
+    reset_settings_cache()
+    # TTL-cached scraper responses — a new DB path should not surface
+    # data from the previous test's cache.
+    try:
+        from brvm.services import company as _company
+        _company.clear_cache()
+    except ImportError:
+        pass
+    try:
+        from brvm.services import history as _history
+        _history.clear_cache()
+    except ImportError:
+        pass
+    # Memoized Anthropic SDK client — built against whatever
+    # ANTHROPIC_API_KEY was in effect at first call.
+    try:
+        from brvm.services import llm as _llm
+        _llm.reset_client()
+    except ImportError:
+        pass
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     return FIXTURES_DIR
@@ -56,14 +65,6 @@ def fixtures_dir() -> Path:
 @pytest.fixture
 def tmp_db_path(tmp_path: Path) -> Path:
     return tmp_path / "brvm.sqlite"
-
-
-def _reload_all() -> None:
-    import brvm.config as cfg
-
-    importlib.reload(cfg)
-    for name in _RELOADABLE:
-        importlib.reload(importlib.import_module(name))
 
 
 def _seed(db_path: Path) -> None:
@@ -115,7 +116,7 @@ def client(monkeypatch, tmp_path):
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    _reload_all()
+    reset_module_state()
     _seed(db_path)
 
     from brvm.apps.web.main import app
@@ -125,4 +126,4 @@ def client(monkeypatch, tmp_path):
         with TestClient(app) as c:
             yield c
 
-    _reload_all()
+    reset_module_state()

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import importlib
 from datetime import date, timedelta
 from pathlib import Path
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import CorporateAction, NewsItem
 from brvm.sources._dedupe import news_hash
@@ -30,11 +30,8 @@ def _mk_news(url: str, title: str, **extra) -> NewsItem:
 def _fresh_svc(tmp_path, monkeypatch):
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    import brvm.config as cfg
-    import brvm.services.news as svc
-
-    importlib.reload(cfg)
-    importlib.reload(svc)
+    reset_settings_cache()
+    from brvm.services import news as svc
     return svc, db_path
 
 

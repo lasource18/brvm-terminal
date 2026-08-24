@@ -25,21 +25,18 @@ def _init(db_path: Path) -> None:
 
 @pytest.fixture
 def history_env(monkeypatch, tmp_path):
-    import importlib
-
-    import brvm.config as cfg
+    from brvm.config import reset_settings_cache
 
     db = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db))
-    importlib.reload(cfg)
-    import brvm.services.history as history_mod
+    reset_settings_cache()
+    from brvm.services import history as history_mod
 
-    importlib.reload(history_mod)
     _init(db)
     history_mod.clear_cache()
     yield history_mod
-    importlib.reload(cfg)
-    importlib.reload(history_mod)
+    history_mod.clear_cache()
+    reset_settings_cache()
 
 
 def _fake_bars(n: int = 5) -> list[DailyBar]:

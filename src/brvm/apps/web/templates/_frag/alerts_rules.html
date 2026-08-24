@@ -1,0 +1,55 @@
+{% if rules %}
+  <table class="alert-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Kind</th>
+        <th>Ticker</th>
+        <th>Trigger</th>
+        <th>Label</th>
+        <th class="right">Enabled</th>
+        <th class="right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rules %}
+        <tr>
+          <td class="dim">{{ r.id }}</td>
+          <td><span class="kind">{{ r.kind }}</span></td>
+          <td>{{ r.ticker or '—' }}</td>
+          <td>
+            {% if r.kind == 'price_move' %}
+              |Δ| ≥ {{ '%.1f'|format(r.threshold_pct or 0) }}%
+            {% elif r.kind == 'new_filing' %}
+              {{ r.doc_types or 'any doc type' }}
+            {% elif r.kind == 'news' %}
+              relevance ≥ {{ r.min_relevance if r.min_relevance is not none else 0 }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td class="dim">{{ r.label or '' }}</td>
+          <td class="right">
+            <button class="btn-toggle"
+                    hx-post="/_frag/alerts/rules/{{ r.id }}/toggle"
+                    hx-target="#alert-rules-wrap"
+                    hx-swap="innerHTML">
+              {{ 'on' if r.enabled else 'off' }}
+            </button>
+          </td>
+          <td class="right">
+            <button class="btn-del"
+                    hx-delete="/_frag/alerts/rules/{{ r.id }}"
+                    hx-target="#alert-rules-wrap"
+                    hx-swap="innerHTML"
+                    hx-confirm="Delete rule #{{ r.id }}? (queued events stay in history)">
+              del
+            </button>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="dim" style="padding: 12px 0;">No rules yet — add one below.</div>
+{% endif %}

@@ -7,11 +7,11 @@ make sure the peers path and interim card get sensible inputs.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import Quote, Security
 from brvm.services.ratios import (
@@ -204,14 +204,9 @@ def test_ratio_dataclass_carries_provenance_string():
 def _setup(monkeypatch, tmp_path: Path):
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    import brvm.config as cfg
-
-    importlib.reload(cfg)
-    import brvm.services.ratios as ratios_svc
-    import brvm.store.financials as fin_repo
-
-    importlib.reload(fin_repo)
-    importlib.reload(ratios_svc)
+    reset_settings_cache()
+    from brvm.services import ratios as ratios_svc
+    from brvm.store import financials as fin_repo
 
     with connect(db_path) as conn:
         apply_migrations(conn)

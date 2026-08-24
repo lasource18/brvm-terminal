@@ -12,16 +12,12 @@ from .conftest import apply_migrations
 
 @pytest.fixture
 def dir_env(monkeypatch, tmp_path):
-    import importlib
-
-    import brvm.config as cfg
+    from brvm.config import reset_settings_cache
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    importlib.reload(cfg)
-    import brvm.services.directory as dir_mod
-
-    importlib.reload(dir_mod)
+    reset_settings_cache()
+    from brvm.services import directory as dir_mod
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -57,8 +53,7 @@ def dir_env(monkeypatch, tmp_path):
             ],
         )
     yield dir_mod
-    importlib.reload(cfg)
-    importlib.reload(dir_mod)
+    reset_settings_cache()
 
 
 def _seed_period_bars(db_path, monkeypatch, today: date, dir_mod):

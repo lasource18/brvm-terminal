@@ -12,6 +12,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from brvm.clock import ABIDJAN, is_market_open
 from brvm.logging import get
+from brvm.services.alerts import deliver_pending as deliver_alerts
+from brvm.services.alerts import evaluate_all as evaluate_alerts
 from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.fundamentals import extract_pending
@@ -112,6 +114,28 @@ def _filings_ocr_job() -> None:
         log.exception("scheduled filings OCR failed: %s", e)
 
 
+def _alerts_evaluate_job() -> None:
+    """Fire rule-matching events into `alert_events`. Trails each news
+    tag pass so a tagged item can immediately produce an alert."""
+    log.info("scheduled alerts eval start (market_open=%s)", is_market_open())
+    try:
+        counts = evaluate_alerts()
+        log.info("scheduled alerts eval ok: %s", counts.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled alerts eval failed: %s", e)
+
+
+def _alerts_deliver_job() -> None:
+    """Drain the queued events via Discord webhook. No-ops (with a
+    warning) when DISCORD_WEBHOOK_URL is unset."""
+    log.info("scheduled alerts deliver start")
+    try:
+        counts = deliver_alerts()
+        log.info("scheduled alerts deliver ok: %s", counts.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled alerts deliver failed: %s", e)
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone=str(ABIDJAN))
     # Every 10 minutes during market hours.
@@ -199,6 +223,30 @@ def build_scheduler() -> BackgroundScheduler:
         _fundamentals_extract_job,
         CronTrigger(hour="3", minute="0", timezone=str(ABIDJAN)),
         id="fundamentals_extract_daily",
+        replace_existing=True,
+    )
+    # Alerts evaluator: every 15 min during market hours (offset +11 min
+    # from news poll so the tagger has finished stamping relevance), hourly
+    # otherwise. The read side is DB-only so there's no rate-limit concern.
+    sched.add_job(
+        _alerts_evaluate_job,
+        CronTrigger(day_of_week="mon-fri", hour="9-14", minute="11-59/15", timezone=str(ABIDJAN)),
+        id="alerts_evaluate_market_hours",
+        replace_existing=True,
+    )
+    sched.add_job(
+        _alerts_evaluate_job,
+        CronTrigger(hour="*", minute="41", timezone=str(ABIDJAN)),
+        id="alerts_evaluate_hourly_outside",
+        replace_existing=True,
+    )
+    # Delivery: every 5 min, always on. Cheap when the queue is empty
+    # (one indexed COUNT). Batch-capped by settings.alerts_delivery_batch
+    # so a webhook outage doesn't turn recovery into a flood.
+    sched.add_job(
+        _alerts_deliver_job,
+        CronTrigger(minute="*/5", timezone=str(ABIDJAN)),
+        id="alerts_deliver_every_5min",
         replace_existing=True,
     )
     return sched

@@ -7,6 +7,8 @@ from fastapi.responses import HTMLResponse
 
 from brvm.apps.web._common import templates
 from brvm.clock import is_market_open, utc_iso
+from brvm.models import AlertRule
+from brvm.services import alerts as alerts_svc
 from brvm.services import directory, market, search, watchlist
 from brvm.services import news as news_svc
 
@@ -106,6 +108,67 @@ def news_frag(
         "_frag/news_feed.html",
         {"feed": feed, "feed_url": "/_frag/news"},
     )
+
+
+def _rules_ctx() -> dict:
+    return {"rules": alerts_svc.list_rules()}
+
+
+def _events_ctx() -> dict:
+    return {"events": alerts_svc.list_recent_events(limit=25)}
+
+
+@router.post("/alerts/rules", response_class=HTMLResponse)
+def create_alert_rule(
+    request: Request,
+    kind: str = Form(...),
+    ticker: str = Form(default=""),
+    label: str = Form(default=""),
+    threshold_pct: str = Form(default=""),
+    doc_types: str = Form(default=""),
+    min_relevance: str = Form(default=""),
+):
+    if kind not in {"price_move", "new_filing", "news"}:
+        raise HTTPException(status_code=400, detail=f"unknown kind: {kind}")
+    t = (ticker or "").strip().upper() or None
+    lbl = (label or "").strip() or None
+    thr = float(threshold_pct) if kind == "price_move" and threshold_pct else None
+    if kind == "price_move" and thr is None:
+        raise HTTPException(status_code=400, detail="price_move needs threshold_pct")
+    docs = (doc_types or "").strip() or None if kind == "new_filing" else None
+    rel = int(min_relevance) if kind == "news" and min_relevance else None
+    try:
+        alerts_svc.create_rule(
+            AlertRule(
+                kind=kind, ticker=t, label=lbl,
+                threshold_pct=thr, doc_types=docs, min_relevance=rel,
+            )
+        )
+    except Exception as e:  # sqlite IntegrityError (FK on ticker) etc.
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
+
+
+@router.post("/alerts/rules/{rule_id}/toggle", response_class=HTMLResponse)
+def toggle_alert_rule(request: Request, rule_id: int):
+    from brvm.config import settings as _s
+    from brvm.db import connect
+    from brvm.store import alerts as _alerts_repo
+
+    with connect(_s.db_path) as conn:
+        rule = _alerts_repo.get_rule(conn, rule_id)
+        if rule is None:
+            raise HTTPException(status_code=404, detail=f"unknown rule: {rule_id}")
+        _alerts_repo.set_enabled(conn, rule_id, not rule.enabled)
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
+
+
+@router.delete("/alerts/rules/{rule_id}", response_class=HTMLResponse)
+def delete_alert_rule(request: Request, rule_id: int):
+    n = alerts_svc.delete_rule(rule_id)
+    if n == 0:
+        raise HTTPException(status_code=404, detail=f"unknown rule: {rule_id}")
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
 
 
 @router.get("/directory", response_class=HTMLResponse)

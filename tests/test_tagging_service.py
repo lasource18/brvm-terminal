@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import NewsItem, Security
 from brvm.sources._dedupe import news_hash
@@ -33,15 +33,11 @@ def _setup(monkeypatch, tmp_path: Path, n_items: int = 5):
     """Fresh DB + seeded securities + `n_items` untagged news rows."""
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
+    reset_settings_cache()
+    from brvm.services import llm as llm_mod
+    from brvm.services import tagging as svc
 
-    import brvm.config as cfg
-
-    importlib.reload(cfg)
-    import brvm.services.llm as llm_mod
-    import brvm.services.tagging as svc
-
-    importlib.reload(llm_mod)
-    importlib.reload(svc)
+    llm_mod.reset_client()
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -160,7 +156,8 @@ def test_pass_aborts_after_consecutive_failures(monkeypatch, tmp_path):
 
 def test_no_api_key_is_a_warning_not_a_crash(monkeypatch, tmp_path):
     _db, svc = _setup(monkeypatch, tmp_path, n_items=3)
-    monkeypatch.setattr(svc.settings, "anthropic_api_key", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    reset_settings_cache()
 
     counts = svc.tag_pending(batch_size=2)
 

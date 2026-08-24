@@ -9,6 +9,10 @@ from brvm import __version__
 from brvm.apps.web import tabs
 from brvm.apps.web._common import base_ctx, templates
 from brvm.clock import is_market_open, utc_iso
+from brvm.config import settings
+from brvm.services import (
+    alerts as alerts_svc,
+)
 from brvm.services import company, directory, fundamentals, market, ratios, watchlist
 from brvm.services import news as news_svc
 
@@ -158,6 +162,20 @@ def watchlist_page(request: Request, slug: str):
             "wl": wl,
             "market_open": is_market_open(),
             "generated_utc": utc_iso(),
+        },
+    )
+
+
+@router.get("/alerts", response_class=HTMLResponse)
+def alerts_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "alerts.html",
+        {
+            **base_ctx(),
+            "rules": alerts_svc.list_rules(),
+            "events": alerts_svc.list_recent_events(limit=25),
+            "has_discord": settings.has_discord,
         },
     )
 

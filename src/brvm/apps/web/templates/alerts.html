@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Alerts · brvm-terminal{% endblock %}
+{% block content %}
+  <h1 class="page-title">Alerts</h1>
+
+  <p class="dim" style="margin: -4px 0 16px;">
+    Rules evaluate every 15 min during market hours, hourly otherwise.
+    Fired events land in the queue below and get pushed to Discord within
+    ~5 min when <code>DISCORD_WEBHOOK_URL</code> is configured.
+    {% if not has_discord %}
+      <span class="badge closed" style="margin-left: 8px;">no webhook</span>
+    {% endif %}
+  </p>
+
+  <h2 class="section-title">Rules</h2>
+  <div id="alert-rules-wrap">
+    {% include "_frag/alerts_rules.html" %}
+  </div>
+
+  <form class="alert-new"
+        hx-post="/_frag/alerts/rules"
+        hx-target="#alert-rules-wrap"
+        hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) this.reset()">
+    <h3 class="section-title" style="margin-top: 24px;">Add a rule</h3>
+    <div class="alert-fields">
+      <label>
+        Kind
+        <select name="kind" required
+                hx-on:change="document.querySelectorAll('.kind-fields').forEach(el=>el.hidden=el.dataset.kind!==this.value)">
+          <option value="price_move">price_move</option>
+          <option value="new_filing">new_filing</option>
+          <option value="news">news</option>
+        </select>
+      </label>
+      <label>
+        Ticker <span class="dim">(blank = any)</span>
+        <input type="text" name="ticker" maxlength="8"
+               placeholder="SNTS" style="text-transform: uppercase;">
+      </label>
+      <label>
+        Label <span class="dim">(optional)</span>
+        <input type="text" name="label" maxlength="60"
+               placeholder="e.g. Sonatel big moves">
+      </label>
+    </div>
+
+    <div class="kind-fields" data-kind="price_move">
+      <label>
+        Threshold %
+        <input type="number" name="threshold_pct" min="0.1" max="50" step="0.1"
+               value="5.0">
+        <span class="dim">fires on |day change| ≥ threshold</span>
+      </label>
+    </div>
+
+    <div class="kind-fields" data-kind="new_filing" hidden>
+      <label>
+        Doc types <span class="dim">(CSV, blank = any)</span>
+        <input type="text" name="doc_types"
+               placeholder="rapport_annuel,etats_financiers">
+      </label>
+    </div>
+
+    <div class="kind-fields" data-kind="news" hidden>
+      <label>
+        Min relevance
+        <input type="number" name="min_relevance" min="0" max="10" step="1"
+               value="7">
+      </label>
+    </div>
+
+    <button type="submit">Add rule</button>
+  </form>
+
+  <h2 class="section-title" style="margin-top: 32px;">Recent events</h2>
+  <div id="alert-events-wrap">
+    {% include "_frag/alerts_events.html" %}
+  </div>
+{% endblock %}

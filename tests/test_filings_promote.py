@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 from datetime import date
 
 import pytest
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import Filing, NewsItem, Security
 from brvm.sources._dedupe import news_hash
@@ -164,12 +164,8 @@ def _fresh_svc(tmp_path, monkeypatch):
     filings_dir = tmp_path / "filings"
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("FILINGS_ROOT", str(filings_dir))
-
-    import brvm.config as cfg
-    import brvm.services.filings as svc
-
-    importlib.reload(cfg)
-    importlib.reload(svc)
+    reset_settings_cache()
+    from brvm.services import filings as svc
     return svc, db_path, filings_dir
 
 

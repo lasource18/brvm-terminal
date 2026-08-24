@@ -7,12 +7,12 @@ they're the risky part. Everything else is bookkeeping.
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import httpx
 import pytest
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import Security
 from brvm.services import company_facts
@@ -87,11 +87,8 @@ def test_parse_market_cap_xof(raw, expected):
 def _fresh(monkeypatch, tmp_path: Path):
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    import brvm.config as cfg
-    import brvm.services.company_facts as svc
-
-    importlib.reload(cfg)
-    importlib.reload(svc)
+    reset_settings_cache()
+    from brvm.services import company_facts as svc
     return svc, db_path
 
 
