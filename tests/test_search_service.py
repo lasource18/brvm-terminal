@@ -7,17 +7,14 @@ from brvm.store import securities as sec_repo
 
 @pytest.fixture
 def search_env(monkeypatch, tmp_path):
-    import importlib
     from pathlib import Path
 
-    import brvm.config as cfg
+    from brvm.config import reset_settings_cache
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    importlib.reload(cfg)
-    import brvm.services.search as search_mod
-
-    importlib.reload(search_mod)
+    reset_settings_cache()
+    from brvm.services import search as search_mod
 
     root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
@@ -36,8 +33,7 @@ def search_env(monkeypatch, tmp_path):
             ],
         )
     yield search_mod
-    importlib.reload(cfg)
-    importlib.reload(search_mod)
+    reset_settings_cache()
 
 
 def test_exact_ticker_beats_prefix(search_env):

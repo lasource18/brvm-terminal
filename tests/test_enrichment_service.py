@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
 
 import pytest
 
+from brvm.config import reset_settings_cache
 from brvm.db import connect, ensure_migrations_table
 from brvm.models import Security
 from brvm.store import securities as sec_repo
@@ -14,14 +14,10 @@ from brvm.store import securities as sec_repo
 
 @pytest.fixture
 def enrich_env(monkeypatch, tmp_path):
-    import brvm.config as cfg
-
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    importlib.reload(cfg)
-    import brvm.services.enrichment as enrich_mod
-
-    importlib.reload(enrich_mod)
+    reset_settings_cache()
+    from brvm.services import enrichment as enrich_mod
 
     root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
@@ -45,8 +41,7 @@ def enrich_env(monkeypatch, tmp_path):
             ],
         )
     yield db_path, enrich_mod
-    importlib.reload(cfg)
-    importlib.reload(enrich_mod)
+    reset_settings_cache()
 
 
 def test_list_missing_sector_only_equities_without_sector(enrich_env):

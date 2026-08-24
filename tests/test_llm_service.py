@@ -168,7 +168,10 @@ def test_tag_batch_on_empty_input_makes_no_call():
 
 
 def test_get_client_without_key_raises_llm_unavailable(monkeypatch):
+    from brvm.config import reset_settings_cache
+
     llm.reset_client()
-    monkeypatch.setattr(llm.settings, "anthropic_api_key", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    reset_settings_cache()
     with pytest.raises(llm.LLMUnavailable, match="ANTHROPIC_API_KEY"):
         llm.get_client()

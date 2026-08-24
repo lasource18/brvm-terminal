@@ -7,21 +7,12 @@ from brvm.store import securities as sec_repo
 
 @pytest.fixture
 def company_env(monkeypatch, tmp_path):
-    import importlib
-
-    import brvm.config as cfg
+    from brvm.config import reset_settings_cache
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    importlib.reload(cfg)
-    # Phase 4d: company_mod now imports the ratios service, which caches
-    # its own `settings` reference at import time. Reload it too so
-    # `get_peers_with_ratios` sees the tmp_path DB.
-    import brvm.services.company as company_mod
-    import brvm.services.ratios as ratios_mod
-
-    importlib.reload(ratios_mod)
-    importlib.reload(company_mod)
+    reset_settings_cache()
+    from brvm.services import company as company_mod
 
     with connect(db_path) as conn:
         # Apply the full migration set — new tabs (Phase 4d Peers-with-
@@ -34,8 +25,8 @@ def company_env(monkeypatch, tmp_path):
         )
     company_mod.clear_cache()
     yield company_mod
-    importlib.reload(cfg)
-    importlib.reload(company_mod)
+    company_mod.clear_cache()
+    reset_settings_cache()
 
 
 def test_sikafinance_success_path(company_env, monkeypatch):

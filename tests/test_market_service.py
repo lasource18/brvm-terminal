@@ -3,19 +3,21 @@ from pathlib import Path
 
 import pytest
 
-from brvm.db import connect, ensure_migrations_table
+from brvm.db import connect
 from brvm.models import IndexLevel, Quote, Security
 from brvm.store import quotes as quotes_repo
 from brvm.store import securities as sec_repo
 
+from .conftest import apply_migrations
+
 
 def _seed(db_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        conn.executescript((root / "migrations" / "0001_init.sql").read_text())
-        conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
-        conn.commit()
+        # Full migration set — Phase 3c's `market.overview()` reaches into
+        # corporate_actions (introduced in 0003), so an 0001+0002-only seed
+        # would break the overview test. Historically this test relied on
+        # leaky module-singleton state to paper over the mismatch.
+        apply_migrations(conn)
         sec_repo.upsert(
             conn,
             [
@@ -54,27 +56,17 @@ def _seed(db_path: Path) -> None:
 
 @pytest.fixture
 def db(monkeypatch, tmp_path):
-    """Point services at a fresh tmp DB by monkeypatching the settings module."""
-    import importlib
-
-    import brvm.config as cfg
+    """Point services at a fresh tmp DB via env + settings-cache reset.
+    The lazy proxy in `brvm.config` re-reads env on the next attribute
+    access, so no module reload is needed."""
+    from brvm.config import reset_settings_cache
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    importlib.reload(cfg)
-    # Reload service modules that captured the settings object at import.
-    import brvm.services.market as market_mod
-    import brvm.services.watchlist as wl_mod
-
-    importlib.reload(market_mod)
-    importlib.reload(wl_mod)
-
+    reset_settings_cache()
     _seed(db_path)
     yield db_path
-
-    importlib.reload(cfg)
-    importlib.reload(market_mod)
-    importlib.reload(wl_mod)
+    reset_settings_cache()
 
 
 def test_top_by_turnover(db):
