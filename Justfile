@@ -60,8 +60,10 @@ filings-pull:
 
 # Phase 4b: extract structured fundamentals from unprocessed annual filings.
 # Respects the $2/day cap (LLM_EXTRACT_DAILY_CAP_CENTS).
+# Optional LIMIT=<n> just fundamentals-extract  → cap filings considered
+# this pass. Default 200; the budget cap is still the real gate on spend.
 fundamentals-extract:
-    uv run python -m brvm.jobs.fundamentals_extract --once
+    uv run python -m brvm.jobs.fundamentals_extract --once {{ if env_var_or_default("LIMIT", "") == "" { "" } else { "--limit " + env_var("LIMIT") } }}
 
 # Same, without spending anything: shows what would be sent and the estimated cost.
 fundamentals-extract-dry:

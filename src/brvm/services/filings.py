@@ -103,54 +103,86 @@ def _split_root_country(name: str) -> tuple[str, str | None]:
     return " ".join(tokens), None
 
 
-def _load_name_index(
-    conn: sqlite3.Connection,
-) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
-    """Return two indexes:
+# Manual brvm.org slug → ticker overrides for issuers the fuzzy matcher
+# can't reach. These are typically rename cases (BOLLORE → AGL), missing-
+# space cases (PALM CI vs PALMCI), or abbreviated slugs whose display name
+# doesn't share tokens with the sikafinance-based `securities.name`
+# (BICI CI vs BICICI, LNB vs LOTERIE NATIONALE DU BENIN).
+#
+# Add here rather than as SQL overrides so the mapping stays in code
+# review and travels with the repo; the operator can still override via
+# `UPDATE filing_source_slugs SET ticker=…` for one-off exceptions.
+_MANUAL_SLUG_ALIASES: dict[str, str] = {
+    # brvm.org slug (lowercase, hyphenated)      → ticker in securities
+    "bici-ci":                          "BICC",   # BICICI
+    "bollore-transport-logistics":      "SDSC",   # renamed to Africa Global Logistics
+    "cfao-motors-ci":                   "CFAC",   # CFAO CI
+    "ecobank-tg":                       "ETIT",   # ETI TG
+    "lnb":                              "LNBB",   # Loterie Nationale du Bénin
+    "palm-ci":                          "PALC",   # PALMCI (no space)
+    "sgb-ci":                           "SGBC",   # SGBCI (no space)
+    "sib":                              "SIBC",   # Société Ivoirienne de Banque
+    "totalenergies-marketing-sn":       "TTLS",   # TOTAL SENEGAL
+    "tractafric-ci":                    "PRSC",   # Tractafric Motors CI
+}
 
-    * `name_idx`: full-normalized-name → ticker (matches the news module).
-    * `root_iso_idx`: (root, iso_country) → ticker (added for brvm.org
-      where names carry a suffix like " BN" that sikafinance writes as
-      " BENIN" or " BJ").
 
-    Both are keyed via `setdefault` so a duplicate name doesn't quietly
-    reassign an earlier ticker.
+@dataclass(frozen=True)
+class _NameIndex:
+    """Bundles the three lookup tables the resolver needs. Kept as a small
+    dataclass rather than a tuple so a future add (e.g. ISIN) doesn't need
+    to sweep every callsite."""
+
+    by_name: dict[str, str]                       # normalized name -> ticker
+    by_ticker: dict[str, str]                     # ticker -> ticker (identity)
+    by_root_iso: dict[tuple[str, str], str]       # (root, iso country) -> ticker
+
+
+def _load_name_index(conn: sqlite3.Connection) -> _NameIndex:
+    """Build the three lookup tables from `securities`.
+
+    * `by_name` catches display names that match a listed name outright
+      ("BANK OF AFRICA BURKINA FASO" → BOABF).
+    * `by_ticker` catches slugs whose display name IS the ticker itself
+      ("NSBC" → NSBC — brvm.org occasionally shows just the code).
+    * `by_root_iso` bridges brvm.org's short country suffixes ("BN"/"NG")
+      against sikafinance's ISO alpha-2 ("BJ"/"NE") or expanded names.
     """
-    name_idx: dict[str, str] = {}
-    root_iso_idx: dict[tuple[str, str], str] = {}
+    by_name: dict[str, str] = {}
+    by_ticker: dict[str, str] = {}
+    by_root_iso: dict[tuple[str, str], str] = {}
     rows = conn.execute(
         "SELECT ticker, name, country FROM securities WHERE kind='equity'"
     )
     for r in rows:
-        n = _normalize(r["name"])
-        name_idx.setdefault(n, r["ticker"])
-        root, iso = _split_root_country(n)
+        by_name.setdefault(_normalize(r["name"]), r["ticker"])
+        by_ticker.setdefault(_normalize(r["ticker"]), r["ticker"])
+        root, iso = _split_root_country(_normalize(r["name"]))
         if not iso and r["country"]:
             iso = _ALIAS_TO_ISO.get(_normalize(r["country"]))
         if iso and root:
-            root_iso_idx.setdefault((root, iso), r["ticker"])
-    return name_idx, root_iso_idx
+            by_root_iso.setdefault((root, iso), r["ticker"])
+    return _NameIndex(by_name=by_name, by_ticker=by_ticker, by_root_iso=by_root_iso)
 
 
-def _fuzzy_resolve(
-    name_idx: dict[str, str],
-    root_iso_idx: dict[tuple[str, str], str],
-    display_name: str,
-) -> str | None:
+def _fuzzy_resolve(indexes: _NameIndex, display_name: str) -> str | None:
     """Match a display name against `securities`. Tries, in order:
-    exact full-name; (root, ISO country) index; bidirectional starts-with
-    over the full-name index (kept for the news-shape 'SGBCI' vs
-    'SOCIETE GENERALE CI' cases).
+    exact full-name; ticker match (for brvm.org rows whose display name
+    IS the ticker, e.g. 'NSBC'); (root, ISO country) index; bidirectional
+    starts-with over the full-name index (kept for the news-shape 'SGBCI'
+    vs 'SOCIETE GENERALE CI' cases).
     """
     key = _normalize(display_name)
     if not key:
         return None
-    if hit := name_idx.get(key):
+    if hit := indexes.by_name.get(key):
+        return hit
+    if hit := indexes.by_ticker.get(key):
         return hit
     root, iso = _split_root_country(display_name)
-    if iso and (hit := root_iso_idx.get((root, iso))):
+    if iso and (hit := indexes.by_root_iso.get((root, iso))):
         return hit
-    for full, tk in name_idx.items():
+    for full, tk in indexes.by_name.items():
         if full.startswith(key) or key.startswith(full):
             return tk
     return None
@@ -162,10 +194,16 @@ def resolve_ticker(
     slug: str,
     display_name: str,
     *,
-    indexes: tuple[dict[str, str], dict[tuple[str, str], str]] | None = None,
+    indexes: _NameIndex | None = None,
 ) -> str | None:
     """Look up (source, slug) → ticker. Persists the outcome so a fuzzy
     match runs once per slug, not once per poll.
+
+    Resolution order:
+    1. Persisted `filing_source_slugs` row (with or without a ticker)
+    2. `_MANUAL_SLUG_ALIASES` — hand-mapped renames + slug-vs-name
+       mismatches that the fuzzy matcher can't reach
+    3. Fuzzy match against `securities`
 
     Returns None if the slug can't be mapped to a known security. A
     subsequent call with the same slug will hit the persisted NULL and
@@ -173,11 +211,19 @@ def resolve_ticker(
     `UPDATE filing_source_slugs SET ticker=...`).
     """
     known = slugs_repo.get(conn, source, slug)
-    if known is not None:
+    if known is not None and known["ticker"] is not None:
+        # Persisted resolution wins; a persisted NULL is treated as
+        # "still unknown" and falls through to the alias table so a new
+        # alias can rescue previously-unresolved slugs on the next poll.
         return known["ticker"]
 
-    name_idx, root_iso_idx = indexes or _load_name_index(conn)
-    ticker = _fuzzy_resolve(name_idx, root_iso_idx, display_name)
+    ticker: str | None = None
+    if source == "brvm_org":
+        ticker = _MANUAL_SLUG_ALIASES.get(slug)
+    if ticker is None:
+        idx = indexes or _load_name_index(conn)
+        ticker = _fuzzy_resolve(idx, display_name)
+
     slugs_repo.remember(
         conn,
         source,
@@ -621,7 +667,7 @@ def promote_from_communiques(
     db_path = Path(settings.db_path)
     try:
         with connect(db_path) as conn:
-            name_idx, root_iso_idx = _load_name_index(conn)
+            indexes = _load_name_index(conn)
             known_tickers = {
                 r[0] for r in conn.execute("SELECT ticker FROM securities").fetchall()
             }
@@ -635,7 +681,7 @@ def promote_from_communiques(
                     continue
 
                 ticker = row["ticker_hint"] or _fuzzy_resolve(
-                    name_idx, root_iso_idx, row["issuer_name"] or "",
+                    indexes, row["issuer_name"] or "",
                 )
                 if ticker is None or ticker not in known_tickers:
                     counts["unresolved_ticker"] += 1
