@@ -87,6 +87,98 @@
           {% endfor %}
         </tbody>
       </table>
+
+      {% if interim_ratios and interim_ratios.has_any %}
+        <div class="dim" style="margin: 10px 0 6px;">Interim ratios (period-to-date)</div>
+        <table class="quotes">
+          <thead>
+            <tr><th>METRIC</th><th>{{ interim_ratios.period_kind }} {{ interim_ratios.period_year }}</th></tr>
+          </thead>
+          <tbody>
+            {# Interim card shows only ratios that make sense on a period-
+               to-date basis: margins + ROE. Valuation multiples and YoY
+               growth are omitted because the numerator/denominator would
+               mix half-year and full-year figures. #}
+            {% for label, r in [
+                ('Net margin', interim_ratios.net_margin),
+                ('Operating margin', interim_ratios.operating_margin),
+                ('ROE', interim_ratios.roe),
+              ] %}
+              {% if r %}
+                <tr title="{{ r.provenance }}">
+                  <td>{{ label }}</td>
+                  <td>
+                    {% if r.unit == 'pct' %}{{ "{:,.2f}%".format(r.value) }}
+                    {% else %}{{ "{:,.2f}x".format(r.value) }}{% endif %}
+                  </td>
+                </tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if ratios_series and ratios_series[0].has_any %}
+    {% set ratio_rows = [
+        ('P/E',              'pe',                 'x'),
+        ('P/B',              'pb',                 'x'),
+        ('P/S',              'ps',                 'x'),
+        ('Dividend yield',   'dividend_yield',     'pct'),
+        ('Payout ratio',     'payout_ratio',       'pct'),
+        ('Earnings yield',   'earnings_yield',     'pct'),
+        ('ROE',              'roe',                'pct'),
+        ('ROA',              'roa',                'pct'),
+        ('Net margin',       'net_margin',         'pct'),
+        ('Operating margin', 'operating_margin',   'pct'),
+        ('Revenue growth (YoY)',    'revenue_growth',    'pct'),
+        ('Net income growth (YoY)', 'net_income_growth', 'pct'),
+        ('EPS growth (YoY)',        'eps_growth',        'pct'),
+        ('Financial leverage', 'financial_leverage', 'x'),
+        ('Equity ratio',       'equity_ratio',       'pct'),
+      ] %}
+    <div style="margin-top: 16px;">
+      <div class="dim" style="margin-bottom: 8px;">
+        Ratios · annual · price from latest snapshot
+        {% if ratios_series[0].price is not none %}
+          (last {{ "{:,.0f}".format(ratios_series[0].price) }})
+        {% endif %}
+        {% if ratios_series[0].currency_mismatch %}
+          · <span class="warn">currency mismatch — price-based ratios suppressed</span>
+        {% endif %}
+      </div>
+      <table class="quotes">
+        <thead>
+          <tr>
+            <th>METRIC</th>
+            {% for view in ratios_series %}<th>{{ view.period_year }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for label, key, _unit in ratio_rows %}
+            {# Skip rows where no period could compute this ratio — keeps
+               the table dense for issuers with sparse data. #}
+            {% set values = ratios_series | map(attribute=key) | list %}
+            {% if values | select | list %}
+              <tr>
+                <td>{{ label }}</td>
+                {% for r in values %}
+                  <td {% if r %}title="{{ r.provenance }}"{% endif %}>
+                    {% if r is none or r.value is none %}
+                      <span class="dim">—</span>
+                    {% elif r.unit == 'pct' %}
+                      {{ "{:,.2f}%".format(r.value) }}
+                    {% else %}
+                      {{ "{:,.2f}x".format(r.value) }}
+                    {% endif %}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   {% endif %}
 </div>

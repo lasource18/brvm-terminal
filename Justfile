@@ -74,3 +74,9 @@ fundamentals-extract-dry:
 # (brew install ocrmypdf tesseract-lang).
 filings-ocr:
     uv run python -m brvm.jobs.filings_ocr --once
+
+# Phase 4d: refresh sikafinance-sourced company facts (shares outstanding,
+# float %, market cap) that the ratios engine uses. Runs weekly on the
+# scheduler; use this to trigger a manual pass.
+company-refresh:
+    uv run python -m brvm.jobs.company_refresh --once

@@ -89,3 +89,81 @@ def update_sector(conn: sqlite3.Connection, ticker: str, sector: str) -> None:
         "UPDATE securities SET sector = ? WHERE ticker = ?", (sector, ticker)
     )
     conn.commit()
+
+
+# --------------------------------------------------------------------------
+# Company facts (Phase 4d — feeds the ratios engine)
+# --------------------------------------------------------------------------
+
+
+def update_company_facts(
+    conn: sqlite3.Connection,
+    ticker: str,
+    *,
+    shares_outstanding: int | None = None,
+    float_pct: float | None = None,
+    market_cap_xof: float | None = None,
+    commit: bool = True,
+) -> None:
+    """Stamp the sikafinance-sourced company facts on `securities`.
+
+    `COALESCE(?, existing)` on every field so a partial refresh (e.g.
+    sikafinance stopped publishing `float_pct` for one issuer) doesn't
+    clobber a value we already had. `company_facts_refreshed_utc` is
+    always bumped so the weekly refresh job can gate on freshness.
+    """
+    conn.execute(
+        """
+        UPDATE securities SET
+            shares_outstanding = COALESCE(?, shares_outstanding),
+            float_pct          = COALESCE(?, float_pct),
+            market_cap_xof     = COALESCE(?, market_cap_xof),
+            company_facts_refreshed_utc = ?
+        WHERE ticker = ?
+        """,
+        (shares_outstanding, float_pct, market_cap_xof, utc_iso(), ticker),
+    )
+    if commit:
+        conn.commit()
+
+
+def list_stale_company_facts(
+    conn: sqlite3.Connection,
+    *,
+    max_age_days: int = 7,
+    limit: int = 200,
+) -> list[sqlite3.Row]:
+    """Equity rows whose company facts are missing or older than
+    `max_age_days`. Used by the weekly refresh job — one row per active
+    equity."""
+    return list(
+        conn.execute(
+            """
+            SELECT ticker, name, country
+            FROM securities
+            WHERE kind = 'equity' AND active = 1
+              AND (company_facts_refreshed_utc IS NULL
+                   OR julianday('now') - julianday(company_facts_refreshed_utc) > ?)
+            ORDER BY ticker
+            LIMIT ?
+            """,
+            (max_age_days, limit),
+        ).fetchall()
+    )
+
+
+def get_company_facts(
+    conn: sqlite3.Connection, ticker: str
+) -> sqlite3.Row | None:
+    """Read the four company-facts columns for one ticker. Returns None
+    if the ticker isn't in `securities` at all (so the caller can tell
+    'no row' apart from 'row exists but not yet refreshed')."""
+    return conn.execute(
+        """
+        SELECT ticker, shares_outstanding, float_pct, market_cap_xof,
+               company_facts_refreshed_utc
+        FROM securities
+        WHERE ticker = ?
+        """,
+        (ticker,),
+    ).fetchone()

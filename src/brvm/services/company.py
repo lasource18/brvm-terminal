@@ -14,6 +14,7 @@ from threading import Lock
 from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
+from brvm.services import ratios as ratios_svc
 from brvm.services._view import CompanyProfile, PeerRow, PeersView, Shareholder
 from brvm.sources import afx_kwayisi, sikafinance
 
@@ -180,3 +181,39 @@ def clear_cache() -> None:
     with _lock:
         _desc_cache.clear()
         _peers_cache.clear()
+
+
+def _annotate_with_ratios(peers: list[PeerRow]) -> list[PeerRow]:
+    """Attach P/E, ROE, net margin to each peer row.
+
+    Called on Peers-tab render; each ticker triggers one small SQL query
+    (list_financials LIMIT 2 + latest quote + company_facts). At ~5 peers
+    per sector this stays well under 10ms. Missing ratios leave the field
+    as None so the template renders '—'."""
+    for p in peers:
+        view = ratios_svc.get_latest_ratios(p.ticker)
+        if view is None:
+            continue
+        if view.pe:
+            p.pe = view.pe.value
+        if view.roe:
+            p.roe = view.roe.value
+        if view.net_margin:
+            p.net_margin = view.net_margin.value
+    return peers
+
+
+def get_peers_with_ratios(ticker: str) -> PeersView:
+    """`get_peers` plus a ratio annotation pass on every returned peer.
+
+    The peers-cache TTL (60 min) still applies to the sector membership
+    lookup — the ratio annotation runs on every request because prices
+    (and therefore P/E) move intraday."""
+    view = get_peers(ticker)
+    # Copy so we don't mutate the cached PeersView shared across requests.
+    annotated = PeersView(
+        sector=view.sector,
+        source=view.source,
+        peers=_annotate_with_ratios([p.model_copy() for p in view.peers]),
+    )
+    return annotated

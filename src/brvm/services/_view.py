@@ -133,6 +133,13 @@ class PeerRow(BaseModel):
     change_ytd_pct: float | None = None
     volume: int | None = None
     market_cap: float | None = None
+    # Phase 4d — headline ratios for cross-ticker comparison. Sourced from
+    # `services/ratios.get_latest_ratios(ticker)`; None when the peer
+    # hasn't been through fundamentals extraction yet (or when the ratio
+    # couldn't be computed for the usual missing-data reasons).
+    pe: float | None = None
+    roe: float | None = None            # percentage points, e.g. 12.3
+    net_margin: float | None = None     # percentage points
 
 
 class PeersView(BaseModel):

@@ -19,6 +19,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 4a — fundamentals (filings corpus + storage)
 - [x] Phase 4b — fundamentals (Haiku extraction + Financials/Ownership/Segments tabs)
 - [x] Phase 4c — fundamentals (OCR + interim extraction + sikafinance-communiqué fallback)
+- [x] Phase 4d — fundamentals (financial ratios on the Financials + Peers tabs)
 - [ ] Phase 5 — TUI
 - [ ] Phase 6 — alerts + daily brief + analyst-note synthesis
 
@@ -224,6 +225,35 @@ Guarantees:
 OCR runs daily on the scheduler at 02:00 Africa/Abidjan
 (`filings_ocr_daily`), one hour ahead of the extractor so newly-text-
 layered filings land in the same night's cycle.
+
+## Try it (Phase 4d demo — financial ratios)
+
+Phase 4d turns the extracted `financials` rows into ratios (P/E, P/B,
+P/S, dividend yield, payout, ROE, ROA, margins, YoY growth, financial
+leverage, equity ratio) and renders them on:
+
+- **`/s/{TICKER}/financials`** — a Ratios table under the annual
+  financials, plus a small interim-ratios block (net margin, operating
+  margin, ROE) under the interim card.
+- **`/s/{TICKER}/peers`** — new P/E / ROE / net-margin columns for
+  cross-ticker comparison in the same sector.
+
+Ratios need `securities.shares_outstanding` (fetched from
+sikafinance). Refresh it weekly:
+
+```bash
+just company-refresh   # walk stale rows, hit sikafinance societe pages
+just dev               # /s/SNTS/financials → Ratios block + Peers with P/E
+```
+
+The runner is polite (0.5s between requests) and idempotent within a
+week — a rerun within `OCR_MAX_AGE_DAYS` (default 7) is a no-op.
+Runs automatically on the scheduler every Sunday at 04:30 Africa/Abidjan
+(`company_facts_refresh_weekly`).
+
+**Deferred**: P/FCF, FCF yield, and EV/EBITDA are on the backlog — they
+need cash-flow (`cash_flow_ops`, `capex`) added to the extractor first.
+See `docs/phases.md` for the Phase 4d writeup.
 
 ## Try it (Phase 1 demo)
 

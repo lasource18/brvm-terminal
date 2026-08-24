@@ -16,6 +16,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
 | 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
 | 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | done | 2026-08-23 |
+| 4d | Fundamentals — financial ratios on the Financials + Peers tabs | in progress | — |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
 
@@ -26,6 +27,13 @@ when we pick it up):
   different page and no parser exists yet. `SecurityKind` already allows
   `"bond"`; needs a source survey + parser + `kind="bond"` branch. Flag
   raised in Phase 1's notes.
+- **Cash-flow extraction (unlocks P/FCF, FCF yield, EV/EBITDA).** Phase
+  4d ships every ratio computable from the current P&L + balance-sheet
+  extract. Adding `cash_flow_ops`, `capex`, and a derived
+  `free_cash_flow` to `services/extraction` + `financials` unlocks the
+  cash-flow-adjacent ratios and a proper EV multiple. One-off Haiku
+  re-run against the ~200 extracted filings; keeps the same $2/day cap.
+  Flagged in 4d's writeup.
 - **Palmarès parser + BOC row extraction.** Deferred from Phase 1.
 - **`hx-push-url` on the `/news` filter form** so filtered views become
   shareable links. Small polish, not currently needed.
@@ -849,6 +857,124 @@ Closes the three coverage holes 4b's live pass surfaced:
   and `services.ocr` (16 modules). The refactor-to-injected-settings
   threshold flagged in 2.5's notes is now crossed; keeping it on the
   list explicitly for the next phase.
+
+---
+
+## Phase 4d — Fundamentals — financial ratios (in progress)
+
+Turns the P&L + balance-sheet rows shipped in 4b/4c into ratios the UI
+and (in Phase 6) the analyst-note prompt can reason about. No LLM calls,
+no schema for the ratios themselves — computed on demand from the
+existing `financials` table, the latest `quote_snapshots.last`, and a
+small `securities` extension for `shares_outstanding` / `float_pct` /
+`market_cap_xof`.
+
+**Delivered**
+
+- **Migration `0008_company_facts.sql`** — extends `securities` with
+  `shares_outstanding`, `float_pct`, `market_cap_xof`, and
+  `company_facts_refreshed_utc`. Kept on `securities` rather than a
+  new `company_facts` table because the relationship is strictly 1:1
+  per ticker and the ratios engine reads all four values via one
+  `SELECT`.
+- **`services/ratios.py`** — pure ratio math split by category:
+  * **Valuation** — P/E, P/B, P/S, dividend yield, payout ratio,
+    earnings yield. Price-based ratios flip to `None` when
+    `financials.currency != quote_snapshots` price currency (XOF by
+    convention here; EUR/USD comparatives from a few issuers otherwise
+    would produce a bogus multiple).
+  * **Profitability** — ROE, ROA, net margin, operating margin.
+  * **Growth (annual only)** — revenue / net-income / EPS YoY,
+    computed against the *immediately-prior period of the same kind*.
+    A Q1→annual comparison returns None rather than mixing
+    period-to-date with full-year.
+  * **Leverage** — financial leverage (`total_assets / total_equity`),
+    equity ratio.
+  Each ratio is wrapped in a `Ratio(value, provenance, unit)` dataclass
+  so the template can show a "how this was computed" tooltip and the
+  Phase 6 analyst prompt can quote the arithmetic back to the reader.
+- **`services/company_facts.py` + `just company-refresh`** — one-shot
+  refresh of the sikafinance societe page for every stale equity.
+  Parses `"100 000 000"` → int, `"22,47%"` → float, `"3 440 000 MFCFA"`
+  → 3.44 trillion XOF. Idempotent within `max_age_days` (default 7);
+  stamps `company_facts_refreshed_utc` even on `no_data` rows so a
+  totally-empty issuer isn't refetched every week.
+- **Scheduler** — `company_facts_refresh_weekly` (Sun 04:30 Abidjan,
+  right after the sector job) so the ratios engine's inputs stay
+  fresh without manual intervention.
+- **Financials tab** — new Ratios table under the annual financials
+  (one row per ratio, one column per period, dense — rows with no
+  values across any period are hidden). Plus a compact interim-ratio
+  block under the "Latest interim" card: net margin, operating margin,
+  ROE only, because valuation and YoY growth on a period-to-date figure
+  would mislead more than inform.
+- **Peers tab** — three new columns (P/E, ROE, NET MARG) sourced from
+  `services.ratios.get_latest_ratios(peer.ticker)`. Missing values
+  render as "—" so a peer that hasn't been through fundamentals
+  extraction still lays out correctly. Titles on the `<th>` explain
+  each metric.
+- **`services/company.get_peers_with_ratios`** — the annotator the
+  pages route calls; keeps the peers cache untouched (60-min TTL on
+  sector membership) but computes ratios fresh on every render
+  because prices tick intraday.
+
+**Two invariants the tests pin**
+
+1. **Missing / zero divisor → None, never inf or NaN.**
+   `test_zero_divisor_never_produces_inf_or_nan` asserts this across
+   the whole ratio surface — the Financials tab must render "—" and
+   move on, not crash.
+2. **Growth ratios need same-kind prior.** An H1 next to an annual
+   prior returns None — mixing period-to-date and full-year figures
+   is worse than no signal.
+3. **Currency mismatch suppresses price ratios.** If a filing was
+   extracted with `currency='EUR'` but the price snapshot is in XOF,
+   P/E / P/B / P/S / earnings yield all come back as None with a
+   `currency_mismatch=True` flag the template surfaces to the user.
+
+**Definition of Done — met**
+
+- `just migrate` picks up `0008` idempotently on the live DB.
+- `just test` → **328 tests green** (36 new: ratio math edge cases,
+  currency-mismatch handling, growth-ratio same-kind gate, DB-facing
+  helpers over a seeded DB, `parse_shares` / `parse_float_pct` /
+  `parse_market_cap_xof` across nbsp + French-formatted inputs,
+  refresh idempotence, HTTP-failure survival, peers annotation
+  populating `pe`/`roe`/`net_margin` on peers with financials and
+  leaving them None on peers without). Ruff clean.
+- Live: SNTS's Financials tab renders the Ratios table alongside the
+  annual + interim tables; SNTS's Peers tab shows ORAC / ONTBF with
+  P/E / ROE / NET MARG when those peers have extracted financials.
+
+**Notes / follow-ups**
+
+- **P/FCF, FCF yield, EV/EBITDA** are deferred. They need a
+  `cash_flow_ops` + `capex` + derived `free_cash_flow` column on
+  `financials`, plus a re-run of the extractor over the ~200 already-
+  processed filings (call cost roughly comparable to the initial 4b
+  pass; well under the $2/day cap). Flagged in the backlog above.
+- **Currency-mismatch handling is coarse.** We treat every price as
+  XOF (which is true for BRVM equities) and only look at the
+  `financials.currency` column. An issuer that reports its cover in
+  XOF but drops EUR EPS figures inside the annexes would still flow
+  through the pipeline as `currency='XOF'` — the mismatch flag only
+  helps for the case where the extractor already normalised on the
+  reported currency.
+- **The Peers annotation is one SQL query per peer.** At ~5 peers per
+  sector this is fine; if the peers table ever gets much larger, the
+  annotation would want a single-query join through
+  `financials` + `quote_snapshots` + `securities` — kept as a
+  follow-up.
+- **Growth ratios walk the returned series in memory** rather than a
+  self-join. Simpler to reason about, and the series is at most 6
+  rows deep (5-year table + one buffer).
+- **`_RELOADABLE` in `tests/conftest.py` gains** `ratios` and
+  `company_facts` (18 modules). The "refactor toward injected
+  settings" flag from 2.5's notes is now overdue; carrying it into
+  the next phase.
+- **First real `just company-refresh` still pending** — expected to
+  populate `shares_outstanding` for the ~47 active equities, at which
+  point every P/E, P/B, P/S on the Financials tab lights up.
 
 ---
 
