@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     # root at write time; absolute paths are honoured as-is.
     filings_root: str = "./data/filings"
 
+    # --- OCR (Phase 4c) — scanned-PDF rescue via ocrmypdf. Free (CPU-only),
+    # so no daily cap, but do bound per-file time so a pathological PDF can't
+    # eat the whole night. Requires the `ocrmypdf` binary and tesseract with
+    # the French language pack (see README).
+    ocr_binary: str = "ocrmypdf"
+    ocr_languages: str = "fra+eng"
+    ocr_timeout_s: int = 600           # per-file wall-clock cap
+    ocr_max_pages: int = 400           # skip filings larger than this (heavy)
+    ocr_max_files_per_run: int = 20    # limit one pass to ~20 files (~1-2h)
+
     http_user_agent: str = Field(default="brvm-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 

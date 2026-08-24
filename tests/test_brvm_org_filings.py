@@ -140,16 +140,23 @@ def test_filings_upsert_dedupes_on_url_hash(tmp_db_path):
         assert filings_repo.exists_url_hash(conn, a.url_hash) is True
 
 
-def test_list_needing_extraction_defaults_to_annual_types(tmp_db_path):
+def test_list_needing_extraction_defaults_include_annual_and_interim(tmp_db_path):
+    """Phase 4c: the default set now includes `rapport_activites` so H1/Q1/Q3
+    reports are picked up. `rse`/`assemblee`/`autre` remain excluded."""
     _init_db(tmp_db_path)
     with connect(tmp_db_path) as conn:
         filings_repo.upsert_filings(conn, [
             _mk_filing("https://x/ef.pdf", doc_type="etats_financiers"),
             _mk_filing("https://x/ra.pdf", doc_type="rapport_annuel"),
             _mk_filing("https://x/act.pdf", doc_type="rapport_activites"),
+            _mk_filing("https://x/rse.pdf", doc_type="rse"),
+            _mk_filing("https://x/agm.pdf", doc_type="assemblee"),
+            _mk_filing("https://x/other.pdf", doc_type="autre"),
         ])
         rows = filings_repo.list_needing_extraction(conn)
-        assert {r["doc_type"] for r in rows} == {"etats_financiers", "rapport_annuel"}
+        assert {r["doc_type"] for r in rows} == {
+            "etats_financiers", "rapport_annuel", "rapport_activites",
+        }
 
 
 def test_slug_map_hit_miss_and_persisted_null(tmp_db_path):

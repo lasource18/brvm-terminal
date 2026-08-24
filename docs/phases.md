@@ -15,6 +15,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | done | 2026-08-21 |
 | 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
 | 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
+| 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | in progress | — |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
 
@@ -25,14 +26,6 @@ when we pick it up):
   different page and no parser exists yet. `SecurityKind` already allows
   `"bond"`; needs a source survey + parser + `kind="bond"` branch. Flag
   raised in Phase 1's notes.
-- **OCR / scanned-PDF handling.** Phase 4a records `is_scanned=NULL`;
-  4b will probe and set it, and skip scanned reports with a warning
-  rather than paying to send an image-only PDF to Haiku. A real OCR
-  pass (tesseract via `ocrmypdf`, then re-extract) is deferred.
-- **Interim / quarterly report extraction.** 4a downloads H1, Q1, Q3
-  filings but 4b only extracts annual reports (a manageable universe of
-  ~50/year). Adding interim extraction is a straight repeat of 4b once
-  we've proven the annual path.
 - **Palmarès parser + BOC row extraction.** Deferred from Phase 1.
 - **`hx-push-url` on the `/news` filter form** so filtered views become
   shareable links. Small polish, not currently needed.
@@ -726,6 +719,136 @@ Consumes the 4a corpus to fill the three placeholder tabs on `/s/{ticker}`.
 - Interim (H1/Q1/Q3) extraction stays on the backlog — a straight
   repeat of 4b's path once we've proven the annual pipeline against
   real Anthropic bills.
+
+---
+
+## Phase 4c — Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback (in progress)
+
+Closes the three coverage holes 4b's live pass surfaced:
+
+* Most 2025/2026 annual reports are image-only PDFs, so `is_scanned=1`
+  short-circuited them before Haiku got a look.
+* Interim reports (`rapport_activites`, ~60 filings in the current corpus)
+  were sitting in `filings` but excluded by 4b's doc-type gate.
+* brvm.org occasionally misses a filing that sikafinance publishes as a
+  `communiqué`. Nothing was promoting those to the corpus.
+
+**Delivered**
+
+- **Migration `0007_ocr.sql`** — adds `filings.ocr_attempted_utc TEXT` +
+  a partial index `ix_filings_pending_ocr` on
+  `(is_scanned=1 AND ocr_attempted_utc IS NULL)` so the nightly OCR
+  query touches only unresolved rows.
+- **`services/ocr.py`** — thin wrapper around the `ocrmypdf` CLI (via
+  `subprocess.run`, so a per-file timeout cleanly kills stray tesseract
+  processes). Injectable `runner` callable keeps the pipeline testable
+  without a real tesseract install. Handles the four operational cases:
+  success (rewrite the file, refresh sha256 + size + page_count), failure
+  (`nonzero_exit`, `timeout`, `no_output` → stamp attempt, leave
+  `is_scanned=1`), `already_ocr` (return code 6 — treat as success
+  because the file secretly had a text layer), and `OcrUnavailable`
+  (binary missing → abort the whole pass without stamping the untouched
+  tail so a rerun after `brew install` picks up where we left off).
+- **`store/filings.py`** — three new helpers keeping the OCR bookkeeping
+  in one place: `list_pending_ocr` (partial-index-backed),
+  `count_pending_ocr`, `apply_ocr_success` (flips `is_scanned=0` and
+  clears `extracted_utc` so the row re-enters `list_needing_extraction`
+  on the next pass), `apply_ocr_failure` (stamp only).
+- **`jobs/filings_ocr.py`** + `just filings-ocr` — one-shot demo. Prints
+  the same shape as `fundamentals-extract` (pending_before / considered
+  / ok / already_had_text / failed / missing_file / pending_after) with
+  a clear "install ocrmypdf" hint if the binary is missing.
+- **Scheduler** — `filings_ocr_daily` at 02:00 Abidjan, one hour ahead
+  of `fundamentals_extract_daily` so newly-OCR'd filings land in the
+  same night's extraction pass.
+- **Interim extraction wiring.** `list_needing_extraction` default
+  doc_types now include `rapport_activites` alongside `etats_financiers`
+  and `rapport_annuel` — that alone unlocks ~60 filings in the current
+  BOA sub-corpus. The system prompt gained explicit period-kind
+  guidance ("interim reports report period-to-date figures, not
+  annualised — return those as-is"; leave EPS/dividend_per_share null
+  for interims that don't state them; don't reach for the shareholder
+  register on activity reports). Storage was already keyed on
+  `(ticker, period_year, period_kind)` so no migration needed.
+- **Financials tab** — annual table stays as-is; a compact "Latest
+  interim" card renders below it when `get_latest_interim(ticker)`
+  finds an H1/Q1/Q3 row newer than the latest annual. Explicitly
+  labelled "period-to-date, not annualised" to keep casual readers
+  from mistaking it for a full-year figure. The helper hides the card
+  when the annual is already at least as new — mixing a stale H1 with
+  a fresh full-year would mislead more than inform.
+- **Sikafinance-communiqué fallback.** New in `services/filings.py`:
+  `classify_communique_title` (pure function, ordered patterns to keep
+  "rapport annuel" beating "rapport d'activités") and
+  `promote_from_communiques(client=None)`. Reads
+  `news_items[kind='communique', source='sikafinance']` via a LEFT JOIN
+  on `filings.source_url` so an already-promoted URL never re-enters
+  the loop, resolves the issuer through the same `(name, ISO country)`
+  index used by the brvm.org resolver, does a
+  `(ticker, doc_type, period_kind, period_year)` cross-source dedupe
+  against brvm.org before downloading, and stores files under
+  `data/filings/<TICKER>/sikafinance_<stem>.pdf` so a filename can't
+  collide with the brvm.org twin.
+- **`just filings-pull`** now runs the promotion step at the tail of
+  each pass; `--skip-promote` opts out for a plain brvm.org-only pull.
+
+**Two invariants the tests pin (OCR)**
+
+1. **Never re-OCR automatically.** Every filing handed to the runner
+   gets `ocr_attempted_utc` stamped, whether the pass ended in success,
+   `nonzero_exit`, `timeout`, or a missing-on-disk file. `OcrUnavailable`
+   is the one exception: nothing is stamped so a re-run after installing
+   the binary starts exactly where we stopped.
+2. **Success re-queues extraction.** `apply_ocr_success` clears
+   `extracted_utc` in the same UPDATE that flips `is_scanned=0`, so
+   the row falls back into `list_needing_extraction` on the next pass
+   — no cross-module signalling needed.
+
+**Definition of Done — met**
+
+- `just migrate` picks up `0007` idempotently.
+- `just test` → 292 tests green (44 new: OCR service ok/fail/timeout/
+  already-ocr/missing-binary/missing-file/page-cap, OCR repo helpers,
+  extraction default gate expansion, `get_latest_interim` behaviour,
+  sikafinance title classifier over 10 filing-worthy titles and
+  9 non-filings, promote end-to-end with a stubbed downloader,
+  cross-source dedupe, network-failure handling). Ruff clean.
+- Live demo shape unchanged: `just filings-pull` now emits a second
+  block ("filings promote (sikafinance)"); `just filings-ocr` runs the
+  nightly OCR sweep; `just fundamentals-extract` picks up interim +
+  newly-OCR'd rows automatically.
+
+**Notes / follow-ups**
+
+- **OCR toolchain is optional.** No Python-side dep on `ocrmypdf` (the
+  package pulls in a compiled tesseract at install time, which we don't
+  want to force on CI). The service shells out via `subprocess`; if the
+  binary isn't on PATH the pass sets `unavailable=1` and returns, and the
+  rest of the app is unaffected. This matches CLAUDE.md's
+  "graceful degradation" charter.
+- **OCR wall-clock budgeting.** `OCR_MAX_FILES_PER_RUN=20` and
+  `OCR_TIMEOUT_S=600` are conservative defaults — a 20×10-min slot is
+  roughly the 02:00→03:00 gap in the scheduler. If the real corpus turns
+  out to run faster, raise both; if a couple of pathological scans
+  routinely time out, lower `OCR_MAX_PAGES` (currently 400) to skip
+  them entirely.
+- **First live `just filings-ocr` still pending.** Once run, the ~21
+  scanned filings in the current BOA sub-corpus should get text layers,
+  re-enter the extractor queue, and populate the Financials tab for the
+  years where 4b's dry-run reported "scanned".
+- **Interim card is annual-first.** The card intentionally hides when the
+  annual for a given year is already extracted — a Q1 2025 sitting next
+  to a full-year 2025 is more distraction than signal.
+- **Sikafinance dedupe is by exact triple.** If sikafinance and brvm.org
+  disagree on `period_kind` for the same underlying filing (e.g. one
+  calls a 6-month report "2eme trimestre" and the other "1er
+  semestre"), the promoter would let both in. `classify_communique_title`
+  folds `Q2 → H1` on the sikafinance side to reduce that surface, but
+  the possibility remains.
+- `_RELOADABLE` in `tests/conftest.py` now covers `services.filings`
+  and `services.ocr` (16 modules). The refactor-to-injected-settings
+  threshold flagged in 2.5's notes is now crossed; keeping it on the
+  list explicitly for the next phase.
 
 ---
 

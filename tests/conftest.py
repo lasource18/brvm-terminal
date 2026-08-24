@@ -26,6 +26,8 @@ _RELOADABLE = (
     "brvm.services.tagging",
     "brvm.services.extraction",
     "brvm.services.fundamentals",
+    "brvm.services.filings",
+    "brvm.services.ocr",
     "brvm.apps.web.routes.pages",
     "brvm.apps.web.routes.fragments",
     "brvm.apps.web.routes.api",

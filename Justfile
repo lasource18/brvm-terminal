@@ -66,3 +66,9 @@ fundamentals-extract:
 # Same, without spending anything: shows what would be sent and the estimated cost.
 fundamentals-extract-dry:
     uv run python -m brvm.jobs.fundamentals_extract --once --dry-run
+
+# Phase 4c: OCR scanned filings so 4b can extract them.
+# Requires the `ocrmypdf` binary and tesseract with the French language pack
+# (brew install ocrmypdf tesseract-lang).
+filings-ocr:
+    uv run python -m brvm.jobs.filings_ocr --once

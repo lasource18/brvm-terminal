@@ -317,3 +317,61 @@ def test_read_helpers_return_empty_views_when_nothing_extracted(monkeypatch, tmp
     assert svc.get_financials_series("SNTS").has_data is False
     assert svc.get_segments("SNTS").has_data is False
     assert svc.get_ownership("SNTS").has_data is False
+    assert svc.get_latest_interim("SNTS") is None
+
+
+# --- interim card (Phase 4c) ----------------------------------------------
+
+
+def test_get_latest_interim_returns_most_recent_period_ahead_of_annual(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    with connect(db_path) as conn:
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        # Annual 2024 stops here; the interim card should surface H1 2025.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(ticker="SNTS", period_year=2024, revenue=100),
+        )
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2025, period_kind="Q1", revenue=25
+            ),
+        )
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2025, period_kind="H1", revenue=55
+            ),
+        )
+
+    interim = svc.get_latest_interim("SNTS")
+    assert interim is not None
+    assert (interim.period_year, interim.period_kind) == (2025, "H1")
+    assert interim.metrics["revenue"] == 55
+
+
+def test_get_latest_interim_hides_stale_interim_when_annual_is_newer(monkeypatch, tmp_path):
+    """Mixing an old H1 with a fresh full-year would mislead — hide it."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    with connect(db_path) as conn:
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2023, period_kind="H1", revenue=40
+            ),
+        )
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, revenue=100
+            ),
+        )
+
+    assert svc.get_latest_interim("SNTS") is None

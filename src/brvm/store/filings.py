@@ -96,13 +96,20 @@ def list_by_ticker(
 def list_needing_extraction(
     conn: sqlite3.Connection,
     *,
-    doc_types: tuple[str, ...] = ("etats_financiers", "rapport_annuel"),
+    doc_types: tuple[str, ...] = (
+        "etats_financiers",
+        "rapport_annuel",
+        "rapport_activites",
+    ),
     limit: int = 100,
 ) -> list[sqlite3.Row]:
-    """Rows the 4b extractor hasn't processed yet.
+    """Rows the extractor hasn't processed yet.
 
-    Filtered to annual-ish document types by default — that's the
-    universe 4b targets (~50 filings/year across the whole exchange).
+    Default doc_types cover the annual + interim universe (Phase 4c). The
+    period_kind on each row tells the caller whether an item is annual
+    (`annual`) or interim (`H1`/`Q1`/`Q3`); the extractor's prompt handles
+    both. `rapport_activites` is where interim BOA-style reports live —
+    excluding it left ~60 filings unreachable through the pipeline.
     """
     placeholders = ",".join("?" * len(doc_types))
     return list(
@@ -149,5 +156,100 @@ def mark_extracted(
             "UPDATE filings SET extracted_utc = ?, is_scanned = ? WHERE id = ?",
             (utc_iso(), 1 if is_scanned else 0, filing_id),
         )
+    if commit:
+        conn.commit()
+
+
+# --------------------------------------------------------------------------
+# OCR bookkeeping (Phase 4c)
+# --------------------------------------------------------------------------
+
+
+def list_pending_ocr(
+    conn: sqlite3.Connection,
+    *,
+    max_pages: int | None = None,
+    limit: int = 20,
+) -> list[sqlite3.Row]:
+    """Filings whose text extraction hit the scanned-PDF wall (4b) and
+    haven't been through OCR yet (4c).
+
+    `max_pages` caps how big a file we're willing to OCR — a 400-page
+    scanned RSE annex would eat the entire nightly slot on its own.
+    Rows with `page_count IS NULL` (pypdf couldn't probe) are included
+    conservatively; the caller handles the failure downstream.
+    """
+    where = ["is_scanned = 1", "ocr_attempted_utc IS NULL"]
+    params: list[object] = []
+    if max_pages is not None:
+        where.append("(page_count IS NULL OR page_count <= ?)")
+        params.append(max_pages)
+    params.append(limit)
+    return list(
+        conn.execute(
+            f"""
+            SELECT * FROM filings
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(published_date, fetched_utc) DESC, id DESC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+    )
+
+
+def count_pending_ocr(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM filings WHERE is_scanned = 1 AND ocr_attempted_utc IS NULL"
+    ).fetchone()[0]
+
+
+def apply_ocr_success(
+    conn: sqlite3.Connection,
+    filing_id: int,
+    *,
+    size_bytes: int,
+    sha256: str,
+    page_count: int | None,
+    commit: bool = True,
+) -> None:
+    """OCR succeeded: refresh the file's byte-level attributes, flip
+    `is_scanned=0`, and clear `extracted_utc` so the row re-enters
+    `list_needing_extraction` on the next pass."""
+    from brvm.clock import utc_iso
+
+    conn.execute(
+        """
+        UPDATE filings
+        SET is_scanned = 0,
+            ocr_attempted_utc = ?,
+            extracted_utc = NULL,
+            size_bytes = ?,
+            sha256 = ?,
+            page_count = COALESCE(?, page_count)
+        WHERE id = ?
+        """,
+        (utc_iso(), size_bytes, sha256, page_count, filing_id),
+    )
+    if commit:
+        conn.commit()
+
+
+def apply_ocr_failure(
+    conn: sqlite3.Connection,
+    filing_id: int,
+    *,
+    commit: bool = True,
+) -> None:
+    """OCR failed (timeout / bad exit / no output). Stamp
+    `ocr_attempted_utc` so the same file isn't retried every night; an
+    operator can clear it manually to force a retry after e.g. upgrading
+    tesseract."""
+    from brvm.clock import utc_iso
+
+    conn.execute(
+        "UPDATE filings SET ocr_attempted_utc = ? WHERE id = ?",
+        (utc_iso(), filing_id),
+    )
     if commit:
         conn.commit()

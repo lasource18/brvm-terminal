@@ -15,6 +15,7 @@ from brvm.logging import get
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.fundamentals import extract_pending
 from brvm.services.news import poll_all as poll_news
+from brvm.services.ocr import ocr_pending
 from brvm.services.quotes import snapshot_once
 from brvm.services.tagging import tag_pending
 
@@ -73,6 +74,18 @@ def _fundamentals_extract_job() -> None:
         log.exception("scheduled fundamentals extraction failed: %s", e)
 
 
+def _filings_ocr_job() -> None:
+    """OCR scanned filings so the next extraction pass can pick them up.
+    No-ops (with a warning) when the `ocrmypdf` binary isn't installed,
+    so this is safe to register unconditionally on any host."""
+    log.info("scheduled filings OCR start")
+    try:
+        counts = ocr_pending()
+        log.info("scheduled filings OCR ok: %s", counts.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled filings OCR failed: %s", e)
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone=str(ABIDJAN))
     # Every 10 minutes during market hours.
@@ -122,6 +135,16 @@ def build_scheduler() -> BackgroundScheduler:
         _sector_enrich_job,
         CronTrigger(day_of_week="sun", hour="4", minute="0", timezone=str(ABIDJAN)),
         id="sector_enrichment_weekly",
+        replace_existing=True,
+    )
+    # OCR sweep: daily at 02:00 Abidjan, one hour before the extraction
+    # job so newly-OCR'd filings land in the same night's cycle. Runs
+    # under the `settings.ocr_max_files_per_run` cap so a large scanned
+    # backlog won't eat the whole hour.
+    sched.add_job(
+        _filings_ocr_job,
+        CronTrigger(hour="2", minute="0", timezone=str(ABIDJAN)),
+        id="filings_ocr_daily",
         replace_existing=True,
     )
     # Fundamentals extraction: daily at 03:00 Abidjan (well after market
