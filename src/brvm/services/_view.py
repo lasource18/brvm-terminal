@@ -94,6 +94,14 @@ class DirectoryRow(BaseModel):
     sector: str | None = None
     last: float | None = None
     change_pct: float | None = None
+    # Period returns vs the close/level on-or-before the reference date.
+    # None when the reference bar isn't available (short-history tickers,
+    # brand-new indices captured only from `just snapshot` runs). Zero
+    # would be misleading — the template renders "—" instead.
+    change_1w_pct: float | None = None
+    change_1m_pct: float | None = None
+    change_3m_pct: float | None = None
+    change_ytd_pct: float | None = None
 
 
 class Shareholder(BaseModel):

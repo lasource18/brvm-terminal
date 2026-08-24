@@ -115,9 +115,23 @@ def directory_frag(
     sector: str | None = None,
     q: str | None = None,
     kind: str | None = None,
+    sort: str | None = None,
+    direction: str | None = None,
 ):
     return templates.TemplateResponse(
         request,
         "_frag/directory_body.html",
-        {"rows": directory.list_directory(country=country, sector=sector, q=q, kind=kind)},
+        {
+            "rows": directory.list_directory(
+                country=country, sector=sector, q=q, kind=kind,
+                sort=sort, direction=direction,
+            ),
+            # `current` is needed so the header links in the fragment
+            # preserve the active filters + toggle the sort direction.
+            "current": {
+                "country": country or "", "sector": sector or "",
+                "q": q or "", "kind": kind or "",
+                "sort": sort or "", "direction": (direction or "").lower(),
+            },
+        },
     )
