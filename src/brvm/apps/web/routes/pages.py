@@ -61,6 +61,7 @@ def security_tab(request: Request, ticker: str, tab: str):
         ctx["actions"] = news_svc.list_upcoming_actions(ticker=sec.ticker, days=90)
     elif spec.key == "financials":
         ctx["financials"] = fundamentals.get_financials_series(sec.ticker)
+        ctx["interim"] = fundamentals.get_latest_interim(sec.ticker)
     elif spec.key == "ownership":
         ctx["ownership"] = fundamentals.get_ownership(sec.ticker)
     elif spec.key == "segments":

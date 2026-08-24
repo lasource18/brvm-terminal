@@ -287,6 +287,24 @@ class FinancialsSeries:
         return bool(self.periods)
 
 
+@dataclass
+class InterimSnapshot:
+    """Most-recent interim (H1/Q1/Q3) reading, rendered as a card above the
+    annual table. Kept separate because interim rows are period-to-date and
+    would mislead if mixed into the year-over-year table."""
+
+    ticker: str
+    period_year: int
+    period_kind: str        # 'H1' | 'Q1' | 'Q3' | 'other'
+    currency: str = "XOF"
+    metrics: dict[str, float | None] = field(default_factory=dict)
+    filing_id: int | None = None
+
+    @property
+    def has_data(self) -> bool:
+        return any(v is not None for v in self.metrics.values())
+
+
 _METRIC_KEYS: tuple[str, ...] = (
     "revenue",
     "operating_income",
@@ -311,6 +329,48 @@ def get_financials_series(ticker: str, *, limit: int = 6) -> FinancialsSeries:
     for key in _METRIC_KEYS:
         series.metrics[key] = [r[key] for r in rows]
     return series
+
+
+def get_latest_interim(ticker: str) -> InterimSnapshot | None:
+    """Most recent H1/Q1/Q3 row for the Financials tab's interim card.
+
+    Returns None when no interim data has been extracted or when the
+    latest annual row already covers a newer period (mixing a stale H1
+    with a fresh annual is more noise than signal)."""
+    with connect(settings.db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT ticker, period_year, period_kind, currency, revenue,
+                   operating_income, net_income, total_assets, total_equity,
+                   eps, dividend_per_share, filing_id
+            FROM financials
+            WHERE ticker = ? AND period_kind IN ('H1', 'Q1', 'Q3', 'other')
+            ORDER BY period_year DESC,
+                     CASE period_kind
+                        WHEN 'Q3' THEN 4
+                        WHEN 'H1' THEN 3
+                        WHEN 'Q1' THEN 2
+                        ELSE 1 END DESC
+            LIMIT 1
+            """,
+            (ticker,),
+        ).fetchone()
+        if row is None:
+            return None
+        latest_annual = financials_repo.latest_period(conn, ticker)
+
+    interim_year = int(row["period_year"])
+    if latest_annual is not None and int(latest_annual["period_year"]) >= interim_year:
+        return None
+
+    return InterimSnapshot(
+        ticker=ticker,
+        period_year=interim_year,
+        period_kind=row["period_kind"],
+        currency=row["currency"] or "XOF",
+        metrics={k: row[k] for k in _METRIC_KEYS},
+        filing_id=int(row["filing_id"]),
+    )
 
 
 @dataclass

@@ -18,6 +18,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 3c — news + corporate actions (UI: `/news`, tabs, 30-day strip)
 - [x] Phase 4a — fundamentals (filings corpus + storage)
 - [x] Phase 4b — fundamentals (Haiku extraction + Financials/Ownership/Segments tabs)
+- [x] Phase 4c — fundamentals (OCR + interim extraction + sikafinance-communiqué fallback)
 - [ ] Phase 5 — TUI
 - [ ] Phase 6 — alerts + daily brief + analyst-note synthesis
 
@@ -27,8 +28,12 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [uv](https://docs.astral.sh/uv/) (dependency manager)
 - [just](https://github.com/casey/just) (task runner)
 - Python 3.12
+- **Optional (Phase 4c OCR):** `ocrmypdf` + tesseract with the French
+  language pack. Without it, `just filings-ocr` no-ops with a warning and
+  scanned filings stay unextractable — everything else works.
 
 On macOS: `brew install uv just python@3.12`.
+For OCR: `brew install ocrmypdf tesseract-lang`.
 
 ## Setup
 
@@ -182,6 +187,43 @@ What it guarantees:
 
 Extraction also runs daily on the scheduler at 03:00 Africa/Abidjan
 (`fundamentals_extract_daily`), well after market close.
+
+## Try it (Phase 4c demo — OCR + sikafinance fallback + interim)
+
+Phase 4c fills the gaps 4b left open:
+
+- **OCR** rescues scanned French annual reports so the extractor can pick
+  them up. Requires the `ocrmypdf` binary (see Requirements above).
+- **Sikafinance-communiqué fallback** promotes filing-worthy communiqué
+  rows (états financiers / rapport d'activités) into the `filings`
+  corpus, catching reports brvm.org missed. Runs automatically at the
+  tail of `just filings-pull`.
+- **Interim extraction** extends the extractor's default gate to include
+  `rapport_activites`, and the Financials tab now shows the most recent
+  H1/Q1/Q3 as a separate card above the annual table (period-to-date
+  figures don't belong in a year-over-year row).
+
+```bash
+just filings-pull            # brvm.org walk + sikafinance promotion
+just filings-ocr             # OCR every is_scanned=1 filing (free, CPU-only)
+just fundamentals-extract    # extract, including newly-OCR'd + interim
+```
+
+Guarantees:
+
+- **Never re-OCR automatically.** Every filing handed to the OCR runner —
+  success or failure — gets `filings.ocr_attempted_utc` stamped. An
+  operator forcing a retry clears that column manually.
+- **Cross-source dedupe.** The sikafinance promoter checks the
+  `(ticker, doc_type, period_kind, period_year)` triple before
+  downloading, so the same H1 report from both brvm.org and sikafinance
+  is stored once.
+- **Bounded per-file OCR time.** `OCR_TIMEOUT_S=600` (per file) and
+  `OCR_MAX_FILES_PER_RUN=20` keep the nightly slot honest.
+
+OCR runs daily on the scheduler at 02:00 Africa/Abidjan
+(`filings_ocr_daily`), one hour ahead of the extractor so newly-text-
+layered filings land in the same night's cycle.
 
 ## Try it (Phase 1 demo)
 

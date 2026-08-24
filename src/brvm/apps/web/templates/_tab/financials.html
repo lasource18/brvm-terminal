@@ -1,5 +1,7 @@
-{# Financials tab — 5-year annual series, most recent year on the left.
-   Currency is per-issuer (usually XOF; a few report in EUR or USD comparatives). #}
+{# Financials tab — annual series first; a compact interim card below it
+   when the extractor has newer H1/Q1/Q3 data. Interim rows are period-to-
+   date and would mislead if mixed into the year-over-year table, hence
+   the split. Currency is per-issuer (usually XOF). #}
 {% set fin = financials %}
 {% set metric_labels = [
      ('revenue',            'Revenue'),
@@ -51,6 +53,40 @@
     <div class="dim" style="padding: 12px;">
       No extracted financials yet for {{ sec.ticker }}. Runs after the daily
       <code>fundamentals-extract</code> job processes an annual filing.
+    </div>
+  {% endif %}
+
+  {% if interim and interim.has_data %}
+    <div style="margin-top: 16px;">
+      <div class="dim" style="margin-bottom: 8px;">
+        Latest interim · {{ interim.period_kind }} {{ interim.period_year }} ·
+        amounts in {{ interim.currency }} · period-to-date, not annualised
+      </div>
+      <table class="quotes">
+        <thead>
+          <tr>
+            <th>METRIC</th>
+            <th>{{ interim.period_kind }} {{ interim.period_year }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for key, label in metric_labels %}
+            {% set v = interim.metrics.get(key) %}
+            {% if v is not none %}
+              <tr>
+                <td>{{ label }}</td>
+                <td>
+                  {% if key in ('eps', 'dividend_per_share') %}
+                    {{ "{:,.2f}".format(v) }}
+                  {% else %}
+                    {{ "{:,.0f}".format(v) }}
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
   {% endif %}
 </div>

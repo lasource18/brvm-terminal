@@ -199,20 +199,27 @@ def preflight(text: str, *, model: str | None = None, output_tokens: int = 1200)
 
 
 _SYSTEM_PROMPT = """\
-You extract structured fundamentals from a BRVM-listed company's annual \
-report. Source material is in French. Prices are in XOF unless the report \
-clearly reports another currency (EUR / USD comparatives sometimes appear).
+You extract structured fundamentals from a BRVM-listed company's financial \
+filing. The input may be an annual report ("Rapport annuel", "États \
+financiers - Exercice YYYY"), an interim report ("Rapport d'activités - \
+1er semestre YYYY" or trimestre), or an auditor's limited-review report on \
+interim figures. Source material is in French. Amounts are in XOF unless \
+the report clearly reports another currency (EUR / USD comparatives \
+sometimes appear).
 
 Return ONE result object for the reporting period the filing is about.
 
 Fields:
-- period_year: the calendar year the report covers (e.g. 2024 for \
-"Exercice 2024" or "Rapport annuel 2024"). Integer.
-- period_kind: 'annual' for a full-year report; 'H1', 'Q1', 'Q3' for interim; \
-'other' if unclear.
+- period_year: the calendar year the reporting period ends in (e.g. 2024 \
+for "Exercice 2024" or "1er semestre 2024"). Integer.
+- period_kind: 'annual' for a full-year report; 'H1' for a first-half / \
+"1er semestre" / "2eme trimestre cumulé" report; 'Q1' for "1er trimestre"; \
+'Q3' for "3eme trimestre" (usually 9-month cumulative); 'other' if unclear. \
+Interim reports report period-to-date figures, not annualised — return \
+those as-is.
 - currency: 3-letter ISO code (XOF, EUR, USD). Default XOF.
-- revenue: consolidated revenue for the period. Called "Chiffre d'affaires" \
-for industrials/telecoms, "Produit net bancaire" (PNB) for banks, "Primes \
+- revenue: revenue for the period. Called "Chiffre d'affaires" for \
+industrials/telecoms, "Produit net bancaire" (PNB) for banks, "Primes \
 émises" for insurers. Take the CONSOLIDATED figure (bilan consolidé) when \
 both are shown.
 - operating_income: "Résultat d'exploitation" or "Résultat brut \
@@ -221,17 +228,21 @@ d'exploitation" (RBE) or "Résultat opérationnel". Not the same as EBITDA.
 not the total including minorities.
 - total_assets: "Total du bilan" / "Total actif". Balance-sheet line.
 - total_equity: "Capitaux propres (part du groupe)".
-- eps: "Bénéfice par action" (BPA/BNPA) in the report's currency.
+- eps: "Bénéfice par action" (BPA/BNPA) in the report's currency. For \
+interim reports this is the period-to-date EPS if the report gives one; \
+otherwise leave null (do NOT annualise).
 - dividend_per_share: dividend proposed for this period, per share, in \
-the report's currency. Zero if a resolution explicitly says none was paid; \
-null if the report doesn't say.
+the report's currency. Interim reports usually omit this — leave null. \
+Zero if a resolution explicitly says none was paid.
 - segments: business or geographic revenue breakdown. Each item: \
 {name, segment_kind ('business' | 'geo'), revenue (in the same currency), \
 share_pct (0-100)}. Use whichever breakdown the report actually gives; \
 often both are present.
 - ownership: top shareholders as of the report's balance-sheet date. Each \
 item: {holder, share_pct (0-100), shares (integer, when the report gives \
-absolute counts)}. Include the "Flottant" / "Public" line if present.
+absolute counts)}. Include the "Flottant" / "Public" line if present. \
+Interim activity reports rarely include a full shareholder register — \
+leave empty when it isn't there.
 
 All numeric amounts in FULL UNITS (not thousands, not millions). If the \
 report says "en millions de F CFA" multiply by 1_000_000 before returning.
@@ -240,10 +251,8 @@ Rules:
 - Do NOT invent figures. If a line is not in the text you were given, \
 return null (or omit the segment / ownership row entirely).
 - Do NOT sum sub-lines to reconstruct a total that's not in the report.
-- Prefer the CONSOLIDATED numbers over "société mère" when both exist.
-- If the report clearly covers a period other than a full year, return \
-the correct period_kind but still fill the fields — the caller decides \
-what to persist.\
+- Do NOT annualise or convert interim figures into a full-year estimate.
+- Prefer the CONSOLIDATED numbers over "société mère" when both exist.\
 """
 
 
