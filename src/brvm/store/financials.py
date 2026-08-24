@@ -59,11 +59,28 @@ def replace_period(
     segments: Iterable[SegmentRow] = (),
     ownership: Iterable[OwnershipRow] = (),
 ) -> None:
-    """Atomically replace one `(ticker, period_year, period_kind)` triple.
+    """Persist one `(ticker, period_year, period_kind)` extract.
 
-    Deletes any prior rows for the same key before inserting so a re-run
-    of the extractor (schema tweak, corrected PDF) can't leave stale
-    segment / ownership entries around.
+    The financials row is always replaced — a re-extract may correct P&L
+    numbers (a schema tweak, a corrected PDF, a smarter prompt) and we
+    want the newest attempt to win.
+
+    Segments and ownership use a **preserve-on-empty** rule instead:
+    the incoming lists overwrite existing rows only when they are
+    non-empty. This matters because a single period is often covered by
+    two filings on brvm.org — an ``etats_financiers`` (14-page financial
+    statements, no shareholder register) and a ``rapport_annuel``
+    (60+ pages, with shareholders and business segments). Whichever one
+    the extractor happens to process last was previously wiping the
+    other's segment/ownership rows. Now the two extractions compose:
+
+      * rapport_annuel extracted first → ownership + segments populated
+      * etats_financiers extracted second → P&L refreshed; ownership +
+        segments preserved because its extract returned empty lists.
+
+    Segments and ownership are deduped inside a single extract on their
+    PK components — the model occasionally repeats a row (e.g. "Autres"
+    twice) and the composite PK would otherwise raise mid-batch.
     """
     now = utc_iso()
     key = (financials.ticker, financials.period_year, financials.period_kind)
@@ -72,15 +89,6 @@ def replace_period(
         "DELETE FROM financials WHERE ticker = ? AND period_year = ? AND period_kind = ?",
         key,
     )
-    conn.execute(
-        "DELETE FROM financial_segments WHERE ticker = ? AND period_year = ? AND period_kind = ?",
-        key,
-    )
-    conn.execute(
-        "DELETE FROM ownership WHERE ticker = ? AND period_year = ? AND period_kind = ?",
-        key,
-    )
-
     conn.execute(
         """
         INSERT INTO financials
@@ -106,60 +114,70 @@ def replace_period(
         ),
     )
 
-    # Dedupe segments / ownership on their PK components — the model
-    # occasionally repeats a row (e.g. "Autres" appearing twice) and the
-    # composite PK would otherwise raise mid-batch.
-    seen_seg: set[tuple[str, str]] = set()
-    for s in segments:
-        if not s.name:
-            continue
-        seg_key = (s.segment_kind, s.name)
-        if seg_key in seen_seg:
-            continue
-        seen_seg.add(seg_key)
-        conn.execute(
-            """
-            INSERT INTO financial_segments
-                (ticker, period_year, period_kind, segment_kind, name,
-                 revenue, share_pct, filing_id, extracted_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                financials.ticker,
-                financials.period_year,
-                financials.period_kind,
-                s.segment_kind,
-                s.name,
-                s.revenue,
-                s.share_pct,
-                filing_id,
-                now,
-            ),
-        )
+    # Materialise the incoming iterables once so we can both test them
+    # for non-emptiness and iterate over them for the insert loop.
+    seg_list = [s for s in segments if s.name]
+    own_list = [o for o in ownership if o.holder]
 
-    seen_holder: set[str] = set()
-    for o in ownership:
-        if not o.holder or o.holder in seen_holder:
-            continue
-        seen_holder.add(o.holder)
+    if seg_list:
         conn.execute(
-            """
-            INSERT INTO ownership
-                (ticker, period_year, period_kind, holder,
-                 share_pct, shares, filing_id, extracted_utc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                financials.ticker,
-                financials.period_year,
-                financials.period_kind,
-                o.holder,
-                o.share_pct,
-                o.shares,
-                filing_id,
-                now,
-            ),
+            "DELETE FROM financial_segments WHERE ticker = ? AND period_year = ? AND period_kind = ?",
+            key,
         )
+        seen_seg: set[tuple[str, str]] = set()
+        for s in seg_list:
+            seg_key = (s.segment_kind, s.name)
+            if seg_key in seen_seg:
+                continue
+            seen_seg.add(seg_key)
+            conn.execute(
+                """
+                INSERT INTO financial_segments
+                    (ticker, period_year, period_kind, segment_kind, name,
+                     revenue, share_pct, filing_id, extracted_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    financials.ticker,
+                    financials.period_year,
+                    financials.period_kind,
+                    s.segment_kind,
+                    s.name,
+                    s.revenue,
+                    s.share_pct,
+                    filing_id,
+                    now,
+                ),
+            )
+
+    if own_list:
+        conn.execute(
+            "DELETE FROM ownership WHERE ticker = ? AND period_year = ? AND period_kind = ?",
+            key,
+        )
+        seen_holder: set[str] = set()
+        for o in own_list:
+            if o.holder in seen_holder:
+                continue
+            seen_holder.add(o.holder)
+            conn.execute(
+                """
+                INSERT INTO ownership
+                    (ticker, period_year, period_kind, holder,
+                     share_pct, shares, filing_id, extracted_utc)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    financials.ticker,
+                    financials.period_year,
+                    financials.period_kind,
+                    o.holder,
+                    o.share_pct,
+                    o.shares,
+                    filing_id,
+                    now,
+                ),
+            )
     conn.commit()
 
 

@@ -98,6 +98,89 @@ def test_replace_period_overwrites_prior_run(tmp_db_path):
         assert {o["holder"] for o in owns} == {"New Holder"}
 
 
+def test_replace_period_preserves_prior_segments_when_new_extract_is_empty(tmp_db_path):
+    """A period is often covered by two filings on brvm.org: an
+    `etats_financiers` (bare financial statements — no shareholders, no
+    segments) and a `rapport_annuel` (full annual report with both).
+    Whichever one lands second must NOT wipe the other's segment /
+    ownership rows just because its own extract came back empty.
+
+    Reproduces the ORAC 2025 bug: rapport_annuel extracted first,
+    etats_financiers extracted second, and the second overwrite dropped
+    every shareholder row. The Ownership tab then rendered "No data"
+    even though the extractor had found shareholders on the first pass.
+    """
+    filing_id = _seed(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        # First filing (rapport_annuel-shape): populates everything.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024,
+                revenue=1_500_000_000, net_income=300_000_000,
+            ),
+            segments=[
+                fin_repo.SegmentRow(name="Sénégal", segment_kind="geo", share_pct=60.0),
+                fin_repo.SegmentRow(name="Mobile", segment_kind="business", share_pct=70.0),
+            ],
+            ownership=[
+                fin_repo.OwnershipRow(holder="SONATEL SA", share_pct=42.3),
+                fin_repo.OwnershipRow(holder="Flottant", share_pct=57.7),
+            ],
+        )
+
+        # Second filing (etats_financiers-shape): refreshes the P&L numbers
+        # but returns empty segments + ownership. Prior rows must survive.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024,
+                revenue=1_600_000_000, net_income=310_000_000,
+            ),
+            segments=[],
+            ownership=[],
+        )
+
+        rows = fin_repo.list_financials(conn, "SNTS")
+        assert len(rows) == 1
+        # P&L numbers reflect the second (newer) extract.
+        assert rows[0]["revenue"] == 1_600_000_000
+        assert rows[0]["net_income"] == 310_000_000
+        # Segments and ownership survived from the first extract.
+        segs = fin_repo.list_segments(conn, "SNTS", 2024)
+        assert {s["name"] for s in segs} == {"Sénégal", "Mobile"}
+        owns = fin_repo.list_ownership(conn, "SNTS", 2024)
+        assert {o["holder"] for o in owns} == {"SONATEL SA", "Flottant"}
+
+
+def test_replace_period_new_nonempty_segments_still_replace_prior(tmp_db_path):
+    """The preserve rule only kicks in when the new extract is empty. A
+    non-empty new list must still fully replace the old one — the
+    extractor's newer read is authoritative."""
+    filing_id = _seed(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(ticker="SNTS", period_year=2024, revenue=100),
+            segments=[fin_repo.SegmentRow(name="Old", segment_kind="business", share_pct=100)],
+            ownership=[fin_repo.OwnershipRow(holder="Old", share_pct=100)],
+        )
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(ticker="SNTS", period_year=2024, revenue=200),
+            segments=[fin_repo.SegmentRow(name="New", segment_kind="business", share_pct=100)],
+            ownership=[fin_repo.OwnershipRow(holder="New", share_pct=100)],
+        )
+        segs = fin_repo.list_segments(conn, "SNTS", 2024)
+        assert {s["name"] for s in segs} == {"New"}
+        owns = fin_repo.list_ownership(conn, "SNTS", 2024)
+        assert {o["holder"] for o in owns} == {"New"}
+
+
 def test_replace_period_dedupes_segments_and_owners_within_a_batch(tmp_db_path):
     filing_id = _seed(tmp_db_path)
     with connect(tmp_db_path) as conn:
