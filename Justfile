@@ -37,6 +37,13 @@ refresh-fixtures:
 snapshot:
     uv run python -m brvm.jobs.quote_snapshot --once
 
+# Bulk-populate daily_bars for every equity so the Directory's period-return
+# columns (1W/1M/3M/YTD/1Y/ALL%) render values for the whole universe rather
+# than only the tickers a user has personally clicked into. Idempotent within
+# --min-age-days (default 7).
+history-backfill:
+    uv run python -m brvm.jobs.history_backfill --once
+
 # Phase 3a demo: fetch news feed + communiqués + upcoming dividends, print summary
 news-poll:
     uv run python -m brvm.jobs.news_poll --once
@@ -68,6 +75,16 @@ fundamentals-extract:
 # Same, without spending anything: shows what would be sent and the estimated cost.
 fundamentals-extract-dry:
     uv run python -m brvm.jobs.fundamentals_extract --once --dry-run
+
+# One-shot recovery for ownership/segments that were wiped before PR #13's
+# fix landed. Clears extracted_utc on shadowed filings so the next
+# `just fundamentals-extract` run re-populates them.
+fundamentals-recover:
+    uv run python -m brvm.jobs.fundamentals_recover --once
+
+# Same, without touching the DB — reports what would be reset.
+fundamentals-recover-dry:
+    uv run python -m brvm.jobs.fundamentals_recover --once --dry-run
 
 # Phase 4c: OCR scanned filings so 4b can extract them.
 # Requires the `ocrmypdf` binary and tesseract with the French language pack

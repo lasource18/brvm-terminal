@@ -15,6 +15,7 @@ from brvm.logging import get
 from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.fundamentals import extract_pending
+from brvm.services.history import backfill_all as backfill_history
 from brvm.services.news import poll_all as poll_news
 from brvm.services.ocr import ocr_pending
 from brvm.services.quotes import snapshot_once
@@ -61,6 +62,18 @@ def _sector_enrich_job() -> None:
         log.info("scheduled sector enrichment ok: %s", counts)
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled sector enrichment failed: %s", e)
+
+
+def _history_backfill_job() -> None:
+    """Weekly historique pass over every active equity so the Directory's
+    period-return columns render for the whole universe (not just the
+    tickers a user has clicked into). Idempotent within min_age_days=7."""
+    log.info("scheduled history backfill start")
+    try:
+        counts = backfill_history()
+        log.info("scheduled history backfill ok: %s", counts)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled history backfill failed: %s", e)
 
 
 def _fundamentals_extract_job() -> None:
@@ -157,6 +170,16 @@ def build_scheduler() -> BackgroundScheduler:
         _company_facts_refresh_job,
         CronTrigger(day_of_week="sun", hour="4", minute="30", timezone=str(ABIDJAN)),
         id="company_facts_refresh_weekly",
+        replace_existing=True,
+    )
+    # History backfill: weekly (Sun 05:00 Abidjan). ~48 equities x 0.5s
+    # polite pause = <1 min of wall time; keeps daily_bars populated for
+    # every ticker so the Directory's period-return columns render for
+    # the whole universe.
+    sched.add_job(
+        _history_backfill_job,
+        CronTrigger(day_of_week="sun", hour="5", minute="0", timezone=str(ABIDJAN)),
+        id="history_backfill_weekly",
         replace_existing=True,
     )
     # OCR sweep: daily at 02:00 Abidjan, one hour before the extraction

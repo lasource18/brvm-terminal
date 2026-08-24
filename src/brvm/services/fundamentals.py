@@ -430,6 +430,83 @@ class OwnershipView:
         return bool(self.holders)
 
 
+def reset_shadowed_extractions(*, dry_run: bool = False) -> dict[str, int]:
+    """Recover ownership + segments that were wiped before PR #13's fix.
+
+    When two filings for the same `(ticker, period_year, period_kind)`
+    triple both got extracted, whichever landed second wiped the other's
+    segment / ownership rows via the old `replace_period` blanket DELETE
+    (fixed in PR #13). This helper finds the resulting shadowed periods
+    and clears `extracted_utc` on the richer filing so the next
+    `just fundamentals-extract` run re-processes it — now with the
+    preserve-on-empty logic in place, which will re-populate ownership
+    and segments without clobbering the P&L numbers.
+
+    Rank order (richer → poorer):
+      rapport_annuel > etats_financiers > rapport_activites > resultats
+      > rse > assemblee > autre
+
+    A period is "shadowed" when the currently-persisted
+    `financials.filing_id` points at a filing whose doc_type ranks
+    lower than at least one other filing for the same triple. Those
+    "richer" filings get their `extracted_utc` cleared. Idempotent —
+    a rerun after `just fundamentals-extract` will find nothing to do.
+    """
+    # Rank: lower value = richer. SQLite lets us map via CASE.
+    _rank_case = """
+        CASE doc_type
+            WHEN 'rapport_annuel'    THEN 1
+            WHEN 'etats_financiers'  THEN 2
+            WHEN 'rapport_activites' THEN 3
+            WHEN 'resultats'         THEN 4
+            WHEN 'rse'               THEN 5
+            WHEN 'assemblee'         THEN 6
+            ELSE 7
+        END
+    """
+    counts = {"periods_shadowed": 0, "filings_reset": 0, "dry_run": int(dry_run)}
+
+    with connect(settings.db_path) as conn:
+        # Find every filing whose rank beats (or ties, but with a
+        # different id) the filing currently persisted in financials for
+        # the same period. Those are the ones to re-process.
+        rows = conn.execute(
+            f"""
+            SELECT candidate.id AS filing_id, candidate.ticker, candidate.doc_type,
+                   candidate.period_year, candidate.period_kind,
+                   persisted.doc_type AS persisted_doc_type
+            FROM filings candidate
+            JOIN financials f
+              ON f.ticker      = candidate.ticker
+             AND f.period_year = candidate.period_year
+             AND f.period_kind = candidate.period_kind
+            JOIN filings persisted ON persisted.id = f.filing_id
+            WHERE candidate.id != persisted.id
+              AND ({_rank_case.replace('doc_type', 'candidate.doc_type')})
+                <
+                  ({_rank_case.replace('doc_type', 'persisted.doc_type')})
+              AND candidate.extracted_utc IS NOT NULL
+            """
+        ).fetchall()
+
+        counts["periods_shadowed"] = len({
+            (r["ticker"], r["period_year"], r["period_kind"]) for r in rows
+        })
+        counts["filings_reset"] = len(rows)
+
+        if not dry_run and rows:
+            ids = [r["filing_id"] for r in rows]
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE filings SET extracted_utc = NULL WHERE id IN ({placeholders})",
+                ids,
+            )
+            conn.commit()
+
+    log.info("fundamentals recover: %s", counts)
+    return counts
+
+
 def get_ownership(ticker: str) -> OwnershipView:
     with connect(settings.db_path) as conn:
         latest = financials_repo.latest_period(conn, ticker)
