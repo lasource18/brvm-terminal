@@ -4,6 +4,16 @@ Miss path: fetch sikafinance historique, upsert into `daily_bars`, hydrate
 the cache. Hit path: return the cached list. If the cache is warm but the
 DB has fresher rows (e.g. from a nightly batch we might add later), the
 cache is bypassed and rebuilt from the DB.
+
+Intraday overlay
+----------------
+Sikafinance's `historique` table only publishes today's session **after**
+the close (~15:00 Africa/Abidjan). During the trading day, `daily_bars`
+therefore stops at yesterday. We synthesise today's in-flight candle
+from `quote_snapshots` — the intraday poller writes one row per snapshot
+with the sikafinance cotation page's O/H/L/last/volume — and prepend it
+to the series when today isn't already in `daily_bars`. Once the nightly
+sikafinance fetch overwrites, the synthetic bar drops out naturally.
 """
 
 from __future__ import annotations
@@ -13,6 +23,7 @@ from datetime import UTC
 from pathlib import Path
 from threading import Lock
 
+from brvm.clock import session_date_for
 from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
@@ -21,6 +32,7 @@ from brvm.sources import sikafinance
 from brvm.store import quotes as quotes_repo
 
 _INDEX_SOURCE = "index_levels"
+_INTRADAY_SOURCE = "intraday_snapshot"
 
 log = get(__name__)
 
@@ -103,11 +115,117 @@ def _load_from_db(ticker: str) -> list[DailyBar]:
     ]
 
 
+def _todays_intraday_bar(ticker: str) -> DailyBar | None:
+    """Synthesise today's in-flight bar from `quote_snapshots`.
+
+    Aggregates the O/H/L/close/volume across today's *market-hours*
+    captures only:
+      * open   — first non-null `open` from today's market-hours snapshots
+      * high   — MAX of `high` and `last`
+      * low    — MIN of `low` and `last`
+      * close  — most recent `last`
+      * volume — most recent `volume` (sikafinance publishes cumulative
+                 daily volume)
+
+    **Why market-hours only.** Sikafinance's cotation page still shows
+    the *previous* session's cumulative data until the market opens.
+    The scheduler snapshot job at 00:17 / 01:17 / 03:17 UTC therefore
+    captures yesterday's numbers under today's `captured_utc`. Filtering
+    to `>= today 09:00 UTC` (Africa/Abidjan opens at 09:00, UTC+0)
+    keeps those out of the aggregate. Returns None when there are no
+    market-hours captures yet — pre-market renders yesterday's close as
+    the last bar rather than fabricating an empty candle.
+    """
+    from datetime import date as _date
+
+    today = session_date_for()
+    day_prefix = today.isoformat()  # 'YYYY-MM-DD' — captured_utc starts with this in Africa/Abidjan (UTC+0)
+    market_open_utc = f"{day_prefix}T09:00:00Z"
+
+    with connect(_db_path()) as conn:
+        agg = conn.execute(
+            """
+            SELECT
+                MAX(COALESCE(high, last)) AS high,
+                MIN(COALESCE(low,  last)) AS low,
+                MAX(volume) AS volume
+            FROM quote_snapshots
+            WHERE ticker = ?
+              AND captured_utc >= ?
+              AND captured_utc LIKE ?
+              AND last IS NOT NULL
+            """,
+            (ticker, market_open_utc, f"{day_prefix}%"),
+        ).fetchone()
+        # `open` should be the FIRST captured value of the market session,
+        # not the min across snapshots.
+        first = conn.execute(
+            """
+            SELECT "open", last
+            FROM quote_snapshots
+            WHERE ticker = ?
+              AND captured_utc >= ?
+              AND captured_utc LIKE ?
+              AND last IS NOT NULL
+            ORDER BY captured_utc ASC
+            LIMIT 1
+            """,
+            (ticker, market_open_utc, f"{day_prefix}%"),
+        ).fetchone()
+        latest = conn.execute(
+            """
+            SELECT last, captured_utc
+            FROM quote_snapshots
+            WHERE ticker = ?
+              AND captured_utc >= ?
+              AND captured_utc LIKE ?
+              AND last IS NOT NULL
+            ORDER BY captured_utc DESC
+            LIMIT 1
+            """,
+            (ticker, market_open_utc, f"{day_prefix}%"),
+        ).fetchone()
+
+    if latest is None or agg is None or agg["high"] is None:
+        return None
+
+    open_val = (first["open"] if first and first["open"] is not None
+                else (first["last"] if first else None))
+    return DailyBar(
+        ticker=ticker,
+        session_date=_date.fromisoformat(day_prefix),
+        open=open_val,
+        high=agg["high"],
+        low=agg["low"],
+        close=latest["last"],
+        volume=agg["volume"],
+        source=_INTRADAY_SOURCE,
+    )
+
+
+def _with_intraday_overlay(ticker: str, bars: list[DailyBar]) -> list[DailyBar]:
+    """Prepend today's intraday bar when it's missing from `bars`.
+
+    `bars` comes back newest-first. If the newest already covers today,
+    the sikafinance historique fetch has caught up (post-close) and we
+    leave things alone."""
+    today = session_date_for()
+    if bars and bars[0].session_date >= today:
+        return bars
+    intraday = _todays_intraday_bar(ticker)
+    if intraday is None:
+        return bars
+    return [intraday, *bars]
+
+
 def get_history(ticker: str, country: str | None = None) -> list[DailyBar]:
     """Return daily bars newest-first, hitting cache -> DB -> network.
 
     Indices are served from `index_levels` (no OHLCV, close = level) and
-    never trigger a per-ticker network fetch.
+    never trigger a per-ticker network fetch. Equities get an intraday
+    overlay from `quote_snapshots` on top of whichever base series we
+    return, so today's in-flight candle shows up on the chart even when
+    sikafinance historique still stops at yesterday.
     """
     ticker = ticker.upper()
     now = time.time()
@@ -116,37 +234,48 @@ def get_history(ticker: str, country: str | None = None) -> list[DailyBar]:
         cached = _cache.get(ticker)
     if cached and now - cached[0] < TTL_S:
         log.debug("history cache hit ticker=%s age=%.1fs", ticker, now - cached[0])
-        return cached[1]
+        return _with_intraday_overlay(ticker, cached[1])
 
     if _security_kind(ticker) == "index":
         bars = _load_index_levels(ticker)
         with _lock:
             _cache[ticker] = (now, bars)
-        return bars
+        return bars  # index chart is close-only; no intraday overlay yet
 
-    # Cache miss: try DB first — no I/O if we already have anything.
+    # Cache miss: try DB first — no I/O if the newest bar is younger
+    # than 2*TTL. `_newest_ingested_age` already returns seconds elapsed
+    # since ingest, so it's compared against the freshness threshold
+    # directly (an earlier `now - age` was always ≈ time.time() and
+    # never fell inside the window — a latent bug the overlay work
+    # surfaced).
     db_bars = _load_from_db(ticker)
-    if db_bars and now - _newest_ingested_age(ticker) < TTL_S * 2:
+    if db_bars and _newest_ingested_age(ticker) < TTL_S * 2:
         with _lock:
             _cache[ticker] = (now, db_bars)
-        return db_bars
+        return _with_intraday_overlay(ticker, db_bars)
 
     # Cold or stale — refetch from sikafinance.
     country = country or _security_country(ticker)
     try:
-        bars = sikafinance.fetch_historique(ticker, country)
+        fetched = sikafinance.fetch_historique(ticker, country)
     except Exception as e:
         log.warning("historique fetch failed for %s: %s; returning DB rows", ticker, e)
         with _lock:
             _cache[ticker] = (now, db_bars)
-        return db_bars
+        return _with_intraday_overlay(ticker, db_bars)
 
-    if bars:
+    if fetched:
         with connect(_db_path()) as conn:
-            quotes_repo.upsert_daily_bars(conn, bars)
+            quotes_repo.upsert_daily_bars(conn, fetched)
+        bars = fetched
+    else:
+        # Empty fetch (network up but sikafinance returned no rows —
+        # off-hours weirdness, temporary outage on the historique
+        # endpoint). Keep the DB rows rather than blanking the chart.
+        bars = db_bars
     with _lock:
         _cache[ticker] = (now, bars)
-    return bars
+    return _with_intraday_overlay(ticker, bars)
 
 
 def _newest_ingested_age(ticker: str) -> float:

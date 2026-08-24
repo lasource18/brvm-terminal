@@ -215,3 +215,99 @@ def test_peers_with_ratios_annotates_from_ratios_service(company_env, monkeypatc
         assert ontbf.pe is None
         assert ontbf.roe is None
         assert ontbf.net_margin is None
+
+
+def test_peers_with_ratios_appends_self_row_at_the_bottom(company_env, monkeypatch, tmp_path):
+    """The currently-viewed company shows up as an `is_self=True` row at
+    the end of the peers list so the ratios table doubles as a
+    self-vs-peers comparison view."""
+    from brvm.models import Quote
+    from brvm.store import quotes as quotes_repo
+
+    def fake_secteur(ticker, country, client=None):
+        return {
+            "sector": "TELECOMS",
+            "peers": [
+                {"ticker": "SNTS", "country": "SN", "name": "SONATEL",
+                 "last": 32500, "change_day_pct": 1.0, "change_ytd_pct": 1.0,
+                 "volume": 100},
+                {"ticker": "ORAC", "country": "CI", "name": "ORANGE CI",
+                 "last": 19000, "change_day_pct": 2.0, "change_ytd_pct": 5.0,
+                 "volume": 200},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+    )
+
+    # Seed a live SNTS quote so the self row picks up last/day%/volume.
+    db_path = tmp_path / "brvm.sqlite"
+    with connect(db_path) as conn:
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=32500.0, change_pct=1.88, volume=3006),
+        ])
+
+    view = company_env.get_peers_with_ratios("SNTS")
+
+    # ORAC is the only non-self peer (SNTS is excluded from the peers
+    # feed, then re-appended as the self row).
+    non_self = [p for p in view.peers if not p.is_self]
+    self_rows = [p for p in view.peers if p.is_self]
+    assert {p.ticker for p in non_self} == {"ORAC"}
+    assert len(self_rows) == 1
+
+    # Self row is last (template renders it visually distinguished at
+    # the bottom of the table).
+    assert view.peers[-1].is_self is True
+    self_row = view.peers[-1]
+    assert self_row.ticker == "SNTS"
+    assert self_row.name == "SONATEL"
+    assert self_row.last == pytest.approx(32500.0)
+    assert self_row.change_day_pct == pytest.approx(1.88)
+    assert self_row.volume == 3006
+
+
+def test_peers_with_ratios_self_row_shows_when_no_peers_available(
+    company_env, monkeypatch, tmp_path
+):
+    """Even when sikafinance returns no peers, the self row still
+    populates so the tab isn't empty for issuers in an orphan sector."""
+    from brvm.models import Quote
+    from brvm.store import quotes as quotes_repo
+
+    monkeypatch.setattr(
+        "brvm.services.company.sikafinance.fetch_secteur",
+        lambda ticker, country, client=None: {"sector": None, "peers": []},
+    )
+    # Stub the afx fallback client to return an empty competitors block
+    # so `get_peers` returns a `source="none"` view with no peers, and
+    # the self row is the only survivor.
+    class _EmptyResp:
+        text = "<html></html>"
+
+        def raise_for_status(self):
+            pass
+
+    class _EmptyClient:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_a):
+            pass
+        def get(self, url):
+            return _EmptyResp()
+
+    monkeypatch.setattr("brvm.sources._http.make_client", lambda: _EmptyClient())
+
+    db_path = tmp_path / "brvm.sqlite"
+    with connect(db_path) as conn:
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=32500.0, change_pct=1.0, volume=100),
+        ])
+
+    view = company_env.get_peers_with_ratios("SNTS")
+    assert len(view.peers) == 1
+    assert view.peers[0].is_self is True
+    assert view.peers[0].ticker == "SNTS"

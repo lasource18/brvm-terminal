@@ -203,17 +203,62 @@ def _annotate_with_ratios(peers: list[PeerRow]) -> list[PeerRow]:
     return peers
 
 
+def _self_row(ticker: str) -> PeerRow | None:
+    """Build a `PeerRow` for the currently-viewed company so the Peers
+    tab shows it alongside its peers.
+
+    Reads the same shape sikafinance `parse_secteur` produces so the
+    row layout stays consistent: name/country from `securities`, live
+    last/day%/volume from the newest `quote_snapshots`. Returns None
+    when the ticker isn't in `securities` (would be surprising — the
+    route already 404s on unknown tickers — but keep the guard for
+    parity with the rest of the module)."""
+    ticker = ticker.upper()
+    with connect(_db_path()) as conn:
+        sec = conn.execute(
+            "SELECT ticker, name, country FROM securities WHERE ticker = ?",
+            (ticker,),
+        ).fetchone()
+        if sec is None:
+            return None
+        quote = conn.execute(
+            """
+            SELECT last, change_pct, volume
+            FROM quote_snapshots
+            WHERE ticker = ?
+            ORDER BY captured_utc DESC
+            LIMIT 1
+            """,
+            (ticker,),
+        ).fetchone()
+    return PeerRow(
+        ticker=sec["ticker"],
+        name=sec["name"],
+        country=sec["country"],
+        last=quote["last"] if quote else None,
+        change_day_pct=quote["change_pct"] if quote else None,
+        volume=quote["volume"] if quote else None,
+        is_self=True,
+    )
+
+
 def get_peers_with_ratios(ticker: str) -> PeersView:
-    """`get_peers` plus a ratio annotation pass on every returned peer.
+    """`get_peers` plus a ratio annotation pass on every returned peer,
+    with the currently-viewed company appended as a `is_self=True` row
+    so the table doubles as a self-vs-peers comparison view.
 
     The peers-cache TTL (60 min) still applies to the sector membership
     lookup — the ratio annotation runs on every request because prices
-    (and therefore P/E) move intraday."""
+    (and therefore P/E) move intraday. The self row is also rebuilt on
+    every request so its intraday price stays fresh."""
     view = get_peers(ticker)
     # Copy so we don't mutate the cached PeersView shared across requests.
-    annotated = PeersView(
+    rows = [p.model_copy() for p in view.peers]
+    self_row = _self_row(ticker)
+    if self_row is not None:
+        rows.append(self_row)
+    return PeersView(
         sector=view.sector,
         source=view.source,
-        peers=_annotate_with_ratios([p.model_copy() for p in view.peers]),
+        peers=_annotate_with_ratios(rows),
     )
-    return annotated
