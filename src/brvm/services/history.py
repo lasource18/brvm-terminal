@@ -23,12 +23,15 @@ from datetime import UTC
 from pathlib import Path
 from threading import Lock
 
+import httpx
+
 from brvm.clock import session_date_for
 from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
 from brvm.models import DailyBar
 from brvm.sources import sikafinance
+from brvm.sources._http import make_client
 from brvm.store import quotes as quotes_repo
 
 _INDEX_SOURCE = "index_levels"
@@ -302,3 +305,89 @@ def _newest_ingested_age(ticker: str) -> float:
 def clear_cache() -> None:
     with _lock:
         _cache.clear()
+
+
+# --------------------------------------------------------------------------
+# Bulk history backfill
+# --------------------------------------------------------------------------
+
+
+def backfill_all(
+    client: httpx.Client | None = None,
+    *,
+    min_age_days: int = 7,
+    delay_between_requests_s: float = 0.5,
+) -> dict[str, int]:
+    """Walk every active equity, fetch sikafinance historique, upsert
+    into `daily_bars`.
+
+    Previously `daily_bars` only got populated when a user visited the
+    Chart tab — so 30/48 equities had zero history and the Directory's
+    period columns (1W/1M/3M/1Y/ALL) rendered "—" for them. This
+    backfill closes that gap.
+
+    Skips tickers whose newest ingested bar is under `min_age_days` old
+    so a rerun during the week is cheap. `delay_between_requests_s` is
+    the polite pause between historique fetches (same shape as
+    `filings.pull_all`)."""
+    close = client is None
+    client = client or make_client()
+    counts = {
+        "considered": 0,
+        "fetched": 0,
+        "up_to_date": 0,
+        "no_rows": 0,
+        "failed": 0,
+        "bars_inserted": 0,
+    }
+    max_age_s = min_age_days * 86400
+
+    db_path = _db_path()
+    try:
+        with connect(db_path) as conn:
+            equities = list(conn.execute(
+                "SELECT ticker, country FROM securities "
+                "WHERE kind = 'equity' AND active = 1 "
+                "ORDER BY ticker"
+            ).fetchall())
+        counts["considered"] = len(equities)
+
+        for row in equities:
+            ticker = row["ticker"]
+            country = row["country"]
+
+            # Skip when we've already fetched recently — a full pass over
+            # 48 equities at 0.5s each is ~24s of network + polite waits,
+            # cheap enough to rerun but not free.
+            if _newest_ingested_age(ticker) < max_age_s:
+                counts["up_to_date"] += 1
+                continue
+
+            try:
+                bars = sikafinance.fetch_historique(ticker, country, client=client)
+            except httpx.HTTPError as e:
+                log.warning("history-backfill: %s failed: %s", ticker, e)
+                counts["failed"] += 1
+                continue
+
+            if not bars:
+                counts["no_rows"] += 1
+                continue
+
+            with connect(db_path) as conn:
+                quotes_repo.upsert_daily_bars(conn, bars)
+            counts["fetched"] += 1
+            counts["bars_inserted"] += len(bars)
+
+            if delay_between_requests_s:
+                time.sleep(delay_between_requests_s)
+    finally:
+        if close:
+            client.close()
+
+    # A fresh backfill invalidates the per-ticker in-memory cache so the
+    # next chart render picks up the new bars without waiting for TTL.
+    clear_cache()
+
+    log.info("history backfill: %s", counts)
+    return counts

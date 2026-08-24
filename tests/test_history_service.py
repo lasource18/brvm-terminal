@@ -314,6 +314,107 @@ def test_intraday_overlay_no_snapshots_no_overlay(history_env, monkeypatch):
     assert bars[0].session_date == _date(2026, 8, 21)
 
 
+def test_backfill_all_walks_every_active_equity(monkeypatch, history_env):
+    """The weekly backfill must hit every ticker sikafinance has, not
+    just the ones a user has clicked into."""
+    from datetime import date as _date
+    from datetime import timedelta
+
+    with connect(history_env._db_path()) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+            Security(ticker="ONTBF", name="ONATEL BF", kind="equity", country="BF"),
+            # Non-equity — must be skipped.
+            Security(ticker="BRVMPR", name="BRVM PRESTIGE", kind="index"),
+        ])
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_fetch(ticker, country, client=None):
+        calls.append((ticker, country))
+        base = _date(2026, 8, 21)
+        return [
+            DailyBar(ticker=ticker, session_date=base - timedelta(days=i),
+                     close=100.0 + i, source="sikafinance")
+            for i in range(5)
+        ]
+
+    monkeypatch.setattr(
+        "brvm.services.history.sikafinance.fetch_historique", fake_fetch
+    )
+
+    class _NoOpClient:
+        def close(self):
+            pass
+
+    counts = history_env.backfill_all(client=_NoOpClient(), delay_between_requests_s=0)
+
+    # SNTS (from fixture) + ORAC + ONTBF; BRVMPR excluded.
+    assert counts["considered"] == 3
+    assert counts["fetched"] == 3
+    assert counts["bars_inserted"] == 15
+    assert sorted(t for t, _ in calls) == ["ONTBF", "ORAC", "SNTS"]
+
+    with connect(history_env._db_path()) as conn:
+        n = conn.execute(
+            "SELECT COUNT(DISTINCT ticker) FROM daily_bars"
+        ).fetchone()[0]
+    assert n == 3
+
+
+def test_backfill_all_skips_recently_ingested(monkeypatch, history_env):
+    """Rerunning within min_age_days is a full no-op."""
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, _fake_bars(3))
+
+    calls = {"n": 0}
+
+    def fake_fetch(ticker, country, client=None):
+        calls["n"] += 1
+        return _fake_bars(3)
+
+    monkeypatch.setattr(
+        "brvm.services.history.sikafinance.fetch_historique", fake_fetch
+    )
+
+    class _NoOpClient:
+        def close(self):
+            pass
+
+    counts = history_env.backfill_all(
+        client=_NoOpClient(), min_age_days=7, delay_between_requests_s=0
+    )
+    assert counts["up_to_date"] == 1
+    assert calls["n"] == 0
+
+
+def test_backfill_all_survives_http_errors(monkeypatch, history_env):
+    """One flaky ticker mustn't abort the whole pass."""
+    import httpx as _httpx
+
+    with connect(history_env._db_path()) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+        ])
+
+    def flaky(ticker, country, client=None):
+        if ticker == "ORAC":
+            raise _httpx.HTTPError("simulated timeout")
+        return _fake_bars(2)
+
+    monkeypatch.setattr(
+        "brvm.services.history.sikafinance.fetch_historique", flaky
+    )
+
+    class _NoOpClient:
+        def close(self):
+            pass
+
+    counts = history_env.backfill_all(client=_NoOpClient(), delay_between_requests_s=0)
+    assert counts["failed"] == 1
+    assert counts["fetched"] == 1  # SNTS came back fine
+
+
 def test_indices_load_from_index_levels_and_skip_network(history_env, monkeypatch):
     from datetime import timedelta
 

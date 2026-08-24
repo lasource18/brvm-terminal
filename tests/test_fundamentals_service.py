@@ -375,3 +375,126 @@ def test_get_latest_interim_hides_stale_interim_when_annual_is_newer(monkeypatch
         )
 
     assert svc.get_latest_interim("SNTS") is None
+
+
+# --- reset_shadowed_extractions (recovery for pre-PR-#13 wipes) ------------
+
+
+def _mk_filing_of(
+    doc_type: str, *, ticker: str = "SNTS", period_year: int = 2025,
+    period_kind: str = "annual",
+) -> Filing:
+    return Filing(
+        ticker=ticker,
+        issuer_name=ticker,
+        doc_type=doc_type,  # type: ignore[arg-type]
+        period_kind=period_kind,  # type: ignore[arg-type]
+        period_year=period_year,
+        source="brvm_org",
+        source_url=f"https://brvm.org/{ticker}/{doc_type}-{period_year}.pdf",
+        url_hash=f"hash-{ticker}-{doc_type}-{period_year}",
+        published_date=date(period_year + 1, 3, 15),
+        file_path=f"data/filings/{ticker}/{doc_type}-{period_year}.pdf",
+        size_bytes=1024,
+        sha256="deadbeef",
+        page_count=42,
+    )
+
+
+def test_reset_shadowed_extractions_clears_richer_filings(monkeypatch, tmp_path):
+    """The ORAC repro: rapport_annuel (rank 1) extracted first with
+    shareholders, then etats_financiers (rank 2) extracted second and
+    wiped ownership. Recovery must clear extracted_utc on the
+    rapport_annuel so the next extract re-populates it."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            _mk_filing_of("rapport_annuel"),
+            _mk_filing_of("etats_financiers"),
+        ])
+        both = {r["doc_type"]: r["id"] for r in conn.execute(
+            "SELECT id, doc_type FROM filings"
+        ).fetchall()}
+        for fid in both.values():
+            filings_repo.mark_extracted(conn, fid)
+        # Financials row points at the LESSER filing — the shadowed state.
+        fin_repo.replace_period(
+            conn,
+            filing_id=both["etats_financiers"],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2025, revenue=1_500_000_000
+            ),
+        )
+
+    counts = svc.reset_shadowed_extractions()
+    assert counts == {"periods_shadowed": 1, "filings_reset": 1, "dry_run": 0}
+
+    with connect(db_path) as conn:
+        rows = {r["doc_type"]: r["extracted_utc"] for r in conn.execute(
+            "SELECT doc_type, extracted_utc FROM filings"
+        ).fetchall()}
+    # Rapport_annuel is now unstamped → next extract will re-process it.
+    assert rows["rapport_annuel"] is None
+    # Etats_financiers stays stamped — its P&L data is still in `financials`;
+    # replace_period's preserve-on-empty logic will merge the rapport_annuel's
+    # ownership + segments into the same row on the next pass.
+    assert rows["etats_financiers"] is not None
+
+
+def test_reset_shadowed_extractions_leaves_non_shadowed_alone(monkeypatch, tmp_path):
+    """If the persisted filing_id ALREADY points at the richest filing
+    for its period, there's nothing to unshadow."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            _mk_filing_of("rapport_annuel"),
+            _mk_filing_of("etats_financiers"),
+        ])
+        both = {r["doc_type"]: r["id"] for r in conn.execute(
+            "SELECT id, doc_type FROM filings"
+        ).fetchall()}
+        for fid in both.values():
+            filings_repo.mark_extracted(conn, fid)
+        # Financials points at the RICHER filing (rapport_annuel).
+        fin_repo.replace_period(
+            conn,
+            filing_id=both["rapport_annuel"],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2025, revenue=1_500_000_000
+            ),
+        )
+
+    counts = svc.reset_shadowed_extractions()
+    assert counts["filings_reset"] == 0
+    with connect(db_path) as conn:
+        stamped = list(conn.execute(
+            "SELECT 1 FROM filings WHERE extracted_utc IS NOT NULL"
+        ).fetchall())
+    assert len(stamped) == 2
+
+
+def test_reset_shadowed_extractions_dry_run_touches_nothing(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            _mk_filing_of("rapport_annuel"),
+            _mk_filing_of("etats_financiers"),
+        ])
+        both = {r["doc_type"]: r["id"] for r in conn.execute(
+            "SELECT id, doc_type FROM filings"
+        ).fetchall()}
+        for fid in both.values():
+            filings_repo.mark_extracted(conn, fid)
+        fin_repo.replace_period(
+            conn,
+            filing_id=both["etats_financiers"],
+            financials=fin_repo.FinancialsRow(ticker="SNTS", period_year=2025),
+        )
+
+    counts = svc.reset_shadowed_extractions(dry_run=True)
+    assert counts == {"periods_shadowed": 1, "filings_reset": 1, "dry_run": 1}
+    with connect(db_path) as conn:
+        stamped = list(conn.execute(
+            "SELECT 1 FROM filings WHERE extracted_utc IS NOT NULL"
+        ).fetchall())
+    assert len(stamped) == 2
