@@ -28,6 +28,8 @@ _RELOADABLE = (
     "brvm.services.fundamentals",
     "brvm.services.filings",
     "brvm.services.ocr",
+    "brvm.services.ratios",
+    "brvm.services.company_facts",
     "brvm.apps.web.routes.pages",
     "brvm.apps.web.routes.fragments",
     "brvm.apps.web.routes.api",

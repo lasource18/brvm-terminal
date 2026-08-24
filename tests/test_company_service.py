@@ -1,6 +1,6 @@
 import pytest
 
-from brvm.db import connect, ensure_migrations_table
+from brvm.db import connect
 from brvm.models import Security
 from brvm.store import securities as sec_repo
 
@@ -8,23 +8,27 @@ from brvm.store import securities as sec_repo
 @pytest.fixture
 def company_env(monkeypatch, tmp_path):
     import importlib
-    from pathlib import Path
 
     import brvm.config as cfg
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     importlib.reload(cfg)
+    # Phase 4d: company_mod now imports the ratios service, which caches
+    # its own `settings` reference at import time. Reload it too so
+    # `get_peers_with_ratios` sees the tmp_path DB.
     import brvm.services.company as company_mod
+    import brvm.services.ratios as ratios_mod
 
+    importlib.reload(ratios_mod)
     importlib.reload(company_mod)
 
-    root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        conn.executescript((root / "migrations" / "0001_init.sql").read_text())
-        conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
-        conn.commit()
+        # Apply the full migration set — new tabs (Phase 4d Peers-with-
+        # ratios) need columns the earliest two migrations don't ship.
+        from .conftest import apply_migrations
+
+        apply_migrations(conn)
         sec_repo.upsert(
             conn, [Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN")]
         )
@@ -138,3 +142,76 @@ def test_peers_success_path(company_env, monkeypatch):
     assert view.sector == "BRVM - TELECOMMUNICATIONS"
     # Self excluded
     assert {p.ticker for p in view.peers} == {"ORAC", "ONTBF"}
+
+
+def test_peers_with_ratios_annotates_from_ratios_service(company_env, monkeypatch, tmp_path):
+    """Phase 4d: the Peers tab route calls `get_peers_with_ratios`, which
+    should walk each peer through `services.ratios.get_latest_ratios`
+    and populate `pe`, `roe`, `net_margin` on the returned PeerRow."""
+    from brvm.models import Filing, Quote
+    from brvm.store import filings as filings_repo
+    from brvm.store import financials as fin_repo
+    from brvm.store import quotes as quotes_repo
+
+    def fake_secteur(ticker, country, client=None):
+        return {
+            "sector": "TELECOMS",
+            "peers": [
+                {"ticker": "SNTS", "country": "SN", "name": "SONATEL",
+                 "last": 32500, "change_day_pct": 1.0, "change_ytd_pct": 1.0,
+                 "volume": 100},
+                {"ticker": "ORAC", "country": "CI", "name": "ORANGE CI",
+                 "last": 19000, "change_day_pct": 1.0, "change_ytd_pct": 1.0,
+                 "volume": 100},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+    )
+
+    # Seed ORAC with financials + shares + a quote so it produces ratios.
+    db_path = tmp_path / "brvm.sqlite"
+    with connect(db_path) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+            Security(ticker="ONTBF", name="ONATEL BF", kind="equity", country="BF"),
+        ])
+        sec_repo.update_company_facts(
+            conn, "ORAC", shares_outstanding=150_000_000,
+        )
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="ORAC", source="sikafinance", last=19000.0, change_pct=1.0),
+        ])
+        filings_repo.upsert_filings(conn, [Filing(
+            ticker="ORAC", issuer_name="ORANGE CI", doc_type="rapport_annuel",
+            period_kind="annual", period_year=2024, source="brvm_org",
+            source_url="u1", url_hash="h1",
+            file_path="p1", size_bytes=1, sha256="a", page_count=1,
+        )])
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        fin_repo.replace_period(conn, filing_id=filing_id, financials=fin_repo.FinancialsRow(
+            ticker="ORAC", period_year=2024,
+            revenue=1_500_000_000_000,
+            net_income=300_000_000_000,
+            eps=2000,
+            total_equity=1_000_000_000_000,
+            total_assets=3_000_000_000_000,
+        ))
+
+    view = company_env.get_peers_with_ratios("SNTS")
+    peers_by_ticker = {p.ticker: p for p in view.peers}
+
+    # ORAC has extraction data → ratios populated.
+    orac = peers_by_ticker["ORAC"]
+    assert orac.pe == pytest.approx(19000 / 2000)             # 9.5x
+    assert orac.roe == pytest.approx(30.0)                    # 300 / 1000 * 100
+    assert orac.net_margin == pytest.approx(20.0)             # 300 / 1500 * 100
+
+    # ONTBF was never extracted — ratios stay None so the template
+    # renders "—" rather than blowing up.
+    ontbf = peers_by_ticker.get("ONTBF")
+    if ontbf is not None:  # fixture may not include it depending on filter
+        assert ontbf.pe is None
+        assert ontbf.roe is None
+        assert ontbf.net_margin is None

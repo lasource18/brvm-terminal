@@ -12,6 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from brvm.clock import ABIDJAN, is_market_open
 from brvm.logging import get
+from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.fundamentals import extract_pending
 from brvm.services.news import poll_all as poll_news
@@ -72,6 +73,18 @@ def _fundamentals_extract_job() -> None:
         log.info("scheduled fundamentals extraction ok: %s", counts.as_dict())
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled fundamentals extraction failed: %s", e)
+
+
+def _company_facts_refresh_job() -> None:
+    """Weekly refresh of sikafinance company facts (shares outstanding, float
+    %, market cap) that feed the ratios engine. Only touches rows older
+    than a week, so a rerun within the window is cheap."""
+    log.info("scheduled company-facts refresh start")
+    try:
+        counts = refresh_company_facts()
+        log.info("scheduled company-facts refresh ok: %s", counts)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled company-facts refresh failed: %s", e)
 
 
 def _filings_ocr_job() -> None:
@@ -135,6 +148,15 @@ def build_scheduler() -> BackgroundScheduler:
         _sector_enrich_job,
         CronTrigger(day_of_week="sun", hour="4", minute="0", timezone=str(ABIDJAN)),
         id="sector_enrichment_weekly",
+        replace_existing=True,
+    )
+    # Company facts (shares_outstanding / float % / market cap): weekly
+    # (Sun 04:30 Abidjan, right after sector enrichment). Numbers shift
+    # on share splits and issuance, not daily.
+    sched.add_job(
+        _company_facts_refresh_job,
+        CronTrigger(day_of_week="sun", hour="4", minute="30", timezone=str(ABIDJAN)),
+        id="company_facts_refresh_weekly",
         replace_existing=True,
     )
     # OCR sweep: daily at 02:00 Abidjan, one hour before the extraction

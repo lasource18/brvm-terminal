@@ -9,7 +9,7 @@ from brvm import __version__
 from brvm.apps.web import tabs
 from brvm.apps.web._common import base_ctx, templates
 from brvm.clock import is_market_open, utc_iso
-from brvm.services import company, directory, fundamentals, market, watchlist
+from brvm.services import company, directory, fundamentals, market, ratios, watchlist
 from brvm.services import news as news_svc
 
 router = APIRouter()
@@ -53,7 +53,10 @@ def security_tab(request: Request, ticker: str, tab: str):
     if spec.key == "description":
         ctx["profile"] = company.get_description(sec.ticker)
     elif spec.key == "peers":
-        ctx["peers"] = company.get_peers(sec.ticker)
+        # Phase 4d: peers now come annotated with P/E, ROE, net margin
+        # sourced from `services/ratios` so the tab supports cross-ticker
+        # comparison in-place.
+        ctx["peers"] = company.get_peers_with_ratios(sec.ticker)
     elif spec.key == "news":
         # Per-ticker feed: matches ticker_hint OR the LLM-tagged CSV.
         ctx["feed"] = news_svc.list_feed(ticker=sec.ticker, limit=25)
@@ -62,6 +65,8 @@ def security_tab(request: Request, ticker: str, tab: str):
     elif spec.key == "financials":
         ctx["financials"] = fundamentals.get_financials_series(sec.ticker)
         ctx["interim"] = fundamentals.get_latest_interim(sec.ticker)
+        ctx["ratios_series"] = ratios.get_ratios_series(sec.ticker)
+        ctx["interim_ratios"] = ratios.get_ratios_for_interim(sec.ticker)
     elif spec.key == "ownership":
         ctx["ownership"] = fundamentals.get_ownership(sec.ticker)
     elif spec.key == "segments":
