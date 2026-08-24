@@ -1,8 +1,51 @@
+{# Directory table body — sortable columns via HTMX.
+
+   Each header is an <a> whose hx-get points at /_frag/directory with the
+   full filter set plus the sort key. Direction toggles on repeat clicks
+   of the same column. Numeric columns default to descending on first
+   click; text columns to ascending. See services/directory._resolve_sort
+   for the invariants.
+#}
+{% macro sort_link(label, key, current, numeric=false) -%}
+  {%- set is_active = current.sort == key -%}
+  {%- if is_active -%}
+    {%- set next_dir = 'asc' if current.direction == 'desc' else 'desc' -%}
+  {%- else -%}
+    {%- set next_dir = 'desc' if numeric else 'asc' -%}
+  {%- endif -%}
+  {%- set arrow = '' -%}
+  {%- if is_active -%}
+    {%- set arrow = ' ↓' if current.direction == 'desc' else ' ↑' -%}
+  {%- endif -%}
+  {# `tojson` handles quote/special-char escaping so a sector name with
+     an ampersand or quote can't break the hx-vals JSON parse. #}
+  <a class="sortable{% if is_active %} active{% endif %}"
+     hx-get="/_frag/directory"
+     hx-vals='{{ {"country": current.country, "sector": current.sector, "q": current.q, "kind": current.kind, "sort": key, "direction": next_dir} | tojson }}'
+     hx-target="#dir-body"
+     hx-swap="outerHTML"
+     style="cursor: pointer; text-decoration: none; color: inherit;"
+     title="Sort by {{ label }} ({{ next_dir }})">{{ label }}{{ arrow }}</a>
+{%- endmacro %}
 <div id="dir-body" class="panel" style="margin-top: 12px;">
   <table class="quotes dir-table">
     <thead>
       <tr>
-        <th>TICKER</th><th>NAME</th><th>KIND</th><th>COUNTRY</th><th>SECTOR</th><th>LAST</th><th>CHG%</th>
+        <th>{{ sort_link('TICKER',  'ticker',         current) }}</th>
+        <th>{{ sort_link('NAME',    'name',           current) }}</th>
+        <th>{{ sort_link('KIND',    'kind',           current) }}</th>
+        <th>{{ sort_link('COUNTRY', 'country',        current) }}</th>
+        <th>{{ sort_link('SECTOR',  'sector',         current) }}</th>
+        <th>{{ sort_link('LAST',    'last',           current, numeric=true) }}</th>
+        <th>{{ sort_link('DAY%',    'change_pct',     current, numeric=true) }}</th>
+        <th>{{ sort_link('1W%',     'change_1w_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('1M%',     'change_1m_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('3M%',     'change_3m_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('YTD%',    'change_ytd_pct', current, numeric=true) }}</th>
+        <th>{{ sort_link('1Y%',     'change_1y_pct',  current, numeric=true) }}</th>
+        <th title="From the earliest recorded close/level for this ticker">
+          {{ sort_link('ALL%',      'change_all_pct', current, numeric=true) }}
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -14,12 +57,14 @@
           <td>{{ r.country or "—" }}</td>
           <td class="dim">{{ r.sector or "—" }}</td>
           <td>{% if r.last is not none %}{{ "{:,.0f}".format(r.last) }}{% else %}—{% endif %}</td>
-          <td class="{% if r.change_pct and r.change_pct > 0 %}pos{% elif r.change_pct and r.change_pct < 0 %}neg{% else %}zero{% endif %}">
-            {% if r.change_pct is not none %}{{ "%+.2f"|format(r.change_pct) }}%{% else %}—{% endif %}
-          </td>
+          {% for pct in [r.change_pct, r.change_1w_pct, r.change_1m_pct, r.change_3m_pct, r.change_ytd_pct, r.change_1y_pct, r.change_all_pct] %}
+            <td class="{% if pct and pct > 0 %}pos{% elif pct and pct < 0 %}neg{% else %}zero{% endif %}">
+              {% if pct is not none %}{{ "%+.2f"|format(pct) }}%{% else %}<span class="dim">—</span>{% endif %}
+            </td>
+          {% endfor %}
         </tr>
       {% else %}
-        <tr><td colspan="7" class="dim" style="text-align: center; padding: 20px;">No matches.</td></tr>
+        <tr><td colspan="13" class="dim" style="text-align: center; padding: 20px;">No matches.</td></tr>
       {% endfor %}
     </tbody>
   </table>

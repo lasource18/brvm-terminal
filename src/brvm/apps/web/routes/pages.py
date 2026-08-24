@@ -112,16 +112,25 @@ def directory_page(
     sector: str | None = Query(default=None),
     q: str | None = Query(default=None),
     kind: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    direction: str | None = Query(default=None),
 ):
     return templates.TemplateResponse(
         request,
         "directory.html",
         {
             **base_ctx(),
-            "rows": directory.list_directory(country=country, sector=sector, q=q, kind=kind),
+            "rows": directory.list_directory(
+                country=country, sector=sector, q=q, kind=kind,
+                sort=sort, direction=direction,
+            ),
             "countries": directory.distinct_countries(),
             "sectors": directory.distinct_sectors(),
-            "current": {"country": country or "", "sector": sector or "", "q": q or "", "kind": kind or ""},
+            "current": {
+                "country": country or "", "sector": sector or "",
+                "q": q or "", "kind": kind or "",
+                "sort": sort or "", "direction": (direction or "").lower(),
+            },
         },
     )
 
