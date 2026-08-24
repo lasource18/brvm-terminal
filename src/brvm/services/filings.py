@@ -205,11 +205,34 @@ def _size_ok(size_bytes: int) -> bool:
     return size_bytes <= settings.extract_max_pdf_mb * 1024 * 1024
 
 
+# macOS APFS and Linux ext4 both cap filename bytes at 255. brvm.org's
+# period labels are occasionally a full CAC sentence (see the SAPH 2024
+# "rapport des commissaires aux comptes sur l'existence…" row) and blow
+# through that when NFC-encoded. Cap the stem at 180 chars so a `.pdf`
+# extension plus an optional `_deadbeef` collision suffix still fits under
+# 200 bytes even in worst-case UTF-8.
+_MAX_STEM_CHARS = 180
+
+
+def _truncate_stem(stem: str, url: str) -> str:
+    """Keep filenames under the FS byte cap. When a stem exceeds
+    `_MAX_STEM_CHARS`, keep the head and append a short hash of the URL so
+    two long-labelled filings with different sources don't collide."""
+    if len(stem) <= _MAX_STEM_CHARS:
+        return stem
+    tag = hashlib.sha256(url.encode("utf-8")).hexdigest()[:8]
+    # Reserve room for the "_<tag>" suffix so the total stays bounded.
+    head = stem[: _MAX_STEM_CHARS - len(tag) - 1].rstrip("_-")
+    return f"{head}_{tag}"
+
+
 def _safe_file_name(published_date: str | None, doc_type: str, period_label: str | None,
                     url: str) -> str:
     """Predictable filename that stays readable in `ls`.
 
     Falls back to the URL basename if we can't reconstruct anything better.
+    Long period labels (occasionally a whole CAC sentence on brvm.org) are
+    truncated with a URL hash suffix so the filesystem doesn't reject them.
     """
     stem_parts: list[str] = []
     if published_date:
@@ -221,7 +244,7 @@ def _safe_file_name(published_date: str | None, doc_type: str, period_label: str
     stem = "_".join(p for p in stem_parts if p)
     if not stem:
         return url.rsplit("/", 1)[-1]
-    return f"{stem}.pdf"
+    return f"{_truncate_stem(stem, url)}.pdf"
 
 
 def _pdf_page_count(path: Path) -> int | None:
@@ -540,16 +563,19 @@ def _sikafinance_file_stem(
     published: date | None,
     doc_type: str,
     period_label: str | None,
+    *,
+    url: str = "",
 ) -> str:
     """Filesystem-safe filename stem, prefixed so it can't collide with a
-    brvm.org filename for the same ticker."""
+    brvm.org filename for the same ticker. Long labels get the same
+    truncate-with-URL-hash treatment as `_safe_file_name`."""
     parts: list[str] = ["sikafinance"]
     if published:
         parts.append(published.isoformat())
     parts.append(doc_type)
     if period_label:
         parts.append(re.sub(r"\s+", "-", period_label.strip().lower()))
-    return "_".join(parts)
+    return _truncate_stem("_".join(parts), url or doc_type)
 
 
 def _parse_published(published_at: str | None) -> date | None:
@@ -631,7 +657,12 @@ def promote_from_communiques(
                     continue
 
                 published = _parse_published(row["published_at"])
-                stem = _sikafinance_file_stem(published, classified.doc_type, classified.period_label)
+                stem = _sikafinance_file_stem(
+                    published,
+                    classified.doc_type,
+                    classified.period_label,
+                    url=row["url"],
+                )
                 dest = _filings_root() / ticker / f"{stem}.pdf"
                 if dest.exists():
                     dest = dest.with_stem(f"{dest.stem}_{uhash[:8]}")

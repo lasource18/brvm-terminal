@@ -102,6 +102,48 @@ def test_skips_non_filings(title):
     assert _classify(title) is None
 
 
+def test_safe_file_name_truncates_long_period_labels():
+    """The SAPH 2024 CAC row on brvm.org carries a full sentence in the
+    period-label slot. Uncapped, the resulting path blows past macOS's
+    255-byte cap and `dest.exists()` raises OSError 63."""
+    from brvm.services.filings import _MAX_STEM_CHARS, _safe_file_name
+
+    long_label = (
+        "rapport des commissaires aux comptes sur l'existence et la tenue "
+        "conforme du registre des titres nominatifs émis par la société "
+        "établi en application de l'article 746-2 de l'acte uniforme de "
+        "l'OHADA relatif au droit des sociétés commerciales et GIE"
+    )
+    name = _safe_file_name(
+        "2024-07-18",
+        "autre",
+        long_label,
+        "https://www.brvm.org/sites/default/files/some-file.pdf",
+    )
+    stem = name.removesuffix(".pdf")
+    assert len(stem) <= _MAX_STEM_CHARS
+    # The hash suffix keeps two truncated stems from different URLs
+    # distinct.
+    name2 = _safe_file_name(
+        "2024-07-18",
+        "autre",
+        long_label,
+        "https://www.brvm.org/sites/default/files/other-file.pdf",
+    )
+    assert name != name2
+
+
+def test_sikafinance_file_stem_truncates_long_period_labels():
+    from brvm.services.filings import _MAX_STEM_CHARS, _sikafinance_file_stem
+
+    long_label = "x" * 500
+    stem = _sikafinance_file_stem(
+        None, "rapport_activites", long_label,
+        url="https://www.sikafinance.com/docs/very-long.pdf",
+    )
+    assert len(stem) <= _MAX_STEM_CHARS
+
+
 def test_bare_year_annual_report():
     # No "Exercice" keyword; the "Rapport annuel" branch salvages a year.
     got = _classify("SONATEL SN _ Rapport annuel 2024")
