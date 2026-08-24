@@ -102,6 +102,11 @@ class DirectoryRow(BaseModel):
     change_1m_pct: float | None = None
     change_3m_pct: float | None = None
     change_ytd_pct: float | None = None
+    change_1y_pct: float | None = None
+    # All-time return vs the *earliest* recorded close/level for the
+    # ticker. Meaningful once we've accumulated enough history — a
+    # brand-new ticker whose earliest bar is also today returns 0%.
+    change_all_pct: float | None = None
 
 
 class Shareholder(BaseModel):

@@ -60,6 +60,8 @@ _SORTABLE: dict[str, str] = {
     "change_1m_pct": "change_1m_pct",
     "change_3m_pct": "change_3m_pct",
     "change_ytd_pct": "change_ytd_pct",
+    "change_1y_pct": "change_1y_pct",
+    "change_all_pct": "change_all_pct",
 }
 
 # Default order: indices at the top (kind = 'index' > 'equity' > 'bond'
@@ -97,16 +99,18 @@ def _resolve_sort(sort: str | None, direction: str | None) -> tuple[str, str, st
 
 
 def _ref_dates(today: date) -> dict[str, str]:
-    """Target reference dates for each period column. `1w`, `1m`, `3m`
-    are calendar-day windows (SQL will pick the closest bar on-or-before).
+    """Target reference dates for each period column. `1w`, `1m`, `3m`,
+    `1y` are calendar-day windows (SQL picks the closest bar on-or-before).
     YTD is the last trading day of the *prior* year, i.e. the base for
-    "year-to-date" is last year's close."""
+    "year-to-date" is last year's close. All-time is handled separately
+    (no target date — just MIN(session_date))."""
     return {
         "1w": (today - timedelta(days=7)).isoformat(),
         "1m": (today - timedelta(days=30)).isoformat(),
         "3m": (today - timedelta(days=90)).isoformat(),
         # `<` today's Jan 1 → last close of the prior year.
         "ytd": date(today.year, 1, 1).isoformat(),
+        "1y": (today - timedelta(days=365)).isoformat(),
     }
 
 
@@ -180,6 +184,22 @@ def list_directory(
               WHERE session_date < ? GROUP BY ticker) x
           ON x.ticker = p.ticker AND x.d = p.session_date
     ),
+    ref_1y  AS (
+        SELECT p.ticker, p.px FROM prices p
+        JOIN (SELECT ticker, MAX(session_date) AS d FROM prices
+              WHERE session_date <= ? GROUP BY ticker) x
+          ON x.ticker = p.ticker AND x.d = p.session_date
+    ),
+    -- All-time base = the earliest recorded price for the ticker. A
+    -- brand-new ticker whose earliest bar is also today naturally
+    -- returns 0% — the LEFT JOIN can't be null here as long as the
+    -- ticker has at least one price row.
+    ref_all AS (
+        SELECT p.ticker, p.px FROM prices p
+        JOIN (SELECT ticker, MIN(session_date) AS d FROM prices
+              GROUP BY ticker) x
+          ON x.ticker = p.ticker AND x.d = p.session_date
+    ),
     latest_q AS (
         SELECT ticker, MAX(captured_utc) AS captured_utc
         FROM quote_snapshots GROUP BY ticker
@@ -201,7 +221,11 @@ def list_directory(
            CASE WHEN lp.px IS NOT NULL AND r3m.px > 0
                 THEN (lp.px - r3m.px) / r3m.px * 100 END AS change_3m_pct,
            CASE WHEN lp.px IS NOT NULL AND rytd.px > 0
-                THEN (lp.px - rytd.px) / rytd.px * 100 END AS change_ytd_pct
+                THEN (lp.px - rytd.px) / rytd.px * 100 END AS change_ytd_pct,
+           CASE WHEN lp.px IS NOT NULL AND r1y.px > 0
+                THEN (lp.px - r1y.px) / r1y.px * 100 END AS change_1y_pct,
+           CASE WHEN lp.px IS NOT NULL AND rall.px > 0
+                THEN (lp.px - rall.px) / rall.px * 100 END AS change_all_pct
     FROM securities s
     LEFT JOIN latest lat ON lat.ticker = s.ticker
     LEFT JOIN prices lp  ON lp.ticker = lat.ticker AND lp.session_date = lat.d
@@ -209,6 +233,8 @@ def list_directory(
     LEFT JOIN ref_1m  r1m  ON r1m.ticker  = s.ticker
     LEFT JOIN ref_3m  r3m  ON r3m.ticker  = s.ticker
     LEFT JOIN ref_ytd rytd ON rytd.ticker = s.ticker
+    LEFT JOIN ref_1y  r1y  ON r1y.ticker  = s.ticker
+    LEFT JOIN ref_all rall ON rall.ticker = s.ticker
     LEFT JOIN latest_q lq ON lq.ticker = s.ticker
     LEFT JOIN quote_snapshots qs
         ON qs.ticker = lq.ticker AND qs.captured_utc = lq.captured_utc
@@ -219,7 +245,11 @@ def list_directory(
     ORDER BY {order_by}
     """
 
-    ordered_params = [refs["1w"], refs["1m"], refs["3m"], refs["ytd"], *params]
+    # `ref_all` has no target date, so it doesn't consume a param — the
+    # order here mirrors the CTE order in the SQL exactly.
+    ordered_params = [
+        refs["1w"], refs["1m"], refs["3m"], refs["ytd"], refs["1y"], *params,
+    ]
     with connect(_db_path()) as conn:
         rows = conn.execute(sql, ordered_params).fetchall()
     return [
@@ -235,6 +265,8 @@ def list_directory(
             change_1m_pct=r["change_1m_pct"],
             change_3m_pct=r["change_3m_pct"],
             change_ytd_pct=r["change_ytd_pct"],
+            change_1y_pct=r["change_1y_pct"],
+            change_all_pct=r["change_all_pct"],
         )
         for r in rows
     ]

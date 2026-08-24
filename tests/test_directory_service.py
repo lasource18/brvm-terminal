@@ -67,19 +67,25 @@ def _seed_period_bars(db_path, monkeypatch, today: date, dir_mod):
     on the module so the test doesn't drift with the real clock."""
     monkeypatch.setattr(dir_mod, "session_date_for", lambda dt=None: today)
 
-    # SNTS: 100 → 105 → 110 → 120 → 132 spanning today, -7d, -30d, -90d,
-    # and prior year. Reference formula for each period:
-    #   1W:  from -7d (110)  → (132-110)/110 = +20%
-    #   1M:  from -30d (105) → (132-105)/105 ≈ +25.71%
-    #   3M:  from -90d (100) → (132-100)/100 = +32%
+    # SNTS: 66 → 80 → 100 → 105 → 110 → 120 → 132 spanning today,
+    # -7d, -30d, -90d, -365d, prior year, and an "all-time" origin
+    # further back. Reference formula for each period:
+    #   1W:  from -7d (110)  → (132-110)/110  = +20%
+    #   1M:  from -30d (105) → (132-105)/105  ≈ +25.71%
+    #   3M:  from -90d (100) → (132-100)/100  = +32%
     #   YTD: from prior year close (90) → (132-90)/90 ≈ +46.67%
+    #   1Y:  from -365d (80) → (132-80)/80    = +65%
+    #   ALL: from earliest bar (66) → (132-66)/66 = +100%
     from datetime import timedelta as td
     bars = [
-        DailyBar(ticker="SNTS", session_date=today - td(days=90), close=100.0, source="sikafinance"),
-        DailyBar(ticker="SNTS", session_date=today - td(days=30), close=105.0, source="sikafinance"),
-        DailyBar(ticker="SNTS", session_date=today - td(days=7),  close=110.0, source="sikafinance"),
-        DailyBar(ticker="SNTS", session_date=today - td(days=1),  close=120.0, source="sikafinance"),
-        DailyBar(ticker="SNTS", session_date=today,               close=132.0, source="sikafinance"),
+        # Oldest first so the min-date query for `ref_all` picks 66.
+        DailyBar(ticker="SNTS", session_date=today - td(days=800), close=66.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today - td(days=365), close=80.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today - td(days=90),  close=100.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today - td(days=30),  close=105.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today - td(days=7),   close=110.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today - td(days=1),   close=120.0, source="sikafinance"),
+        DailyBar(ticker="SNTS", session_date=today,                close=132.0, source="sikafinance"),
         # Prior-year close, one day before Jan 1 of `today`'s year.
         DailyBar(ticker="SNTS",
                  session_date=date(today.year - 1, 12, 31), close=90.0,
@@ -156,6 +162,8 @@ def test_period_return_columns_populate_from_history(monkeypatch, tmp_path, dir_
     assert r.change_1m_pct == pytest.approx((132 - 105) / 105 * 100)
     assert r.change_3m_pct == pytest.approx((132 - 100) / 100 * 100)
     assert r.change_ytd_pct == pytest.approx((132 - 90) / 90 * 100)
+    assert r.change_1y_pct == pytest.approx((132 - 80) / 80 * 100)
+    assert r.change_all_pct == pytest.approx((132 - 66) / 66 * 100)
 
 
 def test_period_returns_are_none_when_history_missing(dir_env):
@@ -168,6 +176,8 @@ def test_period_returns_are_none_when_history_missing(dir_env):
     assert r.change_1m_pct is None
     assert r.change_3m_pct is None
     assert r.change_ytd_pct is None
+    assert r.change_1y_pct is None
+    assert r.change_all_pct is None
 
 
 def test_period_returns_use_closest_prior_bar(monkeypatch, tmp_path, dir_env):
@@ -192,6 +202,33 @@ def test_period_returns_use_closest_prior_bar(monkeypatch, tmp_path, dir_env):
 
     r = dir_env.list_directory(q="SNTS")[0]
     assert r.change_1w_pct == pytest.approx((110 - 100) / 100 * 100)
+
+
+def test_all_time_return_is_zero_when_earliest_bar_is_also_the_latest(
+    monkeypatch, tmp_path, dir_env
+):
+    """A brand-new ticker (or one where our history is so short the
+    earliest bar equals the latest) has ALL% = 0, not None. The
+    template still highlights it as "zero" so the row visibly reads
+    "0.00%" rather than "—" — communicates "we know, and it's flat"
+    vs "we don't have any reference bar"."""
+    from pathlib import Path
+    db_path = Path(dir_env.settings.db_path)
+    today = date(2026, 8, 24)
+    monkeypatch.setattr(dir_env, "session_date_for", lambda dt=None: today)
+
+    with connect(db_path) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=today, close=100.0, source="sikafinance"),
+        ])
+
+    r = dir_env.list_directory(q="SNTS")[0]
+    assert r.change_all_pct == pytest.approx(0.0)
+    # And the multi-window columns stay None — no reference bar 7/30/90d
+    # ago, and no prior-year close either.
+    assert r.change_1w_pct is None
+    assert r.change_ytd_pct is None
+    assert r.change_1y_pct is None
 
 
 def test_sort_by_column_desc_puts_biggest_movers_on_top(monkeypatch, tmp_path, dir_env):
