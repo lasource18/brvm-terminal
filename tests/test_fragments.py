@@ -79,8 +79,10 @@ def test_history_api_returns_ascending_bars(client, monkeypatch):
     payload = r.json()
     assert payload["kind"] == "equity"
     bars = payload["bars"]
-    assert len(bars) == 5
-    # Ascending by time
+    # 5 historical + 1 intraday overlay (Phase 4d/e — the SNTS quote seed
+    # in conftest produces today's synthetic candle from `quote_snapshots`).
+    assert len(bars) >= 5
+    # Ascending by time — the intraday bar (today) is naturally the last.
     dates = [b["time"] for b in bars]
     assert dates == sorted(dates)
     assert bars[0].keys() >= {"time", "open", "high", "low", "close", "volume"}

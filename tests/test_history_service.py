@@ -3,19 +3,17 @@ from pathlib import Path
 
 import pytest
 
-from brvm.db import connect, ensure_migrations_table
-from brvm.models import DailyBar, IndexLevel, Security
+from brvm.db import connect
+from brvm.models import DailyBar, IndexLevel, Quote, Security
 from brvm.store import quotes as quotes_repo
 from brvm.store import securities as sec_repo
 
 
 def _init(db_path: Path) -> None:
-    root = Path(__file__).resolve().parents[1]
+    from .conftest import apply_migrations
+
     with connect(db_path) as conn:
-        ensure_migrations_table(conn)
-        conn.executescript((root / "migrations" / "0001_init.sql").read_text())
-        conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
-        conn.commit()
+        apply_migrations(conn)
         sec_repo.upsert(
             conn,
             [
@@ -100,6 +98,220 @@ def test_falls_back_to_db_when_fetch_fails_and_db_has_rows(history_env, monkeypa
 
     bars = history_env.get_history("SNTS", "SN")
     assert len(bars) == 3
+
+
+def test_intraday_overlay_prepends_todays_bar_from_snapshots(history_env, monkeypatch):
+    """Today's session is missing from `daily_bars` during market hours
+    (sikafinance historique publishes T+1). The overlay stitches today's
+    candle in from `quote_snapshots` so the chart doesn't stop at
+    yesterday's close."""
+    from datetime import date as _date
+
+    # Freeze "today" so the test is deterministic across days.
+    today = _date(2026, 8, 24)
+    monkeypatch.setattr(history_env, "session_date_for", lambda dt=None: today)
+
+    # Seed yesterday and prior in daily_bars.
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=_date(2026, 8, 21),
+                     open=36000, high=37500, low=35900, close=37200, volume=1000,
+                     source="sikafinance"),
+            DailyBar(ticker="SNTS", session_date=_date(2026, 8, 20),
+                     open=35800, high=36200, low=35700, close=36000, volume=800,
+                     source="sikafinance"),
+        ])
+        # Seed a spread of today's snapshots so open/high/low/close aggregate.
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=36980, open=36980, high=36980, low=36980,
+                  volume=4546),
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37000, open=36980, high=37000, low=36980,
+                  volume=4931),
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=36900, open=36980, high=37000, low=36900,
+                  volume=5045),
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37000, open=36980, high=37000, low=36900,
+                  volume=5366),
+        ])
+        # Stamp all four snapshots at 12:00-15:00 UTC so the market-hours
+        # filter (>= 09:00 UTC on today) picks them all up. `insert_snapshots`
+        # writes captured_utc=now which wouldn't match a frozen `today`.
+        conn.execute(
+            "UPDATE quote_snapshots SET captured_utc = "
+            "'2026-08-24T' || printf('%02d', rowid + 11) || ':00:00Z'"
+        )
+        conn.commit()
+
+    # Neuter the network + freshness path so the DB read wins.
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
+
+    bars = history_env.get_history("SNTS", "SN")
+    # Newest-first: today's synthetic bar, then yesterday, then prior.
+    assert bars[0].session_date == today
+    assert bars[0].source == "intraday_snapshot"
+    assert bars[0].open == 36980
+    assert bars[0].close == 37000
+    assert bars[0].high == 37000        # max across snapshots
+    assert bars[0].low == 36900         # min across snapshots
+    assert bars[0].volume == 5366       # latest cumulative volume
+    # Historical bars unchanged.
+    assert bars[1].session_date == _date(2026, 8, 21)
+
+
+def test_intraday_overlay_skips_when_today_already_in_daily_bars(history_env, monkeypatch):
+    """Once the sikafinance nightly publishes today's row into
+    `daily_bars`, the intraday overlay should stand down so we don't
+    double-count."""
+    from datetime import date as _date
+
+    today = _date(2026, 8, 24)
+    monkeypatch.setattr(history_env, "session_date_for", lambda dt=None: today)
+
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=today,
+                     open=36000, high=37200, low=35800, close=37100, volume=8000,
+                     source="sikafinance"),
+        ])
+        # Snapshots also present but the historique already covers today.
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37200, open=36000, high=37200, low=35800, volume=8500),
+        ])
+        conn.execute("UPDATE quote_snapshots SET captured_utc = '2026-08-24T13:00:00Z'")
+        conn.commit()
+
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
+
+    bars = history_env.get_history("SNTS", "SN")
+    # Only the historique row for today — no synthetic prepend.
+    assert len(bars) == 1
+    assert bars[0].source == "sikafinance"
+    assert bars[0].close == 37100
+
+
+def test_intraday_overlay_ignores_premarket_snapshots(history_env, monkeypatch):
+    """Sikafinance's cotation page still serves yesterday's cumulative
+    data until the market opens; the overnight poller (00:17 / 01:17 /
+    03:17 UTC) therefore captures yesterday's numbers under today's
+    `captured_utc`. Those must not leak into today's synthetic candle."""
+    from datetime import date as _date
+
+    today = _date(2026, 8, 24)
+    monkeypatch.setattr(history_env, "session_date_for", lambda dt=None: today)
+
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=_date(2026, 8, 21),
+                     open=36000, high=37500, low=35900, close=37200, volume=1000,
+                     source="sikafinance"),
+        ])
+        # Two overnight snapshots showing yesterday's cumulative data,
+        # then two market-hours snapshots showing today's.
+        quotes_repo.insert_snapshots(conn, [
+            # Pre-market — stale data that must be excluded
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37200, open=34400, high=37200, low=34400, volume=13615),
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37200, open=34400, high=37200, low=34400, volume=13615),
+            # Market hours — real today data
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=36980, open=36980, high=36980, low=36980, volume=4546),
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37000, open=36980, high=37000, low=36900, volume=5366),
+        ])
+        # Rows 1-2 stamped at 00:17 / 03:17 UTC (pre-market),
+        # rows 3-4 stamped at 12:00 / 13:00 UTC (market hours).
+        conn.execute(
+            "UPDATE quote_snapshots SET captured_utc = "
+            "CASE rowid "
+            "WHEN 1 THEN '2026-08-24T00:17:00Z' "
+            "WHEN 2 THEN '2026-08-24T03:17:00Z' "
+            "WHEN 3 THEN '2026-08-24T12:00:00Z' "
+            "WHEN 4 THEN '2026-08-24T13:00:00Z' END"
+        )
+        conn.commit()
+
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
+
+    bars = history_env.get_history("SNTS", "SN")
+    intraday = bars[0]
+    assert intraday.session_date == today
+    assert intraday.source == "intraday_snapshot"
+    # Only market-hours captures contribute: open=36980, low=36900,
+    # high=37000, close=37000 (latest last), vol=5366 (latest cumulative).
+    # If pre-market rows had leaked, open would be 34400 and low would
+    # be 34400 too.
+    assert intraday.open == 36980
+    assert intraday.low == 36900
+    assert intraday.high == 37000
+    assert intraday.close == 37000
+    assert intraday.volume == 5366
+
+
+def test_intraday_overlay_pre_market_only_returns_history_unchanged(history_env, monkeypatch):
+    """Pre-market before the first real trade — only overnight stale
+    captures exist. The overlay should skip so we don't fabricate a
+    candle from yesterday's data."""
+    from datetime import date as _date
+
+    today = _date(2026, 8, 24)
+    monkeypatch.setattr(history_env, "session_date_for", lambda dt=None: today)
+
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=_date(2026, 8, 21),
+                     open=36000, high=37500, low=35900, close=37200, volume=1000,
+                     source="sikafinance"),
+        ])
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=37200, open=34400, high=37200, low=34400, volume=13615),
+        ])
+        conn.execute("UPDATE quote_snapshots SET captured_utc = '2026-08-24T03:17:00Z'")
+        conn.commit()
+
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
+
+    bars = history_env.get_history("SNTS", "SN")
+    # No overlay — chart stops cleanly at Friday's close.
+    assert len(bars) == 1
+    assert bars[0].session_date == _date(2026, 8, 21)
+
+
+def test_intraday_overlay_no_snapshots_no_overlay(history_env, monkeypatch):
+    """Weekend / scheduler down / pre-market — no snapshots for today,
+    so the returned series stops at yesterday's close cleanly."""
+    from datetime import date as _date
+
+    today = _date(2026, 8, 24)
+    monkeypatch.setattr(history_env, "session_date_for", lambda dt=None: today)
+
+    with connect(history_env._db_path()) as conn:
+        quotes_repo.upsert_daily_bars(conn, [
+            DailyBar(ticker="SNTS", session_date=_date(2026, 8, 21),
+                     open=36000, high=37200, low=35800, close=37100, volume=8000,
+                     source="sikafinance"),
+        ])
+
+    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+                        lambda *a, **kw: [])
+    monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
+
+    bars = history_env.get_history("SNTS", "SN")
+    assert len(bars) == 1
+    assert bars[0].session_date == _date(2026, 8, 21)
 
 
 def test_indices_load_from_index_levels_and_skip_network(history_env, monkeypatch):

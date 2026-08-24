@@ -140,6 +140,10 @@ class PeerRow(BaseModel):
     pe: float | None = None
     roe: float | None = None            # percentage points, e.g. 12.3
     net_margin: float | None = None     # percentage points
+    # True for the "self" row appended to the peers list so the currently-
+    # viewed company shows up in the comparison table (rendered at the
+    # bottom, visually distinguished by the template).
+    is_self: bool = False
 
 
 class PeersView(BaseModel):
