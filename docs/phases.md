@@ -15,7 +15,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 3c | News + corporate actions — UI (news feed, per-ticker tabs, 30-day strip on /) | done | 2026-08-21 |
 | 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
 | 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
-| 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | in progress | — |
+| 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | done | 2026-08-23 |
 | 5 | TUI (Textual) | not started | — |
 | 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
 
@@ -722,7 +722,7 @@ Consumes the 4a corpus to fill the three placeholder tabs on `/s/{ticker}`.
 
 ---
 
-## Phase 4c — Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback (in progress)
+## Phase 4c — Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback (done 2026-08-23)
 
 Closes the three coverage holes 4b's live pass surfaced:
 

@@ -73,7 +73,7 @@ def main() -> None:
         "--limit",
         type=int,
         default=None,
-        help="cap filings processed (default: 20)",
+        help="cap filings considered per pass (default: 200; budget cap still applies)",
     )
     parser.add_argument(
         "--dry-run",

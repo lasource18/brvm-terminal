@@ -222,6 +222,64 @@ def test_resolve_ticker_uses_slug_map_then_fuzzy(monkeypatch, tmp_path):
         assert row2 is not None and row2["ticker"] is None
 
 
+def test_resolve_ticker_matches_when_display_name_is_the_ticker(monkeypatch, tmp_path):
+    """brvm.org occasionally lists a display name that IS the ticker code
+    ("NSBC" for NSIA Banque). The name index alone would miss it — the
+    ticker index rescues these."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="NSBC", name="NSIA BANQUE", kind="equity", country="CI"),
+        ])
+        assert svc.resolve_ticker(conn, "brvm_org", "nsbc", "NSBC") == "NSBC"
+
+
+def test_resolve_ticker_uses_manual_slug_aliases(monkeypatch, tmp_path):
+    """Rename cases + slug-vs-name mismatches the fuzzy matcher can't
+    reach: brvm.org's `bici-ci` maps to BICC, `bollore-transport-logistics`
+    maps to SDSC (renamed to AGL), etc."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="BICC", name="BICICI", kind="equity", country="CI"),
+            Security(ticker="SDSC", name="AFRICA GLOBAL LOGISTICS",
+                     kind="equity", country="CI"),
+            Security(ticker="ETIT", name="ETI TG", kind="equity", country="TG"),
+            Security(ticker="LNBB", name="LOTERIE NATIONALE DU BENIN",
+                     kind="equity", country="BJ"),
+        ])
+        # brvm.org display "BICI CI" vs securities.name "BICICI" — no
+        # normalized match, alias table wins.
+        assert svc.resolve_ticker(conn, "brvm_org", "bici-ci", "BICI CI") == "BICC"
+        # Rename: brvm.org still calls it Bolloré, we call it AGL.
+        assert (
+            svc.resolve_ticker(conn, "brvm_org", "bollore-transport-logistics",
+                               "BOLLORE TRANSPORT & LOGISTICS")
+            == "SDSC"
+        )
+        # Abbreviation + rebrand: sikafinance display "ETI TG" happens to
+        # match here, but a fuzzy match against "ECOBANK TG" would still
+        # fail. Alias is what actually resolves it.
+        assert svc.resolve_ticker(conn, "brvm_org", "ecobank-tg", "ECOBANK TG") == "ETIT"
+        assert svc.resolve_ticker(conn, "brvm_org", "lnb", "LNB") == "LNBB"
+
+
+def test_resolve_ticker_manual_alias_is_source_scoped(monkeypatch, tmp_path):
+    """Manual aliases must only apply to their source; a sikafinance slug
+    that happens to collide with a brvm.org alias key mustn't be rewritten."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="OTHR", name="SOMETHING ELSE", kind="equity", country="CI"),
+        ])
+        # `bici-ci` is a brvm.org-only alias; hitting sikafinance with the
+        # same slug string shouldn't hijack the resolution.
+        assert svc.resolve_ticker(conn, "sikafinance", "bici-ci", "SOMETHING ELSE") == "OTHR"
+
+
 def test_resolve_ticker_bridges_country_code_differences(monkeypatch, tmp_path):
     """brvm.org writes 'BANK OF AFRICA BN' where sikafinance has
     'BANK OF AFRICA BENIN' (country BJ). The resolver must bridge both

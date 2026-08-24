@@ -169,7 +169,12 @@ def extract_pending(
     db_path = Path(settings.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
-        rows = filings_repo.list_needing_extraction(conn, limit=limit or 20)
+        # Default 200/pass so a catch-up run after `just filings-ocr` doesn't
+        # need to be invoked 30x in a row. The daily $2 cap
+        # (`llm_extract_daily_cap_cents`) is the real gate on spend — this
+        # limit just bounds how many filings we probe with pypdf per call,
+        # which is essentially free.
+        rows = filings_repo.list_needing_extraction(conn, limit=limit or 200)
         counts.pending_before = len(rows)
         counts.spend_micros_before = spend_repo.spent_micros(conn, day, table="filings_spend")
         counts.spend_micros_after = counts.spend_micros_before
