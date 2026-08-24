@@ -16,9 +16,11 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 4a | Fundamentals — filings corpus + storage | done | 2026-08-21 |
 | 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
 | 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | done | 2026-08-23 |
-| 4d | Fundamentals — financial ratios on the Financials + Peers tabs | in progress | — |
+| 4d | Fundamentals — financial ratios on the Financials + Peers tabs | done | 2026-08-24 |
 | 5 | TUI (Textual) | not started | — |
-| 6 | Alerts + daily brief + analyst-note synthesis | not started | — |
+| 6a | Alerts — price-move / new-filing / news rules + Discord delivery | done | 2026-08-24 |
+| 6b | Daily brief (post-close, stronger model) | not started | — |
+| 6c | Analyst-note synthesis (weekly per-ticker) | not started | — |
 
 **Backlog** (raised during earlier phases; each becomes its own mini-phase
 when we pick it up):
@@ -37,9 +39,14 @@ when we pick it up):
 - **Palmarès parser + BOC row extraction.** Deferred from Phase 1.
 - **`hx-push-url` on the `/news` filter form** so filtered views become
   shareable links. Small polish, not currently needed.
-- **Refactor `_RELOADABLE` in `tests/conftest.py` toward
-  dependency-injected settings** once it crosses ~15 modules
-  (currently 13).
+- **~~Refactor `_RELOADABLE` in `tests/conftest.py` toward
+  dependency-injected settings~~ done in Phase 6a** — replaced by a lazy
+  proxy in `brvm/config.py` with `reset_settings_cache()` as the test
+  escape hatch. `_RELOADABLE` is gone; every service accesses settings
+  via the proxy at call time.
+- **SGBC dividend fixture (in `test_news_service.py`) drifts out of the
+  60-day window** on 2026-08-24 — pre-existing failure not related to
+  6a. Fix is refreshing `tests/fixtures/sikafinance/dividendes.html`.
 
 ---
 
@@ -860,7 +867,7 @@ Closes the three coverage holes 4b's live pass surfaced:
 
 ---
 
-## Phase 4d — Fundamentals — financial ratios (in progress)
+## Phase 4d — Fundamentals — financial ratios (done 2026-08-24)
 
 Turns the P&L + balance-sheet rows shipped in 4b/4c into ratios the UI
 and (in Phase 6) the analyst-note prompt can reason about. No LLM calls,
@@ -985,15 +992,160 @@ layer as the web app.
 
 ---
 
-## Phase 6 — Alerts + daily brief + analyst-note synthesis — not started
+## Phase 6a — Alerts (done 2026-08-24)
 
-Planned scope:
-- Price-move + new-filing alerts (local `alerts` table + optional
-  Discord webhook).
-- Post-close daily brief job — stronger model than the Phase 3 tagger,
-  outputs a short markdown brief of movers + tagged news.
-- **Analyst-note synthesis**: since BRVM has essentially no public
-  sell-side coverage, generate our own per-ticker note weekly by feeding
-  the LLM the recent news + financials + price action. Rendered on the
-  `Analyst view` tab of `/s/{ticker}` (added in this phase). Clearly
-  labelled as machine-generated.
+First slice of Phase 6: a rule engine over the data we already collect
+(snapshots, filings, tagged news) plus a delivery worker that pushes
+matches out over Discord.
+
+**Also folded in**: the `_RELOADABLE` refactor that Phase 2.5 flagged.
+`brvm/config.py`'s `settings` is now a lazy proxy — attribute access
+loads a cached `Settings()` on first use, and `reset_settings_cache()`
+drops the cache. The 17 test files that previously did `importlib.reload`
+sweeps now just monkeypatch envs + call the reset. Fewer test-isolation
+sharp edges (see below).
+
+**Delivered**
+
+- **Migration `0009_alerts.sql`** — two tables:
+  - `alert_rules` (kind + optional ticker + kind-specific fields:
+    `threshold_pct`, `min_relevance`, `doc_types`) with a partial index
+    on enabled rows.
+  - `alert_events` (rule_id FK, kind, ticker, subject, body,
+    `payload_json`, `dedupe_key`, `fired_utc`, `delivered_utc`,
+    `delivery_status`) with `UNIQUE(rule_id, dedupe_key)` and a partial
+    index on `delivered_utc IS NULL` (the delivery queue).
+- **Models** — `AlertRule` and `AlertEvent` pydantic models with
+  `AlertKind = Literal["price_move", "new_filing", "news"]` and
+  `AlertDeliveryStatus = Literal["ok", "failed", "skipped"]`.
+- **`store/alerts.py`** — rule CRUD (`create_rule`, `list_rules`,
+  `get_rule`, `set_enabled`, `delete_rule`) and event helpers
+  (`record_event` returns None on dedupe hit, `list_undelivered`,
+  `mark_delivered`, `list_recent`, `count_undelivered`).
+- **`services/alerts.py`**:
+  - `evaluate_price_moves(conn, rules)` — dedupe by
+    `snap:<ticker>:<captured_utc>`, watchlist-wide with `ticker=None`.
+    `quote_snapshots` has no synthetic id (PK is composite), so the
+    ticker + timestamp is the natural key.
+  - `evaluate_new_filings(conn, rules, since_utc=None)` — dedupe by
+    `filing:<id>`, doc_types CSV narrows the match.
+  - `evaluate_news(conn, rules)` — dedupe by `news:<id>`, only reads
+    rows with `relevance IS NOT NULL` (untagged rows have nothing to
+    gate on), matches ticker via `ticker_hint` OR the `tickers_llm` CSV.
+  - `evaluate_all()` — single entry point the scheduler calls.
+  - `deliver_pending(sender=None, limit=None)` — walks the queue,
+    stops on first failure (a webhook that's failing shouldn't be
+    spammed with every queued event on the same pass), marks delivered
+    rows `ok`, leaves failed rows queued with `delivery_status='failed'`
+    for the next pass. No webhook configured → all events marked
+    `skipped` so the queue doesn't grow forever on a fresh install.
+- **Discord sender** — thin wrapper around `httpx.Client.post` with the
+  webhook URL. Payload is `{content, username}` (plain markdown, no
+  embeds — terminal aesthetic).
+- **Jobs + scheduler**:
+  - `jobs/alerts_evaluate.py` + `just alerts-eval` — prints the
+    counts + last 10 events.
+  - `jobs/alerts_deliver.py` + `just alerts-deliver` — drains queue.
+  - `alerts_evaluate_market_hours` (mon-fri 09-14 Abidjan, `11-59/15`
+    — offset +11 min from news poll so tagger has had time to run),
+    `alerts_evaluate_hourly_outside` (:41), `alerts_deliver_every_5min`
+    (`*/5`).
+- **UI**:
+  - `/alerts` page with a rules table (kind chip, ticker, trigger
+    summary, label, on/off toggle, delete button) and a recent-events
+    feed (color-coded by delivery status). "no webhook" badge when
+    `DISCORD_WEBHOOK_URL` is unset.
+  - Add-a-rule form with kind-specific field groups toggled by inline
+    `hx-on:change` so a `price_move` picker only shows
+    `threshold_pct`, etc.
+  - HTMX endpoints under `/_frag/alerts/rules` for POST create, POST
+    `/toggle`, DELETE.
+  - Topbar `Alerts` link.
+- **Settings** — `DISCORD_WEBHOOK_URL` (empty ⇒ disabled),
+  `ALERTS_DEDUPE_WINDOW_HOURS=24`, `ALERTS_DELIVERY_BATCH=10`,
+  `settings.has_discord` convenience property.
+- **`config.py` refactor** — `settings` is now a `_SettingsProxy` that
+  lazy-loads a cached `Settings()` on attribute access, plus
+  `reset_settings_cache()` for tests. `tests/conftest.py` lost
+  `_RELOADABLE` + `_reload_all`; the `client` fixture calls a small
+  `reset_module_state()` that resets the cache + clears the two TTL
+  caches (company / history) + drops the memoized Anthropic client.
+
+**Two invariants the tests pin**
+
+1. **Never re-fire a rule for the same event.** Every evaluator computes
+   a natural `dedupe_key` (snapshot's `ticker:captured_utc`, filing id,
+   news id) and the `UNIQUE(rule_id, dedupe_key)` at the store layer
+   drops any repeat.
+2. **Never lose an event.** `delivered_utc IS NULL` is the entire
+   queue definition; a webhook 5xx or a missing `DISCORD_WEBHOOK_URL`
+   leaves rows for a later pass (or explicitly stamps them `skipped` so
+   they don't accumulate forever with no notifications). The batch cap
+   keeps recovery from becoming a flood.
+
+**Definition of Done — met**
+
+- `just migrate` picks up `0009` idempotently.
+- `just alerts-eval` runs against the live DB and reports counts +
+  recent events. Verified live: 24 events fired for a wildcard
+  |Δ|≥1% rule against the current snapshots, second run reported 24
+  deduped.
+- `just alerts-deliver` with no webhook: 10 events marked `skipped`,
+  reason `no_webhook`.
+- `/alerts` renders empty state; POSTing a rule adds it; toggle flips
+  enabled; DELETE removes it. Topbar carries the link.
+- `just test` → **379 tests green** (42 new: 19 in
+  `test_alerts_service.py` covering the store, all three evaluators,
+  dedupe, and delivery in every operational shape; 10 in
+  `test_alerts_ui.py` covering the page + form + toggle + delete + 404
+  branches; 3 lines added to `test_scheduler_windows.py`). Ruff clean.
+  The one pre-existing failure
+  (`test_poll_all_ingests_and_dedupes` — SGBC fixture date drift) is
+  unchanged.
+
+**Notes / follow-ups**
+
+- **Settings proxy exposes a pre-existing test-isolation leak in
+  `test_market_service.py`.** The old suite let `_reload_all()` +
+  monkeypatch ordering hide the fact that the test only applied
+  migrations 0001+0002 despite calling `market.overview()` (which
+  reaches into `corporate_actions` from 0003). Fixed by pointing the
+  `_seed()` helper at `conftest.apply_migrations` — the same helper
+  every other post-3a test already uses.
+- **No AlertRule ↔ AlertEvent audit view yet.** The events feed is
+  sorted by fire time; if a rule fires the same "kind of thing"
+  (e.g. daily price moves on SNTS) frequently the feed will be
+  dominated by that rule. Grouping/filtering is a follow-up if it
+  becomes noisy in practice.
+- **Delivery is Discord-only.** The interface is small enough
+  (`_DiscordSender.send(event) -> (bool, str)`) that a second sink
+  (Slack, email) would slot in without a schema move — but nothing
+  needs it today.
+- **Dedupe window setting is currently informational.**
+  `ALERTS_DEDUPE_WINDOW_HOURS` lands in `.env` but the store dedupe
+  is per-event-identity rather than per-time-window. If a rule ever
+  needs "fire once per 24h regardless of underlying event," we'd
+  extend `dedupe_key` to include a coarsened timestamp. Left for
+  when a real-world false-positive shows up.
+- **First real `just alerts-deliver` on the Mac with a Discord webhook
+  is still pending.** Once configured, the same rule set that lit up
+  24 events on the smoke test will start pushing to the channel.
+
+---
+
+## Phase 6b — Daily brief — not started
+
+Planned scope: post-close job that summarizes movers + tagged news with
+a stronger model than Haiku (Sonnet 4.6 candidate), stores results in a
+new `briefs` table with a separate `brief_spend` daily counter, and
+renders a `/brief` page + last-N archive.
+
+---
+
+## Phase 6c — Analyst-note synthesis — not started
+
+Planned scope: since BRVM has essentially no public sell-side coverage,
+generate our own per-ticker note weekly by feeding the LLM the recent
+news + financials + ratios + price action. Rendered on the
+`Analyst view` tab of `/s/{ticker}` (added in this phase). Clearly
+labelled as machine-generated.

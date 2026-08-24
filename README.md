@@ -21,7 +21,9 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 4c — fundamentals (OCR + interim extraction + sikafinance-communiqué fallback)
 - [x] Phase 4d — fundamentals (financial ratios on the Financials + Peers tabs)
 - [ ] Phase 5 — TUI
-- [ ] Phase 6 — alerts + daily brief + analyst-note synthesis
+- [x] Phase 6a — alerts (price move + new filing + news relevance)
+- [ ] Phase 6b — daily brief
+- [ ] Phase 6c — analyst-note synthesis
 
 ## Requirements
 
@@ -254,6 +256,41 @@ Runs automatically on the scheduler every Sunday at 04:30 Africa/Abidjan
 **Deferred**: P/FCF, FCF yield, and EV/EBITDA are on the backlog — they
 need cash-flow (`cash_flow_ops`, `capex`) added to the extractor first.
 See `docs/phases.md` for the Phase 4d writeup.
+
+## Try it (Phase 6a demo — alerts)
+
+Phase 6a adds a rule engine over the existing snapshots / filings /
+tagged news, and pushes matched events to Discord (optional).
+
+```bash
+just dev                    # /alerts — create + toggle + delete rules
+just alerts-eval            # one eval pass — fires matching events
+just alerts-deliver         # drain queue via DISCORD_WEBHOOK_URL
+```
+
+Rule kinds:
+
+- **`price_move`** — fires when `|change_pct| ≥ threshold_pct` on the
+  latest snapshot. `ticker=None` scans every security (watchlist-wide).
+- **`new_filing`** — fires on each new row in `filings`. Narrow by
+  `ticker` and/or a CSV of `doc_types`.
+- **`news`** — fires on Haiku-tagged news whose `relevance ≥
+  min_relevance` and whose attribution (`ticker_hint` or `tickers_llm`
+  CSV) matches the rule's ticker. Untagged rows don't participate.
+
+Guarantees:
+
+- **Never re-fire.** `(rule_id, dedupe_key)` is UNIQUE at the store
+  layer — a re-eval on the same snapshot / filing / news row is a no-op.
+- **Never lose an event.** `delivered_utc IS NULL` is the queue; a
+  webhook outage leaves rows for the next pass. Batch cap
+  (`ALERTS_DELIVERY_BATCH=10`) keeps recovery from becoming a flood.
+- **Degrades quietly.** No `DISCORD_WEBHOOK_URL` → events are marked
+  `skipped` and stay visible on `/alerts` for manual review.
+
+Alerts also run on the scheduler: eval every 15 min during market hours
+(offset +11 from the news poll so tagged relevance has settled), hourly
+otherwise; delivery every 5 min.
 
 ## Try it (Phase 1 demo)
 

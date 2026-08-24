@@ -97,3 +97,14 @@ filings-ocr:
 # scheduler; use this to trigger a manual pass.
 company-refresh:
     uv run python -m brvm.jobs.company_refresh --once
+
+# Phase 6a: evaluate every enabled alert rule and queue matching events.
+# Idempotent — a re-eval before new data lands is a no-op via the
+# (rule_id, dedupe_key) UNIQUE in alert_events.
+alerts-eval:
+    uv run python -m brvm.jobs.alerts_evaluate --once
+
+# Phase 6a: drain the alert_events queue via the Discord webhook.
+# No-ops when DISCORD_WEBHOOK_URL is unset (events land as 'skipped').
+alerts-deliver:
+    uv run python -m brvm.jobs.alerts_deliver --once

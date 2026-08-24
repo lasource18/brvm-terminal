@@ -145,3 +145,45 @@ class Filing(BaseModel):
     size_bytes: int
     sha256: str
     page_count: int | None = None
+
+
+# --- Alerts (Phase 6a) -----------------------------------------------------
+
+AlertKind = Literal["price_move", "new_filing", "news"]
+AlertDeliveryStatus = Literal["ok", "failed", "skipped"]
+
+
+class AlertRule(BaseModel):
+    """One user-configured trigger.
+
+    `ticker=None` means "any security" (watchlist-wide). Only the fields
+    relevant to `kind` are read — the rest are ignored at eval time, but
+    kept on the row so the /alerts page can round-trip a rule verbatim.
+    """
+
+    id: int | None = None
+    kind: AlertKind
+    ticker: str | None = None
+    threshold_pct: float | None = None       # price_move: |change_pct| trigger
+    min_relevance: int | None = None         # news: Haiku relevance floor
+    doc_types: str | None = None             # new_filing: CSV of FilingDocType
+    label: str | None = None
+    enabled: bool = True
+
+
+class AlertEvent(BaseModel):
+    """One fired alert. `dedupe_key` is the natural identity of the *thing*
+    that fired — a snapshot id, filing id, news id, etc. — so a rule that
+    keeps matching only produces one row per underlying event."""
+
+    id: int | None = None
+    rule_id: int
+    kind: AlertKind
+    ticker: str | None = None
+    subject: str
+    body: str
+    payload_json: str | None = None
+    dedupe_key: str
+    fired_utc: str | None = None             # populated by the store on insert
+    delivered_utc: str | None = None
+    delivery_status: AlertDeliveryStatus | None = None
