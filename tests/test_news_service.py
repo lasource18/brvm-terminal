@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from brvm.config import reset_settings_cache
@@ -12,6 +13,12 @@ from brvm.store import news as news_repo
 from brvm.store import securities as sec_repo
 
 from .conftest import apply_migrations
+
+# Fixture snapshot date — dividend rows in tests/fixtures/sikafinance/
+# dividendes.html are dated relative to this. Any test that reads
+# `list_corporate_actions_upcoming` from those rows must pin `today` here
+# so the assertion doesn't drift as the wall clock moves past ex-dates.
+FIXTURE_TODAY = date(2026, 8, 20)
 
 
 def _seed_db(db_path: Path) -> None:
@@ -84,7 +91,11 @@ def test_poll_all_ingests_and_dedupes(monkeypatch, tmp_path, fixtures_dir):
         assert hints.get("SGBCI") == "SGBC"
 
         # Dividends -> corporate_actions carries at least SGBC/TTLC/SPHC.
-        rows = news_repo.list_corporate_actions_upcoming(conn, days=60)
+        # Pin `today` to the fixture-capture date so ex-dates baked into
+        # dividendes.html remain "upcoming" no matter when the test runs.
+        rows = news_repo.list_corporate_actions_upcoming(
+            conn, days=60, today=FIXTURE_TODAY,
+        )
         tickers = {r["ticker"] for r in rows}
         assert {"SGBC", "TTLC", "SPHC"}.issubset(tickers)
 

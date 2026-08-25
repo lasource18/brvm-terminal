@@ -19,7 +19,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 4d | Fundamentals — financial ratios on the Financials + Peers tabs | done | 2026-08-24 |
 | 5 | TUI (Textual) | not started | — |
 | 6a | Alerts — price-move / new-filing / news rules + Discord delivery | done | 2026-08-24 |
-| 6b | Daily brief (post-close, stronger model) | not started | — |
+| 6b | Daily brief (post-close, Haiku) | done | 2026-08-25 |
 | 6c | Analyst-note synthesis (weekly per-ticker) | not started | — |
 
 **Backlog** (raised during earlier phases; each becomes its own mini-phase
@@ -1133,12 +1133,126 @@ sharp edges (see below).
 
 ---
 
-## Phase 6b — Daily brief — not started
+## Phase 6b — Daily brief (done 2026-08-25)
 
-Planned scope: post-close job that summarizes movers + tagged news with
-a stronger model than Haiku (Sonnet 4.6 candidate), stores results in a
-new `briefs` table with a separate `brief_spend` daily counter, and
-renders a `/brief` page + last-N archive.
+Post-close markdown brief synthesized by Haiku from the day's indices,
+top movers, high-relevance tagged news, and next-7-day corporate
+actions. One row per UTC day (rerun overwrites — there's only one brief
+for a given day). Cost accounting is fully isolated in `brief_spend`,
+independent of the 3b tagger and 4b extractor budgets.
+
+**Model choice**: started on Haiku, not Sonnet 4.6 as first sketched.
+At ~2k output tokens per brief the price step doesn't justify the
+prose-quality lift on a very structured, JSON-fed prompt. `BRIEF_MODEL`
+in `.env` flips to Sonnet if the write-ups feel thin once real days
+have run.
+
+**Delivered**
+
+- **Migration `0010_briefs.sql`** — two tables:
+  - `briefs` (day PK, model, title, markdown, `context_json`,
+    input/output tokens, `usd_micros`, `generated_utc`, `session_date`).
+    `context_json` stores the raw snapshot the model saw so a future
+    re-run with a different prompt doesn't need to re-gather.
+  - `brief_spend` — same shape as `llm_spend` after 0004; `SpendTable`
+    literal in `store/spend.py` now covers all three counters.
+- **`Brief` model** — day + model + markdown + context_json +
+  token/cost accounting.
+- **`store/briefs.py`** — `upsert` (INSERT OR REPLACE, overwrite same
+  day in one statement so the UI never renders a half-written brief),
+  `get`, `latest`, `list_recent`, `count`.
+- **`services/brief.py`**:
+  - `gather_context(day)` — pulls `market.overview` + `news_svc.list_feed`
+    (filtered to `day` and `min_relevance`) + `news_svc.list_upcoming_actions`.
+    Same read paths as the UI so the brief can't diverge from what a
+    human sees at ~15:00.
+  - `_SYSTEM_PROMPT` — structured markdown output (`# Session recap` →
+    `# Movers` → `# News that matters` → `# Watch tomorrow`), grounded
+    on the JSON snapshot with an explicit "never invent figures" rule.
+    English body from French source per the charter.
+  - `generate_for(day, client=None, dry_run=False)` — one-shot end-to-
+    end. Pre-checks `brief_spend` against `BRIEF_DAILY_CAP_CENTS` (50)
+    before the call, records real usage against the same day the brief
+    covers (not `utcnow()`) so a `--date` override rolls up cleanly,
+    stamps `title` from the first `# heading` line.
+- **`services/llm.py` public helpers** — `response_text()` and
+  `usage_from_response()` promoted from `_` names (Phase 6c will reuse
+  them for analyst-note synthesis).
+- **`jobs/brief_run.py`** + `just brief-run` / `just brief-run-dry` /
+  `just brief-run --date YYYY-MM-DD` (via `python -m brvm.jobs.brief_run`).
+  Scheduler: `brief_daily` at 15:30 Africa/Abidjan Mon-Fri (BRVM closes
+  ~15:00; the news tagger has finished stamping relevance by then).
+- **`/brief`** page — latest brief with a "machine-generated" badge, an
+  archive sidebar (last 30 days, current one highlighted).
+  **`/brief/YYYY-MM-DD`** for archive links. Server-side render via
+  `markdown-it-py` with `html=False` so raw HTML in the markdown source
+  is escaped (asserted by a test).
+- **Topbar** — new `Brief` link between `Alerts` and the search box.
+- **CSS** — dark, dense, monospace: styled markdown headings match the
+  accent color, sidebar sits right of the article on desktop and
+  stacks below on narrow screens.
+- **Settings** — `BRIEF_MODEL` (Haiku 4.5 dated snapshot),
+  `BRIEF_DAILY_CAP_CENTS=50`, `BRIEF_MIN_RELEVANCE=6`,
+  `BRIEF_MAX_NEWS_ITEMS=30`, `BRIEF_MAX_OUTPUT_TOKENS=2048`,
+  `settings.brief_daily_cap_micros` convenience property.
+- **`markdown-it-py`** added to `pyproject.toml` deps. Pure Python, no
+  compiled extensions — installs cleanly on the Mac and the VPS.
+
+**Two invariants the tests pin**
+
+1. **Overwrite same day.** `test_upsert_overwrites_same_day` +
+   `test_generate_overwrites_same_day` — running twice on the same day
+   leaves exactly one row, and it's the newer content.
+2. **Never lose spend accounting.** `test_generate_empty_reply_bills_but_marks_failed`
+   asserts that a model reply we can't use (empty content) still bills
+   the input tokens into `brief_spend`; the budget cap can't be
+   bypassed by a failed brief. A transport error before the API sees
+   any tokens is the opposite case — `test_generate_transport_error_is_reported_not_billed`
+   pins that at zero.
+
+**Definition of Done — met**
+
+- `just migrate` picks up `0010` idempotently.
+- `just brief-run-dry` prints gather-only counts and spends nothing.
+  Live smoke on the Mac: `2026-08-25: 0 news, 20 movers, 8 upcoming
+  actions`; with `--date 2026-08-20`, `1 news`. Correctly falls back
+  when a day has no tagged news.
+- `just brief-run` end-to-end (verified with a scripted `FakeAnthropic`;
+  live Haiku call still pending — see below).
+- `just test` → **400 tests green** (21 new: 3 store + 2 gather + 8
+  service including happy-path, overwrite, dry-run, no-key, budget
+  exhausted, empty-reply, transport error, read helpers; 8 UI covering
+  empty state, latest render, `/brief/{day}` archive, 404 branches,
+  HTML escaping; 1 scheduler-wiring line). One pre-existing failure
+  (`test_poll_all_ingests_and_dedupes` — SGBC fixture date drift) is
+  unchanged.
+- Ruff clean.
+
+**Notes / follow-ups**
+
+- **First live `just brief-run` on the Mac with a real key still
+  pending.** Once it runs, `brief_spend` starts accumulating; expect
+  fractions of a cent per weekday at Haiku rates. If output quality
+  reads thin, flip `BRIEF_MODEL=claude-sonnet-4-6` and re-run — the
+  pricing table in `services/llm.py` already covers Sonnet.
+- **Test-isolation fix folded in.** The `client` fixture now also
+  monkeypatches `DISCORD_WEBHOOK_URL=""` + `ANTHROPIC_API_KEY=""` so a
+  developer's `.env` doesn't leak into rendered HTML (the `/alerts`
+  "no webhook" badge test regressed on my box after Phase 6a because
+  I'd set the webhook URL for a smoke test). Pinning both to empty in
+  the fixture keeps tests independent of local secrets.
+- **`response_text` + `usage_from_response` are now public** — 6c's
+  analyst-note synthesis will use them verbatim, so I stopped
+  reaching for the underscore-prefixed names from another module.
+  The old `_` aliases are kept as one-line back-compat handles.
+- **Archive is unpaginated at 30 rows.** Enough for the first quarter
+  of daily briefs. If we ever want deeper history, add
+  `/brief?offset=…` — the store already has a `limit`-based query.
+- **`context_json` isn't shown in the UI.** It's stored purely for
+  reproducibility; a future "regenerate with this prompt tweak"
+  workflow can read it back without re-hitting sikafinance. If it
+  needs a viewer, a `/brief/{day}/context` endpoint would be a
+  small addition.
 
 ---
 

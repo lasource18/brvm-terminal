@@ -85,6 +85,25 @@ class Settings(BaseSettings):
     # produce a 50-message avalanche when it recovers.
     alerts_delivery_batch: int = 10
 
+    # --- Daily brief (Phase 6b) ---
+    # Starts on Haiku (matches the 3b tagger — same $/tok, dated snapshot);
+    # can be flipped to Sonnet later if the write-up quality warrants it.
+    brief_model: str = "claude-haiku-4-5-20251001"
+    # $0.50/day cap. One brief per weekday, ~2k output tokens on a normal
+    # day; Haiku prices this at fractions of a cent, so the cap is mostly
+    # a safety net for a run-away prompt.
+    brief_daily_cap_cents: int = 50
+    # News-item floor for what the brief writer sees. Below this we drop
+    # the row entirely from the model's context so the prompt stays lean.
+    brief_min_relevance: int = 6
+    # Hard cap on news items handed to the model. A very newsy day (e.g.
+    # results season) can produce dozens of high-relevance items; more
+    # than this and we truncate to the most-relevant first.
+    brief_max_news_items: int = 30
+    # Output tokens ceiling. Two thousand is comfortable for a ~500-word
+    # markdown brief.
+    brief_max_output_tokens: int = 2048
+
     http_user_agent: str = Field(default="brvm-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 
@@ -99,6 +118,10 @@ class Settings(BaseSettings):
     @property
     def has_discord(self) -> bool:
         return bool(self.discord_webhook_url)
+
+    @property
+    def brief_daily_cap_micros(self) -> int:
+        return self.brief_daily_cap_cents * 10_000
 
 
 _cached: Settings | None = None

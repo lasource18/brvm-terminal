@@ -116,6 +116,11 @@ def client(monkeypatch, tmp_path):
 
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
+    # Pin optional secrets to empty so the .env on a real developer's
+    # machine doesn't leak into a test's rendered HTML (e.g. the /alerts
+    # page's "no webhook" badge disappears if DISCORD_WEBHOOK_URL is set).
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     reset_module_state()
     _seed(db_path)
 

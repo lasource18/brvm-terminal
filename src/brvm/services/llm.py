@@ -172,7 +172,9 @@ def usd_micros_for(
     return round(usd * _MICROS_PER_USD)
 
 
-def _usage_from_response(response: Any, model: str) -> Usage:
+def usage_from_response(response: Any, model: str) -> Usage:
+    """Extract token counts + priced cost from an Anthropic response.
+    Public since Phase 6b — the brief writer reuses it verbatim."""
     u = getattr(response, "usage", None)
     input_tokens = int(getattr(u, "input_tokens", 0) or 0)
     output_tokens = int(getattr(u, "output_tokens", 0) or 0)
@@ -192,6 +194,9 @@ def _usage_from_response(response: Any, model: str) -> Usage:
         ),
         calls=1,
     )
+
+
+_usage_from_response = usage_from_response
 
 
 # --------------------------------------------------------------------------
@@ -344,10 +349,16 @@ def reset_client() -> None:
 # --------------------------------------------------------------------------
 
 
-def _response_text(response: Any) -> str:
+def response_text(response: Any) -> str:
+    """Concatenate the `text` content blocks of an Anthropic response.
+    Public since Phase 6b — the brief writer reuses it verbatim."""
     return "".join(
         b.text for b in getattr(response, "content", []) or [] if getattr(b, "type", "") == "text"
     )
+
+
+# Back-compat alias for pre-6b callers inside this module.
+_response_text = response_text
 
 
 def _validate(raw_text: str, wanted_ids: set[int], allowed_tickers: set[str]) -> list[NewsTag]:

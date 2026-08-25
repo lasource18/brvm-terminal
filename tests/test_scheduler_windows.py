@@ -41,3 +41,5 @@ def test_scheduler_builds():
     assert "alerts_evaluate_market_hours" in ids
     assert "alerts_evaluate_hourly_outside" in ids
     assert "alerts_deliver_every_5min" in ids
+    # Phase 6b jobs.
+    assert "brief_daily" in ids
