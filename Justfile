@@ -112,9 +112,11 @@ alerts-deliver:
 # Phase 6b: generate today's post-close brief and persist it to `briefs`.
 # Respects the $0.50/day cap (BRIEF_DAILY_CAP_CENTS). Runs Mon-Fri at
 # 15:30 Abidjan on the scheduler; use this to trigger a manual pass.
-brief-run:
-    uv run python -m brvm.jobs.brief_run --once
+# Extra args pass through: `just brief-run --date 2026-08-20`.
+brief-run *args:
+    uv run python -m brvm.jobs.brief_run --once {{args}}
 
 # Same, without spending anything: prints the context shape only.
-brief-run-dry:
-    uv run python -m brvm.jobs.brief_run --once --dry-run
+# Extra args pass through: `just brief-run-dry --date 2026-08-20`.
+brief-run-dry *args:
+    uv run python -m brvm.jobs.brief_run --once --dry-run {{args}}
