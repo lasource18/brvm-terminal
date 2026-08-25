@@ -14,6 +14,7 @@ from brvm.clock import ABIDJAN, is_market_open
 from brvm.logging import get
 from brvm.services.alerts import deliver_pending as deliver_alerts
 from brvm.services.alerts import evaluate_all as evaluate_alerts
+from brvm.services.analyst_notes import generate_for_all as generate_analyst_notes
 from brvm.services.brief import generate_for as generate_brief
 from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
@@ -149,6 +150,18 @@ def _brief_job() -> None:
         log.exception("scheduled brief run failed: %s", e)
 
 
+def _analyst_notes_job() -> None:
+    """Weekly per-ticker analyst notes. Runs Sat 20:00 Africa/Abidjan
+    so Friday's close, news tags, and Friday's brief have all landed —
+    plenty of time for the notes to be ready before Monday's open."""
+    log.info("scheduled analyst notes start")
+    try:
+        counts = generate_analyst_notes()
+        log.info("scheduled analyst notes ok: %s", counts.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled analyst notes failed: %s", e)
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone=str(ABIDJAN))
     # Every 10 minutes during market hours.
@@ -269,6 +282,17 @@ def build_scheduler() -> BackgroundScheduler:
         _brief_job,
         CronTrigger(day_of_week="mon-fri", hour="15", minute="30", timezone=str(ABIDJAN)),
         id="brief_daily",
+        replace_existing=True,
+    )
+    # Analyst notes: weekly Saturday 20:00 Abidjan. All the sub-daily
+    # jobs (Friday's brief, the news tagger, snapshots) have settled by
+    # then, and the notes are ready for Monday's open. A full 47-ticker
+    # pass at Sonnet rates ≈ $1.90; NOTES_DAILY_CAP_CENTS gates a rerun
+    # from draining the budget.
+    sched.add_job(
+        _analyst_notes_job,
+        CronTrigger(day_of_week="sat", hour="20", minute="0", timezone=str(ABIDJAN)),
+        id="analyst_notes_weekly",
         replace_existing=True,
     )
     return sched

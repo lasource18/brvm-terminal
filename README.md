@@ -23,7 +23,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [ ] Phase 5 — TUI
 - [x] Phase 6a — alerts (price move + new filing + news relevance)
 - [x] Phase 6b — daily brief (post-close, Haiku)
-- [ ] Phase 6c — analyst-note synthesis
+- [x] Phase 6c — analyst-note synthesis (weekly per-ticker, Sonnet)
 
 ## Requirements
 
@@ -326,6 +326,52 @@ Guarantees:
 
 The brief is **clearly labelled machine-generated** in the UI so
 readers don't mistake the synthesis for editorial commentary.
+
+## Try it (Phase 6c demo — analyst notes)
+
+Weekly per-ticker synthesis on the new `Analyst view` tab of
+`/s/{ticker}`. Sonnet reads the last 30 days of tagged news, 5-year
+annual financials + latest interim, computed ratios, 90-day price
+stats, ownership + segments — then writes a ~1000-word markdown note
+grouped as: Snapshot / Recent developments / Financial position /
+Ratios read-across / Risks & watch items.
+
+```bash
+just analyst-notes-run-dry --ticker SNTS   # gather-only: context counts
+just analyst-notes-run --ticker SNTS       # one ticker, real Sonnet call
+just analyst-notes-run --limit 5           # smoke-run 5 tickers
+just analyst-notes-run                     # full weekly pass ($3/day cap)
+just dev                                   # /s/SNTS/analyst
+```
+
+The scheduler wires `analyst_notes_weekly` at 20:00 Africa/Abidjan on
+Saturday — after Friday's close, all the weekend enrichment jobs
+(sector, company-facts, history backfill are set for Sunday but the
+note doesn't need them). By Monday's open the archive lists the newly-
+written notes on every equity page. Archive sidebar links to
+`/s/{TICKER}/analyst/YYYY-MM-DD` for prior weeks.
+
+Guarantees:
+
+- **Hard $3/day cap** in `note_spend` (its own counter, separate from
+  `llm_spend` / `filings_spend` / `brief_spend`). A full 47-ticker
+  pass at Sonnet rates ≈ $1.90; the cap gives one full retry of
+  headroom, and `NOTES_DAILY_CAP_CENTS` gates a rerun that would
+  drain the budget.
+- **Overwrite by week, not append.** The store keys on
+  `(ticker, week_start)` and `INSERT OR REPLACE`s — a rerun mid-week
+  produces a fresher take on the same week's data, which is what a
+  reader expects.
+- **Only active equities.** Indices and bonds are skipped; the tab
+  404s for indices.
+- **Degrades quietly.** No `ANTHROPIC_API_KEY`, an exhausted cap, an
+  empty reply, or a transport error all end in counts + a log line,
+  never a crash. `context_json` is stored so a future re-run with a
+  different prompt doesn't need to re-gather the source data.
+
+The note is **clearly labelled machine-generated** in the UI so
+readers don't mistake the synthesis for sell-side research. There is
+no sell-side research on the BRVM — that's the whole point.
 
 ## Try it (Phase 1 demo)
 

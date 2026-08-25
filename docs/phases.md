@@ -20,7 +20,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 5 | TUI (Textual) | not started | — |
 | 6a | Alerts — price-move / new-filing / news rules + Discord delivery | done | 2026-08-24 |
 | 6b | Daily brief (post-close, Haiku) | done | 2026-08-25 |
-| 6c | Analyst-note synthesis (weekly per-ticker) | not started | — |
+| 6c | Analyst-note synthesis (weekly per-ticker, Sonnet) | done | 2026-08-25 |
 
 **Backlog** (raised during earlier phases; each becomes its own mini-phase
 when we pick it up):
@@ -1256,10 +1256,149 @@ have run.
 
 ---
 
-## Phase 6c — Analyst-note synthesis — not started
+## Phase 6c — Analyst-note synthesis (done 2026-08-25)
 
-Planned scope: since BRVM has essentially no public sell-side coverage,
-generate our own per-ticker note weekly by feeding the LLM the recent
-news + financials + ratios + price action. Rendered on the
-`Analyst view` tab of `/s/{ticker}` (added in this phase). Clearly
-labelled as machine-generated.
+Weekly per-ticker synthesis. Since the BRVM has essentially no public
+sell-side coverage, we generate our own machine-written note per ticker
+per ISO week — fed the last 30 days of tagged news, 5-year annual
+financials + latest interim, computed ratios, ownership + segments,
+and 90 days of price action. Rendered on the new `Analyst view` tab
+of `/s/{ticker}` with a machine-generated badge and an archive sidebar
+of prior weeks.
+
+**Model choice**: Sonnet 4.6, per user call. An analyst note is a much
+richer write than a Phase 6b daily brief and benefits from the deeper
+reasoning; the full 47-ticker weekly pass at ~$0.04/ticker ≈ $1.90
+which comfortably fits under a $3/day cap with one full retry of
+headroom.
+
+**Delivered**
+
+- **Migration `0011_notes.sql`** — two tables:
+  - `analyst_notes` (PK `(ticker, week_start)`; ticker FK, model,
+    title, markdown, `context_json`, tokens, `usd_micros`,
+    `generated_utc`).
+  - `note_spend` — same shape as the other three spend counters;
+    `SpendTable` literal in `store/spend.py` now covers all four.
+- **`AnalystNote` model** — ticker + `week_start` + model + markdown +
+  `context_json` + token/cost accounting.
+- **`store/analyst_notes.py`** — `upsert` (INSERT OR REPLACE, overwrite
+  same week in one statement so the UI never renders half a note),
+  `get`, `latest_for_ticker`, `list_for_ticker`, `count`,
+  `count_for_week`.
+- **`services/analyst_notes.py`**:
+  - `iso_week_monday(d)` — pure helper mapping any day to its ISO
+    week's Monday (the natural key for `week_start`).
+  - `gather_context(ticker, week_start=...)` — assembles the JSON the
+    model reads (security meta, latest snapshot, 90-day price stats
+    incl. annualised vol proxy, 5-year financials, latest interim,
+    latest ratios, ownership, segments, 30 days of tagged news).
+    Returns None for indices / unknown tickers so the iteration
+    short-circuits cleanly.
+  - `generate_for_ticker(ticker, week_start=None, client=None,
+    dry_run=False)` — one-shot per ticker. Pre-checks `note_spend`
+    against `NOTES_DAILY_CAP_CENTS` (300), records real usage against
+    today's UTC row (not `week_start` — billing follows real time),
+    stamps `title` from the first `# heading`.
+  - `generate_for_all(week_start=None, client=None, dry_run=False,
+    limit=None, delay_between_s=None)` — walks every active equity
+    with a polite pause between calls, aggregates a `PassCounts` with
+    per-ticker outcomes. Budget exhaustion in the middle of a pass
+    marks every remaining ticker as `skipped_budget` (a partial week
+    is better than a rerun blowing the day's cap on the tail).
+  - Read helpers `latest_note`, `get_note`, `list_notes`,
+    `spent_today_micros` for the UI.
+- **`jobs/analyst_notes_run.py`** + `just analyst-notes-run
+  [--ticker X | --limit N | --week YYYY-MM-DD]` (variadic pass-through
+  via `just … *args`) + `just analyst-notes-run-dry`. Prints a per-
+  ticker summary in `--ticker` mode, or the aggregate `PassCounts` in
+  a full-pass mode.
+- **Scheduler** — `analyst_notes_weekly` at Sat 20:00 Africa/Abidjan.
+  Friday's close + brief + tag pass have all settled by then; the
+  notes are ready for Monday's open.
+- **UI**:
+  - New `Analyst view` tab registered in `apps/web/tabs.py`
+    (`hidden_for_kinds=("index",)` — matches the other equity-only
+    tabs).
+  - `/s/{ticker}/analyst` shows the latest note (empty state on a
+    fresh install pointing at `just analyst-notes-run --ticker …`).
+  - `/s/{ticker}/analyst/{YYYY-MM-DD}` archive route for prior weeks,
+    with the same guards as the `/brief/{day}` route (404 on unknown
+    date, non-ISO string, or index-kind ticker).
+  - Markdown rendered server-side via `markdown-it-py` with
+    `html=False` (same rendering config as `/brief`, so raw HTML
+    escapes — asserted by a test).
+  - Archive sidebar lists the last 12 weeks with the current one
+    highlighted. Reuses the `.brief-body` + `.brief-side` +
+    `.brief-archive` CSS from Phase 6b to stay dry.
+- **Settings** — `NOTES_MODEL` (Sonnet 4.6 by user call, not the
+  Haiku snapshot),`NOTES_DAILY_CAP_CENTS=300`,
+  `NOTES_LOOKBACK_DAYS=30`, `NOTES_MAX_NEWS_ITEMS=25`,
+  `NOTES_MAX_OUTPUT_TOKENS=3072`, `NOTES_DELAY_BETWEEN_S=0.5`,
+  `settings.notes_daily_cap_micros` convenience property.
+
+**Two invariants the tests pin**
+
+1. **Overwrite same week, not append.**
+   `test_upsert_overwrites_same_week` + `test_generate_overwrites_same_week`
+   — running twice on the same `(ticker, week_start)` leaves exactly
+   one row, and it's the newer content.
+2. **Never lose spend accounting.**
+   `test_generate_empty_reply_bills_but_marks_failed` — an unusable
+   reply (empty markdown) still bills the input tokens into
+   `note_spend`; the daily cap can't be bypassed by a failed note.
+   `test_generate_transport_error_is_reported_not_billed` — a
+   transport error before the API sees any tokens is the opposite
+   case and stays at zero.
+
+**Definition of Done — met**
+
+- `just migrate` picks up `0011` idempotently.
+- `just analyst-notes-run-dry --ticker SNTS` runs against the live DB
+  and reports the gathered context counts. Verified live: `2 news,
+  has_financials=True` on the current Mac DB, gather completes
+  end-to-end including the sikafinance historique fetch.
+- `just analyst-notes-run --ticker SNTS` end-to-end wired (Sonnet call
+  still pending — see below).
+- `/s/SNTS/analyst` renders the empty state until a note lands;
+  populated view renders heading colors + machine-generated badge +
+  archive sidebar (verified against a seeded row in the UI tests).
+- `/s/BRVMC/analyst` 404s (index-hidden tab).
+- `/s/SNTS/analyst/YYYY-MM-DD` archive route serves specific weeks;
+  unknown dates 404.
+- `just test` → **429 tests green** (30 new: 3 store + 3 gather-context
+  + 8 `generate_for_ticker` (happy / overwrite / dry-run / no-key /
+  budget / empty-reply / transport / non-equity) + 4
+  `generate_for_all` (walk / limit / budget-mid-pass / dry-run) + 10
+  UI covering the tab, index-hidden 404, archive routing, HTML
+  escaping, sidebar ordering + 1 scheduler wiring). One line pinned
+  in `test_scheduler_windows.py` for `analyst_notes_weekly`. Ruff clean.
+
+**Notes / follow-ups**
+
+- **First live full weekly pass still pending.** The scheduled Saturday
+  job at 20:00 Abidjan will do the first one automatically; the live
+  bill lands in `note_spend`. Expect ~$1.90 across the 47 equities.
+- **Peer read-across is prompted, not computed.** The system prompt
+  asks Sonnet to compare a ticker's ratios against a "normal range
+  for its sector"; there's no pre-computed sector-median context in
+  the JSON snapshot. If the notes read too vaguely on this section,
+  the fix is to inject `services.company.get_peers_with_ratios(ticker)`
+  into `gather_context` and quote the peer medians explicitly — kept
+  as a small follow-up.
+- **Price stats are naive.** `_price_stats` sends 90 sessions of
+  closes into a summary block: latest close, period high/low,
+  period change %, and a stdev-of-log-returns × sqrt(252) vol proxy.
+  Good enough for a natural-language narrative; a proper max-drawdown
+  or beta-vs-BRVMC calc would be a separate helper.
+- **No sector-anchored peer table in the note context.** Same reason
+  as above — the model gets the ticker's own numbers, not the sector
+  set. Adding it is a one-service-call change to `gather_context`.
+- **Archive is capped at 12 weeks in the sidebar** (roughly a
+  quarter). Deeper history would want pagination on
+  `/s/{ticker}/analyst?offset=N`.
+- **Notes are per-ticker synchronous.** A 47-ticker Sonnet pass at
+  ~1-2 seconds per call plus the 0.5s polite pause is ~90-120s of
+  wall time, well inside a weekend cron slot. If we ever want that
+  faster, the store dedupe key means it's safe to parallelize; the
+  0.5s pause is the rate-limit safety valve.

@@ -210,3 +210,26 @@ class Brief(BaseModel):
     usd_micros: int = 0
     generated_utc: str | None = None
     session_date: str | None = None
+
+
+# --- Analyst notes (Phase 6c) ----------------------------------------------
+
+
+class AnalystNote(BaseModel):
+    """One weekly per-ticker synthesis. `week_start` is the Monday of the
+    ISO week the note covers (rerun mid-week overwrites — a fresher take
+    on the same week's data is what a reader expects). `context_json` is
+    the raw structured input the model saw (recent news + financials +
+    ratios + price stats + snapshot) — kept so a future re-run with a
+    different prompt doesn't need to re-gather the source data."""
+
+    ticker: str
+    week_start: str                          # 'YYYY-MM-DD' Monday (ISO week)
+    model: str
+    title: str | None = None
+    markdown: str
+    context_json: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    usd_micros: int = 0
+    generated_utc: str | None = None

@@ -35,6 +35,8 @@ TABS: tuple[TabSpec, ...] = (
             hidden_for_kinds=_EQUITY_ONLY),
     TabSpec("segments", "Segments", "_tab/segments.html",
             hidden_for_kinds=_EQUITY_ONLY),
+    TabSpec("analyst", "Analyst view", "_tab/analyst.html",
+            hidden_for_kinds=_EQUITY_ONLY),
 )
 
 _BY_KEY = {t.key: t for t in TABS}

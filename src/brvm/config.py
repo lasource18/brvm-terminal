@@ -104,6 +104,28 @@ class Settings(BaseSettings):
     # markdown brief.
     brief_max_output_tokens: int = 2048
 
+    # --- Analyst notes (Phase 6c) ---
+    # Weekly per-ticker synthesis. Sonnet by user choice — an analyst
+    # note is a much richer write than a daily-brief summary and
+    # benefits from the deeper reasoning. The full weekly pass at
+    # ~$0.04/ticker x 47 equities ≈ $1.90; the daily cap gives one
+    # full retry of headroom.
+    notes_model: str = "claude-sonnet-4-6"
+    notes_daily_cap_cents: int = 300
+    # News lookback per ticker for the prompt context. 30 days catches
+    # a full month of communiqués + a typical earnings cycle.
+    notes_lookback_days: int = 30
+    # Ceiling on news items fed to the model per ticker. Bigger prompts
+    # cost linearly; 25 is enough to cover a busy earnings week.
+    notes_max_news_items: int = 25
+    # Output tokens ceiling — Sonnet writes longer than Haiku by
+    # default; 3k is comfortable for a 1000-1200-word note with several
+    # sections.
+    notes_max_output_tokens: int = 3072
+    # Polite pause between per-ticker calls so a full 47-ticker weekly
+    # pass doesn't hammer the API in a burst.
+    notes_delay_between_s: float = 0.5
+
     http_user_agent: str = Field(default="brvm-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 
@@ -122,6 +144,10 @@ class Settings(BaseSettings):
     @property
     def brief_daily_cap_micros(self) -> int:
         return self.brief_daily_cap_cents * 10_000
+
+    @property
+    def notes_daily_cap_micros(self) -> int:
+        return self.notes_daily_cap_cents * 10_000
 
 
 _cached: Settings | None = None

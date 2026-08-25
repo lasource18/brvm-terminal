@@ -13,6 +13,7 @@ from brvm.config import settings
 from brvm.services import (
     alerts as alerts_svc,
 )
+from brvm.services import analyst_notes as notes_svc
 from brvm.services import brief as brief_svc
 from brvm.services import company, directory, fundamentals, market, ratios, watchlist
 from brvm.services import news as news_svc
@@ -76,7 +77,56 @@ def security_tab(request: Request, ticker: str, tab: str):
         ctx["ownership"] = fundamentals.get_ownership(sec.ticker)
     elif spec.key == "segments":
         ctx["segments"] = fundamentals.get_segments(sec.ticker)
+    elif spec.key == "analyst":
+        # Phase 6c: latest weekly note. Archive sidebar lists prior
+        # weeks so a reader can walk backwards without leaving the tab.
+        note = notes_svc.latest_note(sec.ticker)
+        ctx["note"] = note
+        ctx["note_html"] = _render_markdown(note.markdown) if note else ""
+        ctx["archive"] = notes_svc.list_notes(sec.ticker, limit=12)
     return templates.TemplateResponse(request, "security.html", ctx)
+
+
+@router.get("/s/{ticker}/analyst/{week_start}", response_class=HTMLResponse)
+def analyst_note_by_week(request: Request, ticker: str, week_start: str):
+    """Archive route — a specific historical note for a ticker."""
+    from datetime import date as _date
+    try:
+        _date.fromisoformat(week_start)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"bad week: {week_start}") from e
+    sec = market.get_security(ticker)
+    if sec is None:
+        raise HTTPException(status_code=404, detail=f"unknown ticker: {ticker}")
+    if sec.kind == "index":
+        raise HTTPException(
+            status_code=404, detail="analyst view is not available for indices"
+        )
+    note = notes_svc.get_note(sec.ticker, week_start)
+    if note is None:
+        raise HTTPException(
+            status_code=404, detail=f"no analyst note for {ticker} week {week_start}"
+        )
+    spec = tabs.get("analyst")
+    ctx = {
+        **base_ctx(),
+        "sec": sec,
+        "tabs": tabs.visible_for(sec.kind),
+        "active_tab": "analyst",
+        "tab": spec,
+        "tab_template": spec.template,
+        "note": note,
+        "note_html": _render_markdown(note.markdown),
+        "archive": notes_svc.list_notes(sec.ticker, limit=12),
+    }
+    return templates.TemplateResponse(request, "security.html", ctx)
+
+
+def _render_markdown(md: str) -> str:
+    """Server-side markdown → HTML with `html=False` so any raw HTML in
+    the source is escaped. Same rendering config as the /brief route."""
+    from markdown_it import MarkdownIt
+    return MarkdownIt("commonmark", {"html": False, "linkify": True}).render(md)
 
 
 @router.get("/news", response_class=HTMLResponse)
@@ -182,10 +232,7 @@ def alerts_page(request: Request):
 
 
 def _render_brief_page(request: Request, brief) -> HTMLResponse:
-    from markdown_it import MarkdownIt
-
-    md = MarkdownIt("commonmark", {"html": False, "linkify": True})
-    body_html = md.render(brief.markdown) if brief else ""
+    body_html = _render_markdown(brief.markdown) if brief else ""
     return templates.TemplateResponse(
         request,
         "brief.html",

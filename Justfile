@@ -120,3 +120,17 @@ brief-run *args:
 # Extra args pass through: `just brief-run-dry --date 2026-08-20`.
 brief-run-dry *args:
     uv run python -m brvm.jobs.brief_run --once --dry-run {{args}}
+
+# Phase 6c: generate this week's per-ticker analyst notes (Sonnet).
+# Respects the $3/day cap (NOTES_DAILY_CAP_CENTS). Runs Sat 20:00
+# Abidjan on the scheduler; use this to trigger a manual pass.
+# Extra args pass through:
+#   `just analyst-notes-run --ticker SNTS`   → one ticker only
+#   `just analyst-notes-run --limit 5`       → smoke run
+#   `just analyst-notes-run --week 2026-08-24`
+analyst-notes-run *args:
+    uv run python -m brvm.jobs.analyst_notes_run --once {{args}}
+
+# Same, without spending anything: reports the plan per ticker.
+analyst-notes-run-dry *args:
+    uv run python -m brvm.jobs.analyst_notes_run --once --dry-run {{args}}
