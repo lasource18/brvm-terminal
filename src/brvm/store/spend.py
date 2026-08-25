@@ -4,10 +4,11 @@ One row per UTC day per table. Amounts accumulate in micro-dollars
 because a single Haiku call can cost far less than a cent; `usd_cents`
 is kept as a rounded mirror so the table stays readable in `sqlite3`.
 
-Three tables share this shape:
+Four tables share this shape:
 - `llm_spend` — news-tagging (Phase 3b), $1/day cap.
 - `filings_spend` — fundamentals extractor (Phase 4b), $2/day cap.
 - `brief_spend` — daily brief writer (Phase 6b), $0.50/day cap.
+- `note_spend` — analyst-notes writer (Phase 6c), $3/day cap.
 
 `table` is a `Literal` of the known names so the SQL builders can't
 be pointed at arbitrary tables via caller input.
@@ -22,7 +23,7 @@ from typing import Literal
 MICROS_PER_USD = 1_000_000
 MICROS_PER_CENT = MICROS_PER_USD // 100
 
-SpendTable = Literal["llm_spend", "filings_spend", "brief_spend"]
+SpendTable = Literal["llm_spend", "filings_spend", "brief_spend", "note_spend"]
 
 
 def _day_str(day: date | str | None) -> str:

@@ -43,3 +43,5 @@ def test_scheduler_builds():
     assert "alerts_deliver_every_5min" in ids
     # Phase 6b jobs.
     assert "brief_daily" in ids
+    # Phase 6c jobs.
+    assert "analyst_notes_weekly" in ids

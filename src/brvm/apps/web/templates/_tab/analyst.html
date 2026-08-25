@@ -1,0 +1,49 @@
+{# Analyst view — weekly per-ticker synthesis (Phase 6c). #}
+<div class="analyst-tab">
+  {% if note %}
+    <div class="brief-head">
+      <h2 style="color: var(--accent); font-size: 14px; margin: 0; text-transform: uppercase;">
+        Analyst view · Week of {{ note.week_start }}
+      </h2>
+      <span class="dim">
+        generated {{ (note.generated_utc or '')[:16].replace('T', ' ') }}
+        · {{ note.model }}
+        · {{ note.input_tokens }} in / {{ note.output_tokens }} out
+        (${{ '%.4f'|format(note.usd_micros / 1_000_000) }})
+      </span>
+      <span class="badge machine">machine-generated</span>
+    </div>
+
+    <div class="analyst-layout">
+      <article class="brief-body">
+        {{ note_html|safe }}
+      </article>
+      {% if archive and archive|length > 1 %}
+        <aside class="brief-side">
+          <h2 class="section-title">Archive</h2>
+          <ul class="brief-archive">
+            {% for n in archive %}
+              <li{% if n.week_start == note.week_start %} class="current"{% endif %}>
+                <a href="/s/{{ sec.ticker }}/analyst/{{ n.week_start }}">Week {{ n.week_start }}</a>
+                {% if n.title %}<div class="dim archive-title">{{ n.title }}</div>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </aside>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="panel">
+      <h2>Analyst view · {{ sec.ticker }}</h2>
+      <div class="panel-body dim">
+        No analyst note has been generated yet for {{ sec.ticker }}.
+        Notes are written weekly on Saturday at 20:00 Africa/Abidjan; use
+        <code>just analyst-notes-run --ticker {{ sec.ticker }}</code> to
+        trigger a one-off pass.
+        <div style="margin-top: 8px;">
+          <span class="badge machine">machine-generated when available</span>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>

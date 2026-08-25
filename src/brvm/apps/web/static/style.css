@@ -452,3 +452,12 @@ article.brief-body strong { color: var(--fg); }
 .brief-archive a { color: var(--fg); text-decoration: none; font-family: inherit; }
 .brief-archive a:hover { color: var(--accent); }
 .archive-title { font-size: 11px; margin-top: 2px; }
+
+/* --- Analyst view tab (Phase 6c) --- */
+.analyst-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) { .analyst-layout { grid-template-columns: 1fr; } }
