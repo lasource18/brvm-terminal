@@ -22,11 +22,13 @@ from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import (
     AnalystNote,
+    CorporateAction,
     IndexLevel,
     NewsItem,
     Quote,
     Security,
 )
+from brvm.services._view import PeersView
 from brvm.sources._dedupe import news_hash
 from brvm.store import analyst_notes as notes_repo
 from brvm.store import news as news_repo
@@ -78,6 +80,17 @@ def _setup(monkeypatch, tmp_path: Path):
     from brvm.sources import sikafinance
     monkeypatch.setattr(sikafinance, "fetch_historique",
                         lambda ticker, country, client=None: [])
+    # Stub the peer fetch (Phase 6d competitive analysis). Individual
+    # tests can override this by re-patching `company_svc.get_peers_with_ratios`.
+    from brvm.services import company as company_svc
+    monkeypatch.setattr(
+        company_svc, "get_peers_with_ratios",
+        lambda ticker: PeersView(sector=None, source="none", peers=[]),
+    )
+    monkeypatch.setattr(
+        svc.company_svc, "get_peers_with_ratios",
+        lambda ticker: PeersView(sector=None, source="none", peers=[]),
+    )
     return db_path, svc
 
 
@@ -378,6 +391,141 @@ def test_generate_for_all_stops_on_budget_exhaustion(monkeypatch, tmp_path):
     # SNTS lands (first ticker alphabetically), then the cap kicks in.
     assert counts.generated <= 1
     assert counts.skipped_budget >= 1
+
+
+def test_gather_context_includes_peers_and_corporate_actions(monkeypatch, tmp_path):
+    """Phase 6d: peer + corp-action data must land in the LLM snapshot."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    from brvm.services._view import PeerRow
+
+    def _peers(ticker):
+        return PeersView(
+            sector="Telecommunications",
+            source="sikafinance",
+            peers=[
+                PeerRow(ticker="ORAC", name="ORANGE CI", country="CI",
+                        last=19_000, change_ytd_pct=3.1, pe=8.9, roe=15.2,
+                        net_margin=12.0),
+                PeerRow(ticker="ETIT", name="ECOBANK ETI", country="TG",
+                        last=17, change_ytd_pct=-4.2),
+                # Self row should be filtered out of the context payload.
+                PeerRow(ticker="SNTS", name="SONATEL", country="SN",
+                        last=32_500, is_self=True),
+            ],
+        )
+
+    monkeypatch.setattr(svc.company_svc, "get_peers_with_ratios", _peers)
+    with connect(db_path) as conn:
+        news_repo.upsert_corporate_actions(conn, [CorporateAction(
+            ticker="SNTS", kind="dividend", ex_date=date(2026, 9, 15),
+            pay_date=date(2026, 9, 30), amount=1_400.0, currency="XOF",
+            yield_pct=4.3, source="sikafinance", source_url="https://x/div",
+        )])
+
+    ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
+    assert ctx is not None
+    peers = ctx["peers"]
+    assert peers["sector"] == "Telecommunications"
+    # Self row excluded; ratio-annotated peer preserved.
+    tickers = [p["ticker"] for p in peers["peers"]]
+    assert tickers == ["ORAC", "ETIT"]
+    assert peers["peers"][0]["pe"] == 8.9
+    # Corporate action lands too.
+    actions = ctx["corporate_actions"]
+    assert len(actions) == 1
+    assert actions[0]["kind"] == "dividend"
+    assert actions[0]["ex_date"] == "2026-09-15"
+
+
+def test_generate_skips_when_context_unchanged(monkeypatch, tmp_path):
+    """A previous note with the same fingerprint (news ids, financials
+    periods, CA ids) short-circuits the LLM call for the new week.
+
+    Both weeks used here fall within the seeded news item's 30-day lookback
+    window so the news set is identical across weeks."""
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    client = FakeAnthropic([
+        reply("# Snapshot\nfirst", input_tokens=1000, output_tokens=200),
+    ])
+    # Week 1 — a note is generated.
+    r1 = svc.generate_for_ticker(
+        "SNTS", week_start=date(2026, 8, 24), client=client,
+    )
+    assert r1.note is not None
+    assert client.call_count == 1
+    # Week 2 — nothing changed upstream, so we skip.
+    r2 = svc.generate_for_ticker(
+        "SNTS", week_start=date(2026, 8, 31), client=client,
+    )
+    assert r2.skipped_no_change is True
+    assert r2.note is None
+    assert r2.reason == "no_change_since_2026-08-24"
+    assert client.call_count == 1  # no second call
+    # Same-week rerun still regenerates (a mid-week refresh is expected).
+    r3 = svc.generate_for_ticker(
+        "SNTS", week_start=date(2026, 8, 24), client=FakeAnthropic([
+            reply("# Snapshot\nrefresh", input_tokens=1000, output_tokens=200),
+        ]),
+    )
+    assert r3.note is not None
+    assert r3.skipped_no_change is False
+
+
+def test_generate_regenerates_when_new_news_arrives(monkeypatch, tmp_path):
+    """A fresh tagged news row for the ticker breaks the fingerprint tie
+    and forces a new generation."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    client = FakeAnthropic([
+        reply("# Snapshot\nfirst", input_tokens=1000, output_tokens=200),
+        reply("# Snapshot\nsecond", input_tokens=1000, output_tokens=200),
+    ])
+    svc.generate_for_ticker("SNTS", week_start=date(2026, 8, 24), client=client)
+
+    # Add a new tagged news row before the second week's run.
+    with connect(db_path) as conn:
+        _seed_news(conn, title="SONATEL AGM notice",
+                   published_at="2026-08-28T09:00:00Z", tickers="SNTS",
+                   relevance=6, category="governance")
+
+    r2 = svc.generate_for_ticker(
+        "SNTS", week_start=date(2026, 8, 31), client=client,
+    )
+    assert r2.note is not None
+    assert r2.skipped_no_change is False
+    assert client.call_count == 2
+
+
+def test_generate_force_bypasses_no_change_skip(monkeypatch, tmp_path):
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    client = FakeAnthropic([
+        reply("# Snapshot\nfirst", input_tokens=1000, output_tokens=200),
+        reply("# Snapshot\nforced", input_tokens=1000, output_tokens=200),
+    ])
+    svc.generate_for_ticker("SNTS", week_start=date(2026, 8, 24), client=client)
+    r = svc.generate_for_ticker(
+        "SNTS", week_start=date(2026, 8, 31), client=client, force=True,
+    )
+    assert r.note is not None
+    assert r.skipped_no_change is False
+
+
+def test_generate_for_all_counts_no_change_skips(monkeypatch, tmp_path):
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    first = svc.generate_for_all(
+        week_start=date(2026, 8, 24),
+        client=_endless_client(),
+        delay_between_s=0,
+    )
+    assert first.generated == 3
+    # No upstream changes → every ticker gets skipped on the second pass.
+    second = svc.generate_for_all(
+        week_start=date(2026, 8, 31),
+        client=_endless_client(),
+        delay_between_s=0,
+    )
+    assert second.generated == 0
+    assert second.skipped_no_change == 3
+    assert second.total_usd_micros == 0
 
 
 def test_generate_for_all_dry_run_reports_but_persists_nothing(monkeypatch, tmp_path):
