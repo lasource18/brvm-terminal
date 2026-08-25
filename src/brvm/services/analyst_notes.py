@@ -41,6 +41,7 @@ from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
 from brvm.models import AnalystNote
+from brvm.services import company as company_svc
 from brvm.services import fundamentals, history, market, ratios
 
 # Reuse the LLM helpers Phase 6b promoted to public names.
@@ -69,6 +70,7 @@ class TickerResult:
     dry_run: bool = False
     llm_disabled: bool = False
     budget_exhausted: bool = False
+    skipped_no_change: bool = False
     failed: bool = False
     reason: str = ""
 
@@ -84,6 +86,7 @@ class TickerResult:
             (self.dry_run, "dry_run"),
             (self.llm_disabled, "llm_disabled"),
             (self.budget_exhausted, "budget_exhausted"),
+            (self.skipped_no_change, "skipped_no_change"),
             (self.failed, "failed"),
         ):
             if flag:
@@ -101,6 +104,7 @@ class PassCounts:
     considered: int = 0
     generated: int = 0
     skipped_budget: int = 0
+    skipped_no_change: int = 0
     failed: int = 0
     dry_run_count: int = 0
     tickers_generated: list[str] = field(default_factory=list)
@@ -113,6 +117,7 @@ class PassCounts:
             "considered": self.considered,
             "generated": self.generated,
             "skipped_budget": self.skipped_budget,
+            "skipped_no_change": self.skipped_no_change,
             "failed": self.failed,
             "dry_run": self.dry_run_count,
             "usd_micros": self.total_usd_micros,
@@ -255,6 +260,70 @@ def _security_meta(sec_view) -> dict[str, Any]:
     }
 
 
+def _peers_lite(ticker: str) -> dict[str, Any]:
+    """Peer list for competitive positioning. Best-effort: an outbound
+    HTTP failure downgrades to an empty list rather than aborting the
+    whole note."""
+    try:
+        view = company_svc.get_peers_with_ratios(ticker)
+    except Exception as e:
+        log.warning("peers fetch failed for %s: %s", ticker, e)
+        return {"sector": None, "source": "none", "peers": []}
+    rows: list[dict[str, Any]] = []
+    for p in view.peers:
+        if p.is_self:
+            continue
+        rows.append({
+            "ticker": p.ticker,
+            "name": p.name,
+            "country": p.country,
+            "last": p.last,
+            "change_ytd_pct": p.change_ytd_pct,
+            "market_cap": p.market_cap,
+            "pe": p.pe,
+            "roe": p.roe,
+            "net_margin": p.net_margin,
+        })
+    return {"sector": view.sector, "source": view.source, "peers": rows}
+
+
+def _corporate_actions_lite(ticker: str, week_start: date, lookback_days: int) -> list[dict[str, Any]]:
+    """Corporate actions with ex_date in the note's lookback window OR in
+    the near-term upcoming window (next 180 days). Feeds both the model
+    (upcoming events to flag as risks) and the change detector (a newly
+    announced dividend is a reason to refresh the note)."""
+    since_iso = (week_start - timedelta(days=lookback_days)).isoformat()
+    horizon_iso = (week_start + timedelta(days=180)).isoformat()
+    with connect(_db_path()) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, ticker, kind, ex_date, pay_date, amount, currency,
+                   yield_pct, note, first_seen_utc
+            FROM corporate_actions
+            WHERE ticker = ?
+              AND (
+                  (ex_date IS NOT NULL AND ex_date BETWEEN ? AND ?)
+                  OR (ex_date IS NULL AND first_seen_utc >= ?)
+              )
+            ORDER BY (ex_date IS NULL), ex_date
+            """,
+            (ticker, since_iso, horizon_iso, since_iso),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "kind": r["kind"],
+            "ex_date": r["ex_date"],
+            "pay_date": r["pay_date"],
+            "amount": r["amount"],
+            "currency": r["currency"],
+            "yield_pct": r["yield_pct"],
+            "note": r["note"],
+        }
+        for r in rows
+    ]
+
+
 def gather_context(
     ticker: str,
     *,
@@ -294,6 +363,8 @@ def gather_context(
     trimmed = bars[:90] if bars else []
     ownership = fundamentals.get_ownership(ticker)
     segments = fundamentals.get_segments(ticker)
+    peers = _peers_lite(ticker)
+    actions = _corporate_actions_lite(ticker, week_start, lookback)
 
     return {
         "ticker": ticker,
@@ -309,11 +380,64 @@ def gather_context(
             for h in ownership.holders
         ] if ownership.has_data else [],
         "segments": {
+            "period_year": segments.period_year,
+            "currency": segments.currency,
             "business": segments.business,
             "geo": segments.geo,
         } if segments.has_data else {},
+        "peers": peers,
+        "corporate_actions": actions,
         "news": [_news_lite(r) for r in feed.items],
     }
+
+
+# ---------------------------------------------------------------------------
+# Change detection — skip a weekly regen when nothing material has moved
+# ---------------------------------------------------------------------------
+
+
+def _context_fingerprint(context: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic summary of the inputs that would make a fresh note
+    materially different from the previous one. Two contexts with the
+    same fingerprint would produce a near-identical note — regenerating
+    is spend without new signal.
+
+    Watched inputs (per user request): news, corporate actions, and
+    newly-released financials. Peers and prices are intentionally
+    excluded — they move constantly and would defeat the whole skip
+    mechanism."""
+    fin_periods: list[tuple[int, str]] = []
+    fin = context.get("financials") or {}
+    for row in fin.get("rows", []) or []:
+        year = row.get("period_year")
+        kind = row.get("period_kind", "annual")
+        if year is not None:
+            fin_periods.append((int(year), str(kind)))
+    interim = context.get("interim") or {}
+    interim_key: tuple[int, str] | None = None
+    if interim:
+        y = interim.get("period_year")
+        k = interim.get("period_kind", "")
+        if y is not None:
+            interim_key = (int(y), str(k))
+    return {
+        "news_ids": sorted(int(n["id"]) for n in context.get("news") or [] if n.get("id") is not None),
+        "financials_periods": sorted(fin_periods),
+        "interim_period": interim_key,
+        "corporate_action_ids": sorted(
+            int(a["id"]) for a in context.get("corporate_actions") or [] if a.get("id") is not None
+        ),
+    }
+
+
+def _fingerprint_from_stored(context_json: str | None) -> dict[str, Any] | None:
+    if not context_json:
+        return None
+    try:
+        prev = json.loads(context_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return _context_fingerprint(prev)
 
 
 # ---------------------------------------------------------------------------
@@ -329,9 +453,10 @@ exchange of the 8 WAEMU countries, based in Abidjan. Prices are in XOF \
 
 You will receive a JSON snapshot: the company's latest quote, 90-day \
 price stats, 5-year annual financials + most recent interim, headline \
-ratios, ownership, segment split, and the last 30 days of Haiku-tagged \
-news. Produce a concise markdown note (~700-1000 words) a portfolio \
-manager can read in 3 minutes.
+ratios, ownership, segment split, sector peer list with their headline \
+ratios, upcoming/recent corporate actions, and the last 30 days of \
+Haiku-tagged news. Produce a concise markdown note (~800-1100 words) a \
+portfolio manager can read in 3 minutes.
 
 Structure (in this order, using the exact markdown headings):
 
@@ -350,6 +475,16 @@ out revenue and profit trend, margin trajectory, balance-sheet shape \
 (leverage / equity ratio when useful). Never state a figure that isn't \
 in the snapshot.
 
+# Competitive positioning
+3-5 sentences comparing the company to the peers listed in the \
+snapshot's `peers` block. Anchor on the ratios provided (P/E, ROE, net \
+margin) and, when the `segments` block is populated, note how the \
+company's business mix or geographic split differentiates it from peers. \
+Call out where it screens rich or cheap vs the peer set, and whether \
+the segment mix explains the gap. If `peers` is empty or every peer's \
+ratios are null, say "no peer data available this window" — do not \
+invent peers or numbers.
+
 # Ratios read-across
 2-3 sentences on how the ratios compare to a normal range for the \
 company's sector (e.g. Sonatel telecom peers, a bank vs sector \
@@ -358,8 +493,9 @@ growth, unusual payout).
 
 # Risks & watch items
 Bullet list of forward-looking risks the reader should track: known \
-upcoming events (results, dividends, capital actions), open questions \
-raised by the news, macro exposures (WAEMU, currency).
+upcoming events from `corporate_actions` (dividend ex-dates, AGMs, \
+capital actions) and from the news, open questions raised by recent \
+filings, macro exposures (WAEMU, currency).
 
 Rules:
 - Use only facts present in the JSON. Never invent figures, dates, or \
@@ -433,11 +569,16 @@ def generate_for_ticker(
     week_start: date | None = None,
     client: Any | None = None,
     dry_run: bool = False,
+    force: bool = False,
 ) -> TickerResult:
     """Generate + persist a note for one ticker's week. Safe to call
     unconditionally — every operational case (no key, budget exhausted,
-    non-equity ticker, empty reply, transport error, dry run) returns a
-    `TickerResult` with the appropriate flags set."""
+    non-equity ticker, empty reply, transport error, dry run, no-change
+    skip) returns a `TickerResult` with the appropriate flags set.
+
+    Pass `force=True` to bypass the no-change skip and always regenerate.
+    A re-run within the same week already overwrites via the store's
+    `INSERT OR REPLACE`, so `force` is mainly for prompt-change reruns."""
     ticker = ticker.upper()
     week_start = week_start or iso_week_monday()
     week_iso = week_start.isoformat()
@@ -448,6 +589,25 @@ def generate_for_ticker(
         result.failed = True
         result.reason = "not_equity_or_unknown_ticker"
         return result
+
+    # No-change skip: if a previous note exists (for any week) and its
+    # fingerprint matches the current context — no new news, no new CA,
+    # no newly-released financials — regenerating wastes tokens on the
+    # same story. The current week's row (from an earlier same-week run)
+    # is ignored so a mid-week rerun still refreshes the row it wrote.
+    if not force:
+        with connect(_db_path()) as conn:
+            previous = notes_repo.latest_for_ticker(conn, ticker)
+        if previous is not None and previous.week_start != week_iso:
+            prev_fp = _fingerprint_from_stored(previous.context_json)
+            if prev_fp is not None and prev_fp == _context_fingerprint(context):
+                result.skipped_no_change = True
+                result.reason = f"no_change_since_{previous.week_start}"
+                log.info(
+                    "notes %s (%s): no change since %s, skipping",
+                    ticker, week_iso, previous.week_start,
+                )
+                return result
 
     if dry_run:
         result.dry_run = True
@@ -539,11 +699,14 @@ def generate_for_all(
     dry_run: bool = False,
     limit: int | None = None,
     delay_between_s: float | None = None,
+    force: bool = False,
 ) -> PassCounts:
     """Walk every active equity, generating a note per ticker. Idempotent
     within the same week via the store's `INSERT OR REPLACE`. Budget cap
     is checked before every ticker's call — once crossed, remaining
-    tickers are counted as `skipped_budget`."""
+    tickers are counted as `skipped_budget`. Tickers with no new news,
+    corporate actions, or financials since their previous note are
+    counted as `skipped_no_change` (pass `force=True` to override)."""
     week_start = week_start or iso_week_monday()
     counts = PassCounts(week_start=week_start.isoformat())
     delay = settings.notes_delay_between_s if delay_between_s is None else delay_between_s
@@ -558,6 +721,7 @@ def generate_for_all(
     for i, ticker in enumerate(tickers):
         result = generate_for_ticker(
             ticker, week_start=week_start, client=client, dry_run=dry_run,
+            force=force,
         )
         if result.dry_run:
             counts.dry_run_count += 1
@@ -568,11 +732,19 @@ def generate_for_all(
                 counts.total_usd_micros += result.usage.usd_micros
         elif result.budget_exhausted:
             counts.skipped_budget += 1
+        elif result.skipped_no_change:
+            counts.skipped_no_change += 1
         elif result.failed:
             counts.failed += 1
             counts.tickers_failed.append(ticker)
-        # Polite pause between calls, except on the last one and in dry runs.
-        if delay > 0 and not dry_run and i < len(tickers) - 1:
+        # Polite pause between calls, except on the last one, in dry runs,
+        # and after a no-change skip that never touched the network.
+        if (
+            delay > 0
+            and not dry_run
+            and not result.skipped_no_change
+            and i < len(tickers) - 1
+        ):
             time.sleep(delay)
 
     log.info("notes pass %s: %s", counts.week_start, counts.as_dict())
