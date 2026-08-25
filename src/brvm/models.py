@@ -187,3 +187,26 @@ class AlertEvent(BaseModel):
     fired_utc: str | None = None             # populated by the store on insert
     delivered_utc: str | None = None
     delivery_status: AlertDeliveryStatus | None = None
+
+
+# --- Daily brief (Phase 6b) ------------------------------------------------
+
+
+class Brief(BaseModel):
+    """One post-close brief. `day` is UTC ISO date; `session_date` is the
+    trading day the brief covers (usually the same, but the field lets us
+    render a Monday brief that summarizes Friday's session without
+    ambiguity). `context_json` is the raw structured input the model saw
+    (movers / news / upcoming CA) — kept so a future re-run with a
+    different prompt doesn't need to re-gather the source data."""
+
+    day: str                                 # 'YYYY-MM-DD' UTC
+    model: str
+    title: str | None = None
+    markdown: str
+    context_json: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    usd_micros: int = 0
+    generated_utc: str | None = None
+    session_date: str | None = None

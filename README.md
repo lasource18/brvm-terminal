@@ -22,7 +22,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 4d — fundamentals (financial ratios on the Financials + Peers tabs)
 - [ ] Phase 5 — TUI
 - [x] Phase 6a — alerts (price move + new filing + news relevance)
-- [ ] Phase 6b — daily brief
+- [x] Phase 6b — daily brief (post-close, Haiku)
 - [ ] Phase 6c — analyst-note synthesis
 
 ## Requirements
@@ -291,6 +291,41 @@ Guarantees:
 Alerts also run on the scheduler: eval every 15 min during market hours
 (offset +11 from the news poll so tagged relevance has settled), hourly
 otherwise; delivery every 5 min.
+
+## Try it (Phase 6b demo — daily brief)
+
+Post-close markdown brief synthesized by Haiku from the day's indices,
+top movers, high-relevance tagged news, and next-7-day corporate
+actions. Overwrites the same-day row on rerun (there's only one brief
+for a given day).
+
+```bash
+just brief-run-dry            # gather-only: prints context counts
+just brief-run                # real call ($0.50/day cap)
+just dev                      # /brief (latest) + /brief/YYYY-MM-DD
+```
+
+The scheduler wires `brief_daily` at 15:30 Africa/Abidjan Mon-Fri —
+BRVM closes ~15:00, and the news tagger has run by then so relevance
+scores are settled. `/brief` renders the latest brief server-side via
+`markdown-it-py`; the sidebar lists the last 30 days for archive
+browsing.
+
+Guarantees:
+
+- **Hard $0.50/day cap** in `brief_spend` (a separate counter from
+  `llm_spend` and `filings_spend`). One brief per weekday at Haiku
+  rates rounds to fractions of a cent; the cap is a safety net.
+- **Overwrite on rerun**, not append — the store `INSERT OR REPLACE`s
+  the row for `day`, so a mid-day dry-run followed by the real
+  post-close run leaves the good one.
+- **Degrades quietly.** No `ANTHROPIC_API_KEY`, an exhausted cap,
+  an empty reply, or a transport error all end in counts + a log
+  line, never a crash. `context_json` is stored so a future re-run
+  with a different prompt doesn't need to re-gather the source data.
+
+The brief is **clearly labelled machine-generated** in the UI so
+readers don't mistake the synthesis for editorial commentary.
 
 ## Try it (Phase 1 demo)
 

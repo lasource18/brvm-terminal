@@ -409,3 +409,46 @@ table.alert-table .kind {
 .ae-hd .status.queued { color: var(--accent); }
 .ae-subject { margin: 4px 0; color: var(--fg); }
 .ae-body { white-space: pre-wrap; font-size: 11px; }
+
+/* --- Daily brief (Phase 6b) --- */
+.brief-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) { .brief-layout { grid-template-columns: 1fr; } }
+.brief-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px;
+}
+.brief-head .badge.machine {
+  color: var(--muted); border: 1px solid var(--border); padding: 1px 6px;
+  font-size: 10px; text-transform: uppercase; margin-left: auto;
+}
+article.brief-body { max-width: 780px; font-size: 13px; line-height: 1.6; }
+article.brief-body h1 {
+  font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--accent); margin: 20px 0 8px; border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+article.brief-body h1:first-child { margin-top: 0; }
+article.brief-body h2 { font-size: 13px; color: var(--blue); margin: 16px 0 6px; }
+article.brief-body h3 { font-size: 13px; color: var(--fg); margin: 12px 0 4px; }
+article.brief-body ul, article.brief-body ol { padding-left: 20px; margin: 8px 0; }
+article.brief-body li { margin: 4px 0; }
+article.brief-body p { margin: 8px 0; }
+article.brief-body code {
+  background: var(--bg-panel); padding: 1px 5px; border: 1px solid var(--border);
+  font-size: 12px;
+}
+article.brief-body a { color: var(--accent); }
+article.brief-body strong { color: var(--fg); }
+
+.brief-side { border-left: 1px solid var(--border); padding-left: 16px; }
+.brief-archive { list-style: none; padding: 0; margin: 0; }
+.brief-archive li { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.brief-archive li.current { background: var(--bg-hover); padding-left: 6px; margin-left: -6px; }
+.brief-archive a { color: var(--fg); text-decoration: none; font-family: inherit; }
+.brief-archive a:hover { color: var(--accent); }
+.archive-title { font-size: 11px; margin-top: 2px; }

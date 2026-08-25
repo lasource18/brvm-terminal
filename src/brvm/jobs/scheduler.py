@@ -14,6 +14,7 @@ from brvm.clock import ABIDJAN, is_market_open
 from brvm.logging import get
 from brvm.services.alerts import deliver_pending as deliver_alerts
 from brvm.services.alerts import evaluate_all as evaluate_alerts
+from brvm.services.brief import generate_for as generate_brief
 from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
 from brvm.services.fundamentals import extract_pending
@@ -136,6 +137,18 @@ def _alerts_deliver_job() -> None:
         log.exception("scheduled alerts deliver failed: %s", e)
 
 
+def _brief_job() -> None:
+    """Post-close daily brief. Runs Mon-Fri at 15:30 Africa/Abidjan, ~30
+    min after the exchange close, so the last snapshot cycle has landed
+    and the news tagger has stamped the day's relevance scores."""
+    log.info("scheduled brief run start")
+    try:
+        result = generate_brief()
+        log.info("scheduled brief run ok: %s", result.as_dict())
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled brief run failed: %s", e)
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone=str(ABIDJAN))
     # Every 10 minutes during market hours.
@@ -247,6 +260,15 @@ def build_scheduler() -> BackgroundScheduler:
         _alerts_deliver_job,
         CronTrigger(minute="*/5", timezone=str(ABIDJAN)),
         id="alerts_deliver_every_5min",
+        replace_existing=True,
+    )
+    # Daily brief: Mon-Fri 15:30 Abidjan. BRVM closes ~15:00, and the
+    # news tag pass runs on the :23/:38/:53 (etc.) minute inside the
+    # market-hours block — 30 min buffer covers both.
+    sched.add_job(
+        _brief_job,
+        CronTrigger(day_of_week="mon-fri", hour="15", minute="30", timezone=str(ABIDJAN)),
+        id="brief_daily",
         replace_existing=True,
     )
     return sched

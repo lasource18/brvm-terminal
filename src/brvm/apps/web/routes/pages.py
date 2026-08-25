@@ -13,6 +13,7 @@ from brvm.config import settings
 from brvm.services import (
     alerts as alerts_svc,
 )
+from brvm.services import brief as brief_svc
 from brvm.services import company, directory, fundamentals, market, ratios, watchlist
 from brvm.services import news as news_svc
 
@@ -178,6 +179,43 @@ def alerts_page(request: Request):
             "has_discord": settings.has_discord,
         },
     )
+
+
+def _render_brief_page(request: Request, brief) -> HTMLResponse:
+    from markdown_it import MarkdownIt
+
+    md = MarkdownIt("commonmark", {"html": False, "linkify": True})
+    body_html = md.render(brief.markdown) if brief else ""
+    return templates.TemplateResponse(
+        request,
+        "brief.html",
+        {
+            **base_ctx(),
+            "brief": brief,
+            "body_html": body_html,
+            "archive": brief_svc.list_recent_briefs(limit=30),
+        },
+    )
+
+
+@router.get("/brief", response_class=HTMLResponse)
+def brief_latest(request: Request):
+    latest = brief_svc.latest_brief()
+    return _render_brief_page(request, latest)
+
+
+@router.get("/brief/{day}", response_class=HTMLResponse)
+def brief_by_day(request: Request, day: str):
+    # Cheap guard so a "/brief/foo" doesn't reach the SQL layer.
+    from datetime import date as _date
+    try:
+        _date.fromisoformat(day)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=f"unknown brief: {day}") from e
+    b = brief_svc.get_brief(day)
+    if b is None:
+        raise HTTPException(status_code=404, detail=f"no brief for {day}")
+    return _render_brief_page(request, b)
 
 
 @router.get("/health")
