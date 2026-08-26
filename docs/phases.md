@@ -17,7 +17,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 4b | Fundamentals — Haiku extraction + Financials/Ownership/Segments tabs | done | 2026-08-22 |
 | 4c | Fundamentals — OCR + interim extraction + sikafinance-communiqué fallback | done | 2026-08-23 |
 | 4d | Fundamentals — financial ratios on the Financials + Peers tabs | done | 2026-08-24 |
-| 5 | TUI (Textual) | not started | — |
+| 5 | TUI (Textual) — parity with the web | done | 2026-08-26 |
 | 6a | Alerts — price-move / new-filing / news rules + Discord delivery | done | 2026-08-24 |
 | 6b | Daily brief (post-close, Haiku) | done | 2026-08-25 |
 | 6c | Analyst-note synthesis (weekly per-ticker, Sonnet) | done | 2026-08-25 |
@@ -47,6 +47,34 @@ when we pick it up):
 - **SGBC dividend fixture (in `test_news_service.py`) drifts out of the
   60-day window** on 2026-08-24 — pre-existing failure not related to
   6a. Fix is refreshing `tests/fixtures/sikafinance/dividendes.html`.
+- **Pre-computed sector-median peer table in `gather_context`** (analyst
+  notes). Today the note prompt asks Sonnet to compare a ticker's ratios
+  against a "normal range for its sector" without any concrete numbers.
+  Injecting `services.company.get_peers_with_ratios(ticker)` medians
+  into the JSON snapshot would make the "Competitive positioning" and
+  ratio-read sections concrete. Flagged in 6c's notes.
+- **Richer `_price_stats` in analyst notes** — add max drawdown +
+  beta-vs-BRVMC to the 90-day price block. Current stats are latest
+  close, period high/low, period change %, and a stdev-of-log-returns
+  vol proxy. Flagged in 6c's notes.
+- **Analyst-note archive pagination beyond 12 weeks.** Sidebar on
+  `/s/{ticker}/analyst` currently caps at a rolling quarter. Deeper
+  history would want `/s/{ticker}/analyst?offset=N`. Flagged in 6c's
+  notes.
+- **First live Saturday Sonnet weekly pass** (analyst notes) hasn't run
+  yet — the 20:00 Africa/Abidjan cron will do it automatically. Expect
+  ~$1.90 across the 47 equities in `note_spend`. Flagged in 6c's notes.
+- **Scrolling news headline strip in the TUI footer during market
+  hours.** Charter mentioned it in the original Phase 5 blurb; the
+  standalone News screen already covers the read case, so this is
+  pure polish. Flagged in 5's notes.
+- **Lazy per-tab rendering in the TUI ticker view.** Every tab paints
+  on every `refresh_data()`; the Chart tab is the heavy one (fetches
+  90-day history). Moving to on-tab-activate would remove a wasted
+  network hit when the user only wants Overview. Flagged in 5's notes.
+- **Multi-select for `new_filing` doc_types in the TUI alerts editor.**
+  Currently a CSV `Input`; a proper multi-select widget would be
+  friendlier. Flagged in 5's notes.
 
 ---
 
@@ -985,10 +1013,129 @@ small `securities` extension for `shares_outstanding` / `float_pct` /
 
 ---
 
-## Phase 5 — TUI (Textual) — not started
+## Phase 5 — TUI (Textual) (done 2026-08-26)
 
-Planned scope: Watchlist + quotes + news ticker sharing the same service
-layer as the web app.
+Textual shell over the same SQLite + services layer the web app uses.
+Bloomberg-ish two-pane layout: a persistent watchlist sidebar on the
+left, a right pane that swaps between six screens. Reads only — no
+scrapers, no LLM calls, no schedulers. The TUI is a viewer over what
+the jobs layer has already ingested; refresh polls the local DB.
+
+**Scope call**: parity with the web (per user choice). Started with the
+narrow "watchlist + quotes + news ticker" from the original charter,
+then folded in Directory / Ticker tabs / Alerts / Watchlists so the
+Bloomberg user doesn't have to switch to the browser for any common
+action.
+
+**Delivered**
+
+- **`src/brvm/apps/tui/`** — new package: `app.py` (`BRVMTerminalApp`
+  shell + `ContentSwitcher`), `sidebar.py` (watchlist column), one
+  `views/*.py` per screen (`home`, `ticker`, `directory`, `news`,
+  `watchlists`, `alerts`), `palette.py` (Ctrl-K search modal),
+  `format.py` (shared number/pct/age formatters), `style.tcss`
+  (dark-terminal aesthetic).
+- **Entrypoints** — `just tui` runs `python -m brvm.apps.tui`;
+  `brvm-tui` console_scripts entry via `[project.scripts]`. Both share
+  the same `BRVMTerminalApp().run()` path.
+- **Persistent chrome** — header row with market-status pill
+  (● OPEN / ○ CLOSED), Abidjan clock, and a "last snapshot: Xs ago"
+  clock that pulls from `services.market.last_snapshot_utc`. Repainted
+  every second so the age counter keeps ticking.
+- **Sidebar** — always shows a virtual "Turnover leaders" list
+  (`services.market.top_by_turnover(20)`) as the first source, then
+  every user watchlist from `services.watchlist.list_all()`. `Shift+W`
+  cycles between them; `Enter` on a row opens the ticker view.
+- **Home view** — indices strip + Gainers/Losers/Turnover leaders +
+  latest high-relevance tagged news. Mirrors the web `/`.
+- **Ticker view** — quote header + `TabbedContent` with 8 tabs
+  matching the web `/s/{ticker}`: Overview (from
+  `services.company.get_description`), Chart (90-day `plotext` line
+  plot via `services.history.get_history`), News (per-ticker feed),
+  Financials (annual series + interim card), Peers (with the P/E,
+  ROE, net-margin ratio annotations from
+  `services.company.get_peers_with_ratios`), Corp actions (365-day
+  window), Brief (latest daily brief markdown), Analyst view (latest
+  weekly note markdown). Both markdown tabs use Textual's `Markdown`
+  widget.
+- **Directory view** — full securities table with the same period
+  columns as `/directory` (Chg% / 1W / 1M / 3M / YTD / 1Y / ALL).
+  `s` cycles the sort column, `f` flips ascending/descending. `Enter`
+  opens the ticker view.
+- **News view** — filterable feed with in-view ticker / category /
+  min-relevance inputs; `/` focuses the ticker input. `Enter` on a
+  row opens the primary ticker (LLM attribution first, ticker_hint
+  fallback).
+- **Alerts view** — top table is the recent events inbox
+  (`list_recent_events(limit=100)`), bottom table is the enabled +
+  disabled rules. `t` toggles the selected rule, `Delete` deletes,
+  `n` focuses the "new rule" row (kind Select + ticker + threshold /
+  min_relevance / doc_types). Kind-specific validation lives in the
+  view — a `price_move` without a threshold shows a notification
+  instead of writing a broken rule.
+- **Watchlists view** — list + item table with `n` to focus the
+  new-list input, `Delete` to drop the selected list, `a` to focus
+  add-ticker, `r` to remove. Emits `WatchlistChanged` so the sidebar
+  refreshes its source list without a full reload.
+- **Search palette (`Ctrl-K`)** — modal over `services.search.search`;
+  results ranked exact ticker > prefix > name substring. Rebound
+  from Ctrl-P because Textual's default command palette owns Ctrl-P
+  system-wide.
+- **Refresh model** — App-level `set_interval(30, _tick_refresh)`
+  during market hours; off-hours the tick returns early via
+  `brvm.clock.is_market_open()`. `r` always forces a manual pass.
+  Repaints preserve `DataTable.cursor_coordinate` and
+  `scroll_y` — the fresh snapshot slides in under the user's cursor
+  without yanking it around.
+
+**Two invariants the tests pin**
+
+1. **Off-hours the auto-tick no-ops, the manual `r` still works.**
+   `test_market_closed_pauses_auto_refresh` monkeypatches
+   `is_market_open` to False, wraps the sidebar's `refresh_data`
+   to record calls, and asserts the automatic tick produces zero
+   calls while `action_refresh_now()` still lands one.
+2. **Cursor position survives a repaint.** `test_refresh_preserves_
+   sidebar_cursor` moves the cursor down twice, forces a refresh,
+   and asserts `cursor_row == 2`.
+
+**Definition of Done — met**
+
+- `just tui` boots the app against the current `data/brvm.sqlite`.
+- `uv run brvm-tui` boots the same app via the console_scripts entry.
+- `just test` → **448 tests green** (14 new via Textual `Pilot`: boot,
+  indices render, sidebar populates, each screen switch (directory /
+  news / alerts / watchlists), open ticker from sidebar, refresh
+  preserves cursor, directory sort cycle, watchlist create + add,
+  off-hours pause, closed-market chrome, search palette filter).
+  Ruff clean across the new package + tests.
+- README "Try it (Phase 5)" section documents keybindings and the
+  layout diagram.
+
+**Naming quirk worth remembering**
+
+Textual's `App` has a `auto_refresh` reactive attribute whose backing
+storage lives at `_auto_refresh`. Naming a method `_auto_refresh` on
+your `App` subclass silently binds it to `None` (the reactive default),
+which surfaces as `TypeError: 'NoneType' object is not callable` when
+you try to invoke it. Renamed the ticker method to `_tick_refresh`.
+
+**Notes / follow-ups**
+
+- **No news ticker in the footer yet.** The charter mentioned a
+  scrolling headline strip during market hours — deferred as a small
+  polish item. The News screen already covers the read case.
+- **Chart tab renders once per refresh, not per tab-switch.** Every
+  tab paints on every `refresh_data()` even if it's not visible. Fine
+  for the small local reads; the chart is the one heavy tab (fetches
+  history), a real profile would move it to lazy-on-tab-activate.
+- **Alerts rule editor is a single-row form.** More than a couple of
+  doc_types on a `new_filing` rule needs typing them CSV-style. A
+  proper multi-select would be nicer — good candidate for a Phase 5b
+  polish pass.
+- **Sidebar shows at most 20 rows for Turnover leaders.** Hard-coded
+  limit in `_rows_for_source`; big watchlists render in full because
+  they scroll.
 
 ---
 
