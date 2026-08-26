@@ -13,6 +13,11 @@ sync:
 dev:
     uv run uvicorn brvm.apps.web.main:app --reload --host 127.0.0.1 --port 8765
 
+# Phase 5: run the Textual TUI. Shares the DB + services layer with the
+# web app; refresh polls every 30s during market hours.
+tui:
+    uv run python -m brvm.apps.tui
+
 # Apply SQL migrations to $DB_PATH (default ./data/brvm.sqlite)
 migrate:
     uv run python scripts/migrate.py

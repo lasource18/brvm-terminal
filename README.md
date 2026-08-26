@@ -20,7 +20,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 4b — fundamentals (Haiku extraction + Financials/Ownership/Segments tabs)
 - [x] Phase 4c — fundamentals (OCR + interim extraction + sikafinance-communiqué fallback)
 - [x] Phase 4d — fundamentals (financial ratios on the Financials + Peers tabs)
-- [ ] Phase 5 — TUI
+- [x] Phase 5 — TUI (Textual, parity with the web)
 - [x] Phase 6a — alerts (price move + new filing + news relevance)
 - [x] Phase 6b — daily brief (post-close, Haiku)
 - [x] Phase 6c — analyst-note synthesis (weekly per-ticker, Sonnet)
@@ -326,6 +326,56 @@ Guarantees:
 
 The brief is **clearly labelled machine-generated** in the UI so
 readers don't mistake the synthesis for editorial commentary.
+
+## Try it (Phase 5 demo — Textual TUI)
+
+The TUI reads the same SQLite as the web app and calls the same
+services layer. A Bloomberg-ish shell with a persistent watchlist
+sidebar and a right pane that swaps between screens.
+
+```bash
+just tui              # or: uv run python -m brvm.apps.tui
+# also available as `brvm-tui` on the PATH after `just sync`
+```
+
+Layout (Bloomberg-ish):
+
+```
+┌ header ─────────────────────────────────────────────────────────┐
+│ ● OPEN   last snapshot: 42s ago             2026-08-26 09:42 Abidjan │
+├────────────────────────┬────────────────────────────────────────┤
+│ Watchlist / Turnover   │  Home / Ticker / Directory / News /    │
+│   leaders (◂/▸ arrows) │  Watchlists / Alerts (h/t/d/F5/w/a)    │
+│   Enter → open ticker  │                                        │
+├────────────────────────┴────────────────────────────────────────┤
+│ footer: keybinding hints                                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+Keybindings:
+
+| Key       | Action                                            |
+|-----------|---------------------------------------------------|
+| `h`       | Home (indices strip + movers + high-relevance news) |
+| `t`       | Ticker view (last selected)                       |
+| `d`       | Directory (sortable columns: 1W / 1M / 3M / YTD / 1Y / ALL) |
+| `F5`      | News feed (`/` inside for filters)                |
+| `w`       | Watchlists (create / delete / add / remove)       |
+| `a`       | Alerts (events inbox + rules editor)              |
+| `ctrl+k`  | Command palette — search ticker or company name   |
+| `shift+w` | Cycle sidebar watchlist                           |
+| `r`       | Force refresh now                                 |
+| `q`       | Quit                                              |
+
+Refresh model: `set_interval(30)` during market hours (paused
+off-hours via `clock.is_market_open()`); repaints preserve
+`DataTable.cursor_coordinate` and scroll offset so the timer
+doesn't yank the cursor around. Manual `r` always works.
+
+The ticker view mirrors the web `/s/{ticker}` tabs (Overview, Chart,
+News, Financials, Peers, Corp actions, Brief, Analyst view). Charts
+use `plotext` for an inline Braille line-plot. Markdown (brief +
+analyst note) renders via Textual's `Markdown` widget.
 
 ## Try it (Phase 6c demo — analyst notes)
 

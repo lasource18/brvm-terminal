@@ -1,0 +1,152 @@
+/* Bloomberg-ish dark terminal aesthetic. */
+
+Screen {
+    background: $background;
+    color: $text;
+}
+
+Header {
+    background: $primary-background;
+    color: $text;
+}
+
+Footer {
+    background: $primary-background;
+}
+
+#chrome-row {
+    height: 1;
+    background: $primary-background;
+    padding: 0 1;
+}
+
+#market-status {
+    width: auto;
+    color: $success;
+    padding: 0 1;
+}
+
+#market-status.-closed {
+    color: $warning;
+}
+
+#last-updated {
+    width: 1fr;
+    color: $text-muted;
+    text-align: right;
+    padding: 0 1;
+}
+
+#clock {
+    width: auto;
+    color: $accent;
+    padding: 0 1;
+}
+
+#body {
+    height: 1fr;
+}
+
+Sidebar {
+    width: 34;
+    background: $panel;
+    border-right: solid $primary-background;
+}
+
+Sidebar Label {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+Sidebar #sidebar-title {
+    color: $accent;
+    text-style: bold;
+}
+
+Sidebar DataTable {
+    height: 1fr;
+}
+
+#right-pane {
+    width: 1fr;
+    height: 1fr;
+}
+
+/* Home view */
+
+HomeView {
+    layout: vertical;
+    height: 1fr;
+    padding: 0 1;
+}
+
+HomeView #home-indices {
+    height: 3;
+    background: $boost;
+    padding: 0 1;
+    color: $text;
+}
+
+HomeView .home-section {
+    padding: 1 0 0 0;
+    height: 1fr;
+}
+
+HomeView .home-section-title {
+    color: $accent;
+    text-style: bold;
+    padding: 0 0 0 0;
+}
+
+/* Ticker view */
+
+TickerView {
+    layout: vertical;
+    height: 1fr;
+    padding: 0 1;
+}
+
+TickerView #quote-header {
+    height: 4;
+    background: $boost;
+    padding: 1;
+    color: $text;
+}
+
+TickerView TabbedContent {
+    height: 1fr;
+}
+
+/* Directory / News / Alerts / Watchlists */
+
+DataTable {
+    height: 1fr;
+}
+
+.empty-state {
+    color: $text-muted;
+    padding: 1 2;
+    height: auto;
+}
+
+/* Modal search palette */
+
+SearchPalette {
+    align: center middle;
+}
+
+SearchPalette #palette-box {
+    width: 60;
+    height: 18;
+    background: $panel;
+    border: round $accent;
+    padding: 0 1;
+}
+
+SearchPalette Input {
+    margin: 0 0 1 0;
+}
+
+SearchPalette ListView {
+    height: 1fr;
+}

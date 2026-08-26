@@ -21,12 +21,15 @@ dependencies = [
     "python-multipart>=0.0.20",
     "anthropic>=0.69",
     "markdown-it-py>=3.0",
+    "textual>=0.85",
+    "textual-plotext>=0.5",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=8.3",
     "pytest-httpx>=0.35",
+    "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "mypy>=1.13",
     "freezegun>=1.5",
@@ -35,6 +38,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project.scripts]
+brvm-tui = "brvm.apps.tui.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/brvm"]
@@ -57,6 +63,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+asyncio_mode = "auto"
 markers = [
     "pdf: parses a PDF fixture (fragile if source layout shifts)",
     "network: hits the live network (skipped in default runs)",
