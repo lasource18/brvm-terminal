@@ -108,6 +108,9 @@ def _persist(
             extract.total_equity,
             extract.eps,
             extract.dividend_per_share,
+            extract.cash_flow_ops,
+            extract.capex,
+            extract.free_cash_flow,
         )
     )
     if not (has_numbers or extract.segments or extract.ownership):
@@ -128,6 +131,9 @@ def _persist(
             total_equity=extract.total_equity,
             eps=extract.eps,
             dividend_per_share=extract.dividend_per_share,
+            cash_flow_ops=extract.cash_flow_ops,
+            capex=extract.capex,
+            free_cash_flow=extract.free_cash_flow,
         ),
         segments=[
             financials_repo.SegmentRow(
@@ -318,6 +324,9 @@ _METRIC_KEYS: tuple[str, ...] = (
     "total_equity",
     "eps",
     "dividend_per_share",
+    "cash_flow_ops",
+    "capex",
+    "free_cash_flow",
 )
 
 
@@ -347,7 +356,8 @@ def get_latest_interim(ticker: str) -> InterimSnapshot | None:
             """
             SELECT ticker, period_year, period_kind, currency, revenue,
                    operating_income, net_income, total_assets, total_equity,
-                   eps, dividend_per_share, filing_id
+                   eps, dividend_per_share, cash_flow_ops, capex,
+                   free_cash_flow, filing_id
             FROM financials
             WHERE ticker = ? AND period_kind IN ('H1', 'Q1', 'Q3', 'other')
             ORDER BY period_year DESC,
@@ -430,6 +440,67 @@ class OwnershipView:
         return bool(self.holders)
 
 
+@dataclass(frozen=True)
+class FilingRef:
+    """One row in the Financials tab's "References" subsection: the
+    filing that produced the extract for a given `(period_year,
+    period_kind)`. `source_url` links out to the original PDF on the
+    issuer / brvm.org / sikafinance so a reader can audit the numbers.
+    """
+
+    period_year: int
+    period_kind: str
+    doc_type: str
+    published_date: str | None
+    source: str
+    source_url: str
+    filing_id: int
+
+
+def get_financials_source_filings(ticker: str, *, limit: int = 24) -> list[FilingRef]:
+    """Filings currently backing the persisted `financials` rows for
+    `ticker` — one entry per `(period_year, period_kind)` triple, joined
+    onto the filings table for the audit-trail metadata.
+
+    The Financials tab renders these as a "References" table so a reader
+    can jump from a P&L cell to the source PDF that produced it. Sorted
+    newest-first with annual periods preferred inside a tied year (the
+    annual is usually what the user came for).
+    """
+    with connect(settings.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT f.period_year, f.period_kind, ff.doc_type,
+                   ff.published_date, ff.source, ff.source_url, ff.id AS filing_id
+            FROM financials f
+            JOIN filings ff ON ff.id = f.filing_id
+            WHERE f.ticker = ?
+            ORDER BY f.period_year DESC,
+                     CASE f.period_kind
+                        WHEN 'annual' THEN 5
+                        WHEN 'Q3'     THEN 4
+                        WHEN 'H1'     THEN 3
+                        WHEN 'Q1'     THEN 2
+                        ELSE 1 END DESC,
+                     COALESCE(ff.published_date, ff.fetched_utc) DESC
+            LIMIT ?
+            """,
+            (ticker, limit),
+        ).fetchall()
+    return [
+        FilingRef(
+            period_year=int(r["period_year"]),
+            period_kind=r["period_kind"],
+            doc_type=r["doc_type"],
+            published_date=r["published_date"],
+            source=r["source"],
+            source_url=r["source_url"],
+            filing_id=int(r["filing_id"]),
+        )
+        for r in rows
+    ]
+
+
 def reset_shadowed_extractions(*, dry_run: bool = False) -> dict[str, int]:
     """Recover ownership + segments that were wiped before PR #13's fix.
 
@@ -504,6 +575,48 @@ def reset_shadowed_extractions(*, dry_run: bool = False) -> dict[str, int]:
             conn.commit()
 
     log.info("fundamentals recover: %s", counts)
+    return counts
+
+
+def reset_missing_cashflow(*, dry_run: bool = False) -> dict[str, int]:
+    """Clear `filings.extracted_utc` on filings whose `financials` row
+    is missing every cash-flow column, so the next extraction pass
+    re-processes them with the Phase-7-aware prompt.
+
+    Only the filing currently backing the persisted `financials` row is
+    reset — no attempt to reprocess sibling filings for the same period,
+    because `replace_period`'s preserve-on-empty rule already handles
+    a second pass composing with the first. Runs against annual rows
+    only (interims rarely publish a cash-flow statement).
+
+    Idempotent: once cash-flow columns are populated, the row drops out
+    of the query.
+    """
+    counts = {"filings_reset": 0, "dry_run": int(dry_run)}
+    with connect(settings.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT f.filing_id
+            FROM financials f
+            JOIN filings ff ON ff.id = f.filing_id
+            WHERE f.period_kind = 'annual'
+              AND f.cash_flow_ops IS NULL
+              AND f.capex IS NULL
+              AND f.free_cash_flow IS NULL
+              AND ff.extracted_utc IS NOT NULL
+              AND (ff.is_scanned IS NULL OR ff.is_scanned = 0)
+            """
+        ).fetchall()
+        counts["filings_reset"] = len(rows)
+        if not dry_run and rows:
+            ids = [int(r["filing_id"]) for r in rows]
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(
+                f"UPDATE filings SET extracted_utc = NULL WHERE id IN ({placeholders})",
+                ids,
+            )
+            conn.commit()
+    log.info("fundamentals recover (cash-flow): %s", counts)
     return counts
 
 

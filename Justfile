@@ -91,6 +91,17 @@ fundamentals-recover:
 fundamentals-recover-dry:
     uv run python -m brvm.jobs.fundamentals_recover --once --dry-run
 
+# Phase 7: one-shot recovery pass that clears extracted_utc on filings
+# whose persisted `financials` row is missing every cash-flow column.
+# The next `just fundamentals-extract` re-runs the Phase-7 prompt against
+# them and populates cash_flow_ops / capex / free_cash_flow. Respects
+# the daily extraction cap. Idempotent.
+fundamentals-recover-cashflow:
+    uv run python -m brvm.jobs.fundamentals_recover --once --cash-flow
+
+fundamentals-recover-cashflow-dry:
+    uv run python -m brvm.jobs.fundamentals_recover --once --cash-flow --dry-run
+
 # Phase 4c: OCR scanned filings so 4b can extract them.
 # Requires the `ocrmypdf` binary and tesseract with the French language pack
 # (brew install ocrmypdf tesseract-lang).

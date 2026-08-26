@@ -24,6 +24,7 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 6a — alerts (price move + new filing + news relevance)
 - [x] Phase 6b — daily brief (post-close, Haiku)
 - [x] Phase 6c — analyst-note synthesis (weekly per-ticker, Sonnet)
+- [x] Phase 7 — cash-flow extraction (P/FCF, FCF yield, EV/EBITDA) + filings-link references on the Financials tab
 
 ## Requirements
 
@@ -253,9 +254,9 @@ week — a rerun within `OCR_MAX_AGE_DAYS` (default 7) is a no-op.
 Runs automatically on the scheduler every Sunday at 04:30 Africa/Abidjan
 (`company_facts_refresh_weekly`).
 
-**Deferred**: P/FCF, FCF yield, and EV/EBITDA are on the backlog — they
-need cash-flow (`cash_flow_ops`, `capex`) added to the extractor first.
-See `docs/phases.md` for the Phase 4d writeup.
+**Follow-up (shipped in Phase 7)**: P/FCF, FCF yield, and EV/EBITDA now
+render alongside the earlier ratios — see the Phase 7 Try-it section
+below. `docs/phases.md` has the full writeup for both phases.
 
 ## Try it (Phase 6a demo — alerts)
 
@@ -422,6 +423,41 @@ Guarantees:
 The note is **clearly labelled machine-generated** in the UI so
 readers don't mistake the synthesis for sell-side research. There is
 no sell-side research on the BRVM — that's the whole point.
+
+## Try it (Phase 7 demo — cash-flow + filings references)
+
+Three new cash-flow columns on `financials` — `cash_flow_ops`, `capex`,
+`free_cash_flow` — populated by the Haiku extractor from the
+"Flux de trésorerie" section of each annual report. The Financials tab
+gains a P/FCF, FCF yield, and EV/EBITDA proxy in the ratios table, and
+a **References** section that lists the source filings behind each
+row with a link back to the original PDF.
+
+```bash
+just fundamentals-recover-cashflow-dry   # count filings needing re-extract
+just fundamentals-recover-cashflow       # clear extracted_utc on those
+just fundamentals-extract                # re-run against the reset filings
+just dev                                 # /s/SNTS/financials
+```
+
+The recovery job is idempotent — once a row has any of the three
+cash-flow columns populated, it's out of the query. Extraction still
+respects the `LLM_EXTRACT_DAILY_CAP_CENTS=200` daily cap; a full ~200-
+filing backfill fits comfortably in one day at Haiku rates.
+
+Notes on the multiples:
+
+- **P/FCF** and **FCF yield** use market cap (`shares * price`) and are
+  suppressed on currency mismatch or when FCF ≤ 0 (yield still shown as
+  a signed % — the direction matters).
+- **EV/EBITDA** is a **proxy** — we don't yet ingest net debt or D&A,
+  so EV = market cap and EBITDA ≈ operating income (RBE). The Ratios
+  cell hovers a `title` with the exact formula, and the table footer
+  spells out the caveat so nobody screens on it as a textbook multiple.
+- **References** section lists every `(period, doc_type)` currently
+  backing the persisted rows, joined onto `filings` for the audit
+  trail. Annual filings are surfaced above interims inside a given
+  year (that's usually what the reader came for).
 
 ## Try it (Phase 1 demo)
 

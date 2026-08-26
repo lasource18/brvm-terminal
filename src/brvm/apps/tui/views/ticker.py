@@ -203,6 +203,7 @@ class TickerView(Vertical):
             return
         fs = fundamentals.get_financials_series(self._ticker)
         interim = fundamentals.get_latest_interim(self._ticker)
+        refs = fundamentals.get_financials_source_filings(self._ticker)
         lines: list[str] = []
         if fs.has_data:
             # Header row: metric name, one column per period (newest→oldest).
@@ -220,6 +221,14 @@ class TickerView(Vertical):
             lines.append(f"\nInterim ({interim.period_kind} {interim.period_year}):")
             for k, v in interim.metrics.items():
                 lines.append(f"  {k:<20} {num(v, decimals=0)}")
+        if refs:
+            lines.append("\nReferences (source filings):")
+            for r in refs:
+                pub = r.published_date or "—"
+                lines.append(
+                    f"  {r.period_kind:<6} {r.period_year}  "
+                    f"{r.doc_type:<20} {pub:<10}  {r.source_url}"
+                )
         body.update("\n".join(lines))
 
     def _render_peers(self) -> None:

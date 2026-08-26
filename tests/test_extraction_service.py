@@ -201,3 +201,78 @@ def test_extract_filing_surfaces_refusal():
         extraction.extract_filing(
             ticker="SNTS", issuer_name=None, pdf_text="text", client=client
         )
+
+
+# --- cash-flow extraction (Phase 7) --------------------------------------
+
+
+def test_extract_filing_populates_cash_flow_fields_from_reply():
+    data = _happy_extract(
+        cash_flow_ops=500_000_000,
+        capex=200_000_000,
+        free_cash_flow=300_000_000,
+    )
+    client = FakeAnthropic([_json_reply(data)])
+    result = extraction.extract_filing(
+        ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+    )
+    assert result.extract.cash_flow_ops == 500_000_000
+    assert result.extract.capex == 200_000_000
+    assert result.extract.free_cash_flow == 300_000_000
+
+
+def test_extract_filing_flips_negative_capex_to_positive():
+    """French reports show capex as an outflow ("-200 M"). We store it
+    positive so FCF = CFO - capex has the conventional sign regardless
+    of how the model transcribed the source."""
+    data = _happy_extract(
+        cash_flow_ops=500_000_000,
+        capex=-200_000_000,
+        free_cash_flow=None,
+    )
+    client = FakeAnthropic([_json_reply(data)])
+    result = extraction.extract_filing(
+        ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+    )
+    assert result.extract.capex == 200_000_000
+    # FCF derived from CFO - |capex| = 500M - 200M = 300M
+    assert result.extract.free_cash_flow == 300_000_000
+
+
+def test_extract_filing_derives_fcf_when_only_components_given():
+    data = _happy_extract(
+        cash_flow_ops=100.0,
+        capex=30.0,
+        free_cash_flow=None,
+    )
+    client = FakeAnthropic([_json_reply(data)])
+    result = extraction.extract_filing(
+        ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+    )
+    assert result.extract.free_cash_flow == pytest.approx(70.0)
+
+
+def test_extract_filing_prefers_reported_fcf_over_derived():
+    """When the report publishes an explicit FCF line, respect it — the
+    issuer may back out non-standard items we'd miss by computing."""
+    data = _happy_extract(
+        cash_flow_ops=100.0,
+        capex=30.0,
+        free_cash_flow=42.0,
+    )
+    client = FakeAnthropic([_json_reply(data)])
+    result = extraction.extract_filing(
+        ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+    )
+    assert result.extract.free_cash_flow == pytest.approx(42.0)
+
+
+def test_extract_filing_leaves_fcf_none_when_no_components():
+    data = _happy_extract()  # nothing cash-flow-related
+    client = FakeAnthropic([_json_reply(data)])
+    result = extraction.extract_filing(
+        ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+    )
+    assert result.extract.cash_flow_ops is None
+    assert result.extract.capex is None
+    assert result.extract.free_cash_flow is None

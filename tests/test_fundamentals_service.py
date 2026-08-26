@@ -468,6 +468,193 @@ def test_reset_shadowed_extractions_leaves_non_shadowed_alone(monkeypatch, tmp_p
     assert len(stamped) == 2
 
 
+def test_get_financials_source_filings_lists_one_per_extracted_period(monkeypatch, tmp_path):
+    """The References subsection on the Financials tab renders exactly
+    one row per `(period_year, period_kind)` currently persisted in
+    `financials`, joined onto the filings table for the audit link."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            _mk_filing(year=2024),
+            _mk_filing(year=2023),
+            _mk_filing(year=2022),
+        ])
+        by_year = {int(r["period_year"]): int(r["id"]) for r in conn.execute(
+            "SELECT id, period_year FROM filings"
+        ).fetchall()}
+        for year, fid in by_year.items():
+            fin_repo.replace_period(
+                conn, filing_id=fid,
+                financials=fin_repo.FinancialsRow(
+                    ticker="SNTS", period_year=year, revenue=1_000_000,
+                ),
+            )
+
+    refs = svc.get_financials_source_filings("SNTS")
+    assert [r.period_year for r in refs] == [2024, 2023, 2022]
+    for r in refs:
+        assert r.source == "brvm_org"
+        assert r.source_url.startswith("https://brvm.org/")
+        assert r.doc_type == "rapport_annuel"
+
+
+def test_get_financials_source_filings_prefers_annual_within_a_year(monkeypatch, tmp_path):
+    """When both an annual and an interim row exist for the same year, the
+    annual should come first in the reference list (users usually want the
+    full-year audit trail before the interim)."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            Filing(
+                ticker="SNTS", issuer_name="SONATEL", doc_type="rapport_activites",
+                period_kind="H1", period_year=2024, source="brvm_org",
+                source_url="https://brvm.org/SNTS/2024-H1.pdf", url_hash="h-h1",
+                file_path="p", size_bytes=1, sha256="a", page_count=1,
+            ),
+            _mk_filing(year=2024),  # annual
+        ])
+        by_kind = {r["period_kind"]: int(r["id"]) for r in conn.execute(
+            "SELECT id, period_kind FROM filings"
+        ).fetchall()}
+        fin_repo.replace_period(
+            conn, filing_id=by_kind["H1"],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, period_kind="H1", revenue=500_000,
+            ),
+        )
+        fin_repo.replace_period(
+            conn, filing_id=by_kind["annual"],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, period_kind="annual", revenue=1_000_000,
+            ),
+        )
+
+    refs = svc.get_financials_source_filings("SNTS")
+    assert [(r.period_year, r.period_kind) for r in refs] == [
+        (2024, "annual"),
+        (2024, "H1"),
+    ]
+
+
+def test_get_financials_source_filings_empty_when_no_extractions(monkeypatch, tmp_path):
+    _db, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    assert svc.get_financials_source_filings("SNTS") == []
+
+
+def test_extract_pending_persists_cash_flow_columns(monkeypatch, tmp_path):
+    """End-to-end: a cash-flow-bearing extract lands in the `financials`
+    table with the three new columns populated."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    payload = _happy() | {
+        "cash_flow_ops": 400_000_000,
+        "capex": 150_000_000,
+        "free_cash_flow": 250_000_000,
+    }
+    client = FakeAnthropic([_json_reply(payload)])
+
+    counts = svc.extract_pending(client=client, project_root=tmp_path)
+    assert counts.extracted == 1
+
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT cash_flow_ops, capex, free_cash_flow FROM financials"
+        ).fetchone()
+    assert row["cash_flow_ops"] == 400_000_000
+    assert row["capex"] == 150_000_000
+    assert row["free_cash_flow"] == 250_000_000
+
+
+def test_reset_missing_cashflow_unstamps_annual_rows_without_cashflow(monkeypatch, tmp_path):
+    """The Phase-7 backfill: a `financials` row extracted before the
+    cash-flow prompt landed will have `cash_flow_ops` / `capex` /
+    `free_cash_flow` all NULL. Clear `extracted_utc` on the filing so
+    the next extraction pass picks it up again."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [_mk_filing(year=2024), _mk_filing(year=2023)])
+        by_year = {int(r["period_year"]): int(r["id"]) for r in conn.execute(
+            "SELECT id, period_year FROM filings"
+        ).fetchall()}
+        # 2024: extracted with cash-flow populated → should stay stamped.
+        filings_repo.mark_extracted(conn, by_year[2024])
+        fin_repo.replace_period(
+            conn, filing_id=by_year[2024],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, revenue=1_000_000,
+                cash_flow_ops=100_000, capex=30_000, free_cash_flow=70_000,
+            ),
+        )
+        # 2023: extracted before Phase 7 → cash-flow columns all NULL.
+        filings_repo.mark_extracted(conn, by_year[2023])
+        fin_repo.replace_period(
+            conn, filing_id=by_year[2023],
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2023, revenue=900_000,
+            ),
+        )
+
+    counts = svc.reset_missing_cashflow()
+    assert counts == {"filings_reset": 1, "dry_run": 0}
+
+    with connect(db_path) as conn:
+        stamps = {int(r["id"]): r["extracted_utc"] for r in conn.execute(
+            "SELECT id, extracted_utc FROM filings"
+        ).fetchall()}
+    # 2023 filing is now unstamped → will re-enter the next extraction pass.
+    assert stamps[by_year[2023]] is None
+    # 2024 filing (which has cash-flow data) stays stamped.
+    assert stamps[by_year[2024]] is not None
+
+
+def test_reset_missing_cashflow_dry_run_reports_without_touching(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [_mk_filing(year=2023)])
+        fid = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        filings_repo.mark_extracted(conn, fid)
+        fin_repo.replace_period(
+            conn, filing_id=fid,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2023, revenue=900_000,
+            ),
+        )
+
+    counts = svc.reset_missing_cashflow(dry_run=True)
+    assert counts == {"filings_reset": 1, "dry_run": 1}
+    with connect(db_path) as conn:
+        stamped = list(conn.execute(
+            "SELECT 1 FROM filings WHERE extracted_utc IS NOT NULL"
+        ).fetchall())
+    assert len(stamped) == 1  # untouched
+
+
+def test_reset_missing_cashflow_skips_interim_rows(monkeypatch, tmp_path):
+    """Interim reports (H1/Q1/Q3) rarely publish a full cash-flow
+    statement — recovering them would waste extraction budget on rows
+    that will never light up cash-flow columns."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            Filing(
+                ticker="SNTS", issuer_name="SONATEL", doc_type="rapport_activites",
+                period_kind="H1", period_year=2025, source="brvm_org",
+                source_url="u", url_hash="h",
+                file_path="p", size_bytes=1, sha256="a", page_count=1,
+            ),
+        ])
+        fid = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        filings_repo.mark_extracted(conn, fid)
+        fin_repo.replace_period(
+            conn, filing_id=fid,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2025, period_kind="H1", revenue=500_000,
+            ),
+        )
+
+    counts = svc.reset_missing_cashflow()
+    assert counts["filings_reset"] == 0
+
+
 def test_reset_shadowed_extractions_dry_run_touches_nothing(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
     with connect(db_path) as conn:
