@@ -1,20 +1,27 @@
 """Per-ticker view: quote header + tabbed content.
 
 Tabs mirror the web `/s/{ticker}` page: Overview, Chart, News,
-Financials, Peers, Corporate actions, Brief, Analyst view. Index-kind
+Financials, Peers, Corporate actions, Analyst view. Index-kind
 tickers hide the equity-only tabs (Financials, Peers, Analyst view).
+The Daily brief lives on Home now — it's a global summary, not a
+per-ticker artefact — so no Brief tab here.
+
+Every non-table tab wraps its body in `VerticalScroll` so long content
+(long descriptions, wide financials tables, multi-paragraph markdown
+notes) scrolls with the mouse wheel / PgUp / PgDn instead of getting
+clipped at the tab area's height.
 """
 
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
+from textual_plotext import PlotextPlot
 
 from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, num
 from brvm.services import (
     analyst_notes,
-    brief,
     company,
     fundamentals,
     history,
@@ -36,15 +43,24 @@ class TickerView(Vertical):
     def compose(self) -> ComposeResult:
         yield Static("Select a ticker…", id="quote-header")
         with TabbedContent(id="ticker-tabs"):
-            with TabPane("Overview", id="tab-overview"):
+            # VerticalScroll gives mouse-wheel + PgUp/PgDn scrolling for
+            # tab bodies that grow past the tab area's height. DataTable
+            # is already scrollable so its tabs skip the wrapper — nesting
+            # DataTable inside another scroll container hijacks the arrow
+            # keys used to move cells.
+            with TabPane("Overview", id="tab-overview"), VerticalScroll():
                 yield Static(id="overview-body")
             with TabPane("Chart", id="tab-chart"):
-                yield Static(id="chart-body")
+                # Use textual-plotext's PlotextPlot widget rather than
+                # `Static.update(plt.build())` — the latter dumps raw
+                # ANSI escape sequences into a Static which renders them
+                # as garbage (the "mix of description + pixels" symptom).
+                yield PlotextPlot(id="chart-plot")
             with TabPane("News", id="tab-news"):
                 news_table = DataTable(id="ticker-news", cursor_type="row", zebra_stripes=True)
                 news_table.add_columns("When", "Rel", "Category", "Title")
                 yield news_table
-            with TabPane("Financials", id="tab-financials"):
+            with TabPane("Financials", id="tab-financials"), VerticalScroll():
                 yield Static(id="financials-body")
             with TabPane("Peers", id="tab-peers"):
                 peers = DataTable(id="peers-table", cursor_type="row", zebra_stripes=True)
@@ -54,9 +70,7 @@ class TickerView(Vertical):
                 actions = DataTable(id="actions-table", cursor_type="row", zebra_stripes=True)
                 actions.add_columns("Kind", "Ex date", "Pay date", "Amount", "Yield%", "Note")
                 yield actions
-            with TabPane("Brief", id="tab-brief"):
-                yield Markdown("", id="brief-md")
-            with TabPane("Analyst view", id="tab-analyst"):
+            with TabPane("Analyst view", id="tab-analyst"), VerticalScroll():
                 yield Markdown("", id="analyst-md")
 
     def set_ticker(self, ticker: str) -> None:
@@ -77,7 +91,6 @@ class TickerView(Vertical):
         self._render_financials()
         self._render_peers()
         self._render_actions()
-        self._render_brief()
         self._render_analyst()
 
     # -- individual sections ----------------------------------------------
@@ -146,37 +159,35 @@ class TickerView(Vertical):
         body.update("\n\n".join(pieces) if pieces else f"[{DIM}]no details on file[/]")
 
     def _render_chart(self) -> None:
-        body = self.query_one("#chart-body", Static)
+        plot = self.query_one("#chart-plot", PlotextPlot)
         assert self._ticker
         country = getattr(self._sec, "country", None) if self._sec else None
         try:
             bars = history.get_history(self._ticker, country)
         except Exception as e:
-            body.update(f"[{DIM}]chart unavailable: {e}[/]")
+            # Fall back to a title-only chart with the error inline so the
+            # tab still renders instead of raising through the refresh loop.
+            plot.plt.clear_figure()
+            plot.plt.title(f"{self._ticker} — chart unavailable: {e}")
+            plot.refresh()
             return
         # `get_history` returns newest-first; plotext wants oldest→newest.
         trimmed = list(reversed(bars[:90])) if bars else []
         closes = [b.close for b in trimmed if b.close is not None]
         dates = [b.session_date.isoformat() for b in trimmed if b.close is not None]
-        if not closes:
-            body.update(f"[{DIM}]no history for {self._ticker}[/]")
-            return
-        # Render as an inline text plot via plotext directly — TabPane
-        # sizing doesn't play with textual-plotext's PlotextPlot widget
-        # inside a mounted-then-swapped tab, so we render on refresh.
-        try:
-            import plotext as plt
-        except ImportError:
-            body.update(f"[{DIM}]plotext missing — dep install issue[/]")
-            return
+        plt = plot.plt
         plt.clear_figure()
+        if not closes:
+            plt.title(f"{self._ticker} — no history")
+            plot.refresh()
+            return
         plt.date_form("Y-m-d")
-        plt.plot_size(width=100, height=20)
         plt.theme("dark")
-        plt.plot(dates, closes, marker="braille", color="green")
+        plt.plot(dates, closes, marker="braille")
         plt.title(f"{self._ticker} — last {len(closes)} sessions")
-        rendered = plt.build()
-        body.update(rendered)
+        # PlotextPlot sizes itself to the widget's rect on the next paint;
+        # explicit plot_size would fight the layout.
+        plot.refresh()
 
     def _render_news(self) -> None:
         table = self.query_one("#ticker-news", DataTable)
@@ -268,15 +279,6 @@ class TickerView(Vertical):
             )
         if rows:
             table.move_cursor(row=min(cursor, len(rows) - 1), animate=False)
-
-    def _render_brief(self) -> None:
-        md = self.query_one("#brief-md", Markdown)
-        latest = brief.latest_brief()
-        if latest is None:
-            md.update("*No brief on file. Run `just brief-run` after the market closes.*")
-            return
-        header = f"# Daily brief — {latest.day}\n\n"
-        md.update(header + (latest.markdown or ""))
 
     def _render_analyst(self) -> None:
         md = self.query_one("#analyst-md", Markdown)
