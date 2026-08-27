@@ -541,6 +541,146 @@ def test_generate_for_all_dry_run_reports_but_persists_nothing(monkeypatch, tmp_
     assert svc.latest_note("SNTS") is None
 
 
+# --- Phase 8e: sector-median peer table -----------------------------------
+
+
+class TestPeerMedians:
+    """Pure helper — direct dict inputs, no DB."""
+
+    def test_returns_empty_when_no_rows(self):
+        from brvm.services.analyst_notes import _peer_medians
+        assert _peer_medians([]) == {}
+
+    def test_omits_fields_with_one_sample(self):
+        from brvm.services.analyst_notes import _peer_medians
+        rows = [
+            {"pe": 10.0, "roe": None, "net_margin": None,
+             "change_ytd_pct": 3.0, "market_cap": None},
+            {"pe": None, "roe": 15.0, "net_margin": 12.0,
+             "change_ytd_pct": None, "market_cap": None},
+        ]
+        med = _peer_medians(rows)
+        # Every field has ≤1 non-None sample → all dropped.
+        assert med == {}
+
+    def test_median_of_odd_and_even_samples(self):
+        from brvm.services.analyst_notes import _peer_medians
+        rows = [
+            {"pe": 8.0, "roe": None, "net_margin": None,
+             "change_ytd_pct": None, "market_cap": None},
+            {"pe": 12.0, "roe": None, "net_margin": None,
+             "change_ytd_pct": None, "market_cap": None},
+            {"pe": 10.0, "roe": None, "net_margin": None,
+             "change_ytd_pct": None, "market_cap": None},
+        ]
+        med = _peer_medians(rows)
+        assert med == {"pe": 10.0}
+        # Add a fourth peer → median of 8/10/12/14 = 11 (mean of the two middles).
+        rows.append({"pe": 14.0, "roe": None, "net_margin": None,
+                     "change_ytd_pct": None, "market_cap": None})
+        med2 = _peer_medians(rows)
+        assert med2 == {"pe": 11.0}
+
+    def test_covers_all_expected_fields(self):
+        from brvm.services.analyst_notes import _peer_medians
+        rows = [
+            {"pe": 8.0, "roe": 10.0, "net_margin": 5.0,
+             "change_ytd_pct": 2.0, "market_cap": 1_000.0},
+            {"pe": 12.0, "roe": 20.0, "net_margin": 15.0,
+             "change_ytd_pct": 6.0, "market_cap": 3_000.0},
+        ]
+        med = _peer_medians(rows)
+        assert med == {
+            "pe": 10.0, "roe": 15.0, "net_margin": 10.0,
+            "change_ytd_pct": 4.0, "market_cap": 2_000.0,
+        }
+
+
+def test_gather_context_peers_block_includes_medians_and_self(monkeypatch, tmp_path):
+    """Peer block should carry a `medians` dict (Python-computed) and a
+    `self` dict (the subject's own ratios) so Sonnet can do a concrete
+    self-vs-median compare without inventing numbers."""
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    from brvm.services._view import PeerRow
+
+    def _peers(ticker):
+        return PeersView(
+            sector="Telecommunications",
+            source="sikafinance",
+            peers=[
+                PeerRow(ticker="ORAC", name="ORANGE CI", country="CI",
+                        last=19_000, change_ytd_pct=3.1, pe=8.9, roe=15.2,
+                        net_margin=12.0, market_cap=200_000_000),
+                PeerRow(ticker="ETIT", name="ECOBANK ETI", country="TG",
+                        last=17, change_ytd_pct=-4.2, pe=6.5, roe=11.0,
+                        net_margin=8.0, market_cap=400_000_000),
+                PeerRow(ticker="ONTBF", name="ONATEL BF", country="BF",
+                        last=3_500, change_ytd_pct=1.0, pe=10.0, roe=13.0,
+                        net_margin=10.0, market_cap=300_000_000),
+                # Subject row (is_self) provides the self-vs-median block.
+                PeerRow(ticker="SNTS", name="SONATEL", country="SN",
+                        last=32_500, change_ytd_pct=5.0, pe=15.0, roe=20.0,
+                        net_margin=18.0, market_cap=600_000_000, is_self=True),
+            ],
+        )
+
+    monkeypatch.setattr(svc.company_svc, "get_peers_with_ratios", _peers)
+    ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
+    assert ctx is not None
+    peers = ctx["peers"]
+    med = peers["medians"]
+    # Medians computed over the three peer rows (self is excluded).
+    assert med["pe"] == 8.9        # median of 8.9 / 6.5 / 10.0
+    assert med["roe"] == 13.0      # median of 15.2 / 11.0 / 13.0
+    assert med["net_margin"] == 10.0
+    assert med["change_ytd_pct"] == 1.0
+    assert med["market_cap"] == 300_000_000
+    # Subject's own numbers live in `self` for a direct compare.
+    assert peers["self"]["pe"] == 15.0
+    assert peers["self"]["roe"] == 20.0
+    # Peer list itself still excludes the self row.
+    assert [p["ticker"] for p in peers["peers"]] == ["ORAC", "ETIT", "ONTBF"]
+
+
+def test_gather_context_peers_medians_empty_when_all_null(monkeypatch, tmp_path):
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    from brvm.services._view import PeerRow
+
+    def _peers(ticker):
+        # Every peer has null ratios → no field clears the ≥2-sample floor.
+        return PeersView(
+            sector="Telecom",
+            source="sikafinance",
+            peers=[
+                PeerRow(ticker="ORAC", name="ORANGE CI", country="CI", last=19_000),
+                PeerRow(ticker="ETIT", name="ECOBANK ETI", country="TG", last=17),
+            ],
+        )
+
+    monkeypatch.setattr(svc.company_svc, "get_peers_with_ratios", _peers)
+    ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
+    assert ctx is not None
+    assert ctx["peers"]["medians"] == {}
+
+
+def test_gather_context_peers_medians_absent_when_fetch_fails(monkeypatch, tmp_path):
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+
+    def _raises(ticker):
+        raise RuntimeError("upstream down")
+
+    monkeypatch.setattr(svc.company_svc, "get_peers_with_ratios", _raises)
+    ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
+    assert ctx is not None
+    peers = ctx["peers"]
+    assert peers["peers"] == []
+    assert peers["medians"] == {}
+    # `self` isn't emitted when the fetch fails — there's no subject row
+    # to draw from — so downstream renderers can rely on its presence
+    # implying a live peer set.
+    assert "self" not in peers
+
+
 # --- Phase 7b: price-stats enrichment (max drawdown + beta vs BRVMC) -----
 
 
