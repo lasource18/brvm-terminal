@@ -1765,3 +1765,95 @@ category (state / regional / private).
   doesn't publish ISINs on the category page, so we can't do the
   clean "first two letters of ISIN" mapping equities use. If the
   BOC PDF exposes bond ISINs, a Phase 8.5 pass could tighten this.
+
+
+## Phase 8b — Bond enrichment (done 2026-08-27)
+
+Second bond mini-phase off the 8a foundation. Every bond row now
+carries the four reference fields a Bloomberg DES screen would
+surface (coupon rate, maturity year, issue date, issuer name) plus
+two daily-refreshed fields (accrued coupon, last-payment date/amount).
+Foundation for the bond tabs UI that lands in 8c — Overview, Cash
+flow, Yield & Duration, and Related bonds all pivot on this data.
+
+**Delivered**
+
+- **Migration `0013_bonds.sql`** — four `ALTER TABLE` on `securities`
+  (`coupon_rate`, `maturity_year`, `issue_date`, `issuer_name`),
+  one new `bond_snapshots` table for the two daily-varying values,
+  index on `securities(issuer_name)` so "Related bonds" reads are
+  O(log n).
+- **`parse_nom(name)`** in `sources/brvm_org_bonds.py` — pulls
+  `(issuer_name, coupon_rate, issue_year, maturity_year)` from the
+  `Nom` cell via one regex covering:
+  * comma-decimal coupons (`6,10%`) and period-decimal (`6.25%`);
+  * integer coupons (`7%`);
+  * space-before-percent (`3,00 %`);
+  * en-dash year range (`2025–2030`) alongside hyphen (`2025-2030`).
+  Returns None on unmatched shapes ("à préciser", empty) so the
+  ingest keeps running with enrichment left NULL — a graceful signal
+  rather than a raise.
+- **Bond-type prefix normalization** — `SOCIAL BOND`, `GENDER BOND`,
+  `DIASPORA BONDS`, `KEUR SAMBA`, `GSS BAOBAB`, `GSS ` are stripped
+  from the issuer name so `SOCIAL BOND CRRH-UEMOA 6,00% 2025-2040`
+  groups with plain `CRRH-UEMOA 6.10% 2012-2022` in
+  `list_by_issuer`. Regression test pins this.
+- **`parse_last_payment(cell)`** — splits `DD/MM/YYYY / N,NN` on the
+  spaced slash (a bare `/` would split the date itself) into
+  `(date, amount)`. Missing / malformed halves come back as None
+  each so a newly-admitted bond with no first coupon yet surfaces
+  cleanly.
+- **`Security` model** — four new bond-only fields (`coupon_rate`,
+  `maturity_year`, `issue_date`, `issuer_name`). `store.securities.upsert`
+  COALESCEs them on conflict so a parser regression that briefly
+  returns NULL for a field doesn't wipe a value we already had.
+- **`BondSnapshot` model + `store.bonds` repo** — `upsert_snapshots`
+  writes one row per `(ticker, session_date)`; `latest_snapshot(ticker)`
+  reads the newest; `list_by_issuer(issuer_name, exclude_ticker)`
+  returns same-issuer bonds sorted by maturity year (NULLs last),
+  with the current bond excluded so the caller doesn't have to
+  filter.
+- **`services.quotes.snapshot_bonds_once`** now writes three
+  tables: `securities` (reference), `daily_bars` (price),
+  `bond_snapshots` (accrued + last payment). Return dict grows to
+  `{securities, bars, snapshots}`.
+
+**Two invariants the tests pin**
+
+1. **`SOCIAL BOND CRRH-UEMOA` and plain `CRRH-UEMOA` share an
+   `issuer_name`.** The regional fixture contains both; grouping on
+   `issuer_name = "CRRH-UEMOA"` returns ≥2 rows, at least one
+   `SOCIAL BOND …` and at least one non-prefixed one.
+2. **Last-payment date parses without eating the date's internal
+   slashes.** `parse_last_payment("16/06/2026 / 76,25")` →
+   `(date(2026, 6, 16), 76.25)` — the split is on `\s+/\s+`, not on
+   a bare slash.
+
+**Definition of Done — met**
+
+- `just test` → **511 tests green** (+20 new: 8 for `parse_nom`
+  covering all coupon/prefix/year shapes, 3 for `parse_last_payment`,
+  4 for the parsed `Security` + `BondSnapshot` rows, 4 for the
+  `bond_snapshots` repo + `list_by_issuer` ordering + self-exclusion,
+  1 wiring test for the extended `snapshot_bonds_once` return dict).
+  Ruff clean.
+- Existing partial-migration tests (`test_repos`, `test_search_service`,
+  `test_enrichment_service`, `test_watchlist_repo`) updated to apply
+  the full migration set so future schema additions don't force a
+  one-line patch per file.
+
+**Notes / follow-ups**
+
+- **`maturity_year` is a bare INT.** Storing the exact `maturity_date`
+  needs either the `Date maturité` cell (currently blank) or a
+  derivation like "issue-date anniversary in the maturity year". The
+  latter is what a bullet bond's maturity actually is; when the
+  cash-flow schedule lands in 8c we'll derive it there.
+- **YTM / duration / convexity aren't computed yet.** That's 8c's
+  `services/bonds.py` — the reference fields shipped here are the
+  inputs. Bisection solver, no scipy dependency.
+- **News-tagger issuer matching is unchanged.** The tagger still
+  emits equity tickers; bond issuer news won't get stamped
+  automatically until the tagger's ticker list grows to accept
+  issuer-name matches. 8c's News tab will match on issuer-name
+  substring at read time as a bridging fallback.

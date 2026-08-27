@@ -22,6 +22,19 @@ class Security(BaseModel):
     sector: str | None = None
     currency: str = "XOF"
     source_url: str | None = None
+    # Bond-specific reference fields (populated only when kind='bond').
+    # Coupon rate is expressed as a percent (e.g. 6.10 for 6.10%). Maturity
+    # is stored as a bare year — the exchange leaves the exact date blank
+    # on the category page, and the issue-date anniversary is the closest
+    # thing to a canonical maturity date for the bullet issues that are
+    # the BRVM default. Issuer name is the `Nom` prefix with bond-type
+    # labels ("SOCIAL BOND", "GENDER BOND", "DIASPORA BONDS", "KEUR SAMBA")
+    # stripped, so related-bonds lookups group `SOCIAL BOND CRRH-UEMOA`
+    # with plain `CRRH-UEMOA`.
+    coupon_rate: float | None = None
+    maturity_year: int | None = None
+    issue_date: date | None = None
+    issuer_name: str | None = None
 
 
 class Quote(BaseModel):
@@ -56,6 +69,24 @@ class IndexLevel(BaseModel):
     session_date: date
     level: float
     change_pct: float | None = None
+    source: str
+
+
+class BondSnapshot(BaseModel):
+    """One row from brvm.org's `/fr/cours-obligations/N` per bond per day.
+
+    The exchange publishes the daily accrued coupon and the last-payment
+    date/amount alongside the price. Those two fields shift every session
+    (accrued grows linearly between coupons; last-payment jumps on
+    coupon-payment day), so they get their own table rather than sitting
+    on `daily_bars` where every non-bond row would carry NULLs.
+    """
+
+    ticker: str
+    session_date: date
+    accrued_coupon: float | None = None
+    last_coupon_date: date | None = None
+    last_coupon_amount: float | None = None
     source: str
 
 

@@ -8,10 +8,11 @@ from brvm.store import securities as sec_repo
 
 
 def _init(tmp_db_path: Path) -> None:
-    sql = (Path(__file__).resolve().parents[1] / "migrations" / "0001_init.sql").read_text()
+    root = Path(__file__).resolve().parents[1] / "migrations"
     with connect(tmp_db_path) as conn:
         ensure_migrations_table(conn)
-        conn.executescript(sql)
+        for f in sorted(root.glob("*.sql")):
+            conn.executescript(f.read_text())
         conn.commit()
 
 
