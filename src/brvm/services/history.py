@@ -239,11 +239,20 @@ def get_history(ticker: str, country: str | None = None) -> list[DailyBar]:
         log.debug("history cache hit ticker=%s age=%.1fs", ticker, now - cached[0])
         return _with_intraday_overlay(ticker, cached[1])
 
-    if _security_kind(ticker) == "index":
+    kind = _security_kind(ticker)
+    if kind == "index":
         bars = _load_index_levels(ticker)
         with _lock:
             _cache[ticker] = (now, bars)
         return bars  # index chart is close-only; no intraday overlay yet
+    if kind == "bond":
+        # Bonds get their close from the brvm.org daily poll, not
+        # sikafinance historique (which 404s on bond tickers). Serve
+        # daily_bars directly and skip the network fetch fallback.
+        bars = _load_from_db(ticker)
+        with _lock:
+            _cache[ticker] = (now, bars)
+        return bars
 
     # Cache miss: try DB first — no I/O if the newest bar is younger
     # than 2*TTL. `_newest_ingested_age` already returns seconds elapsed
