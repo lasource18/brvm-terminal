@@ -1,0 +1,105 @@
+{% if bond %}
+  <div class="panels desc-panels">
+    <div class="panel">
+      <h2>Bond</h2>
+      <table class="kv">
+        <tr><th>Issuer</th><td>{{ bond.issuer_name or "—" }}</td></tr>
+        <tr><th>Category</th><td>{{ bond.sector or "—" }}</td></tr>
+        {% if bond.country %}<tr><th>Country</th><td>{{ bond.country }}</td></tr>{% endif %}
+        <tr><th>Coupon</th>
+          <td>
+            {% if bond.coupon_rate is not none %}{{ "%.2f"|format(bond.coupon_rate) }}%{% else %}—{% endif %}
+            <span class="dim">· annual</span>
+          </td>
+        </tr>
+        <tr><th>Issue date</th>
+          <td>{% if bond.issue_date %}{{ bond.issue_date.isoformat() }}{% else %}—{% endif %}</td>
+        </tr>
+        <tr><th>Maturity</th>
+          <td>{% if bond.maturity_year %}{{ bond.maturity_year }}{% else %}—{% endif %}</td>
+        </tr>
+        <tr><th>Nominal</th>
+          <td>{{ "{:,.0f}".format(10000) }} XOF <span class="dim">· assumed</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h2>Latest price</h2>
+      <table class="kv">
+        <tr><th>Clean price</th>
+          <td>{% if bond.clean_price is not none %}{{ "{:,.2f}".format(bond.clean_price) }} XOF{% else %}—{% endif %}</td>
+        </tr>
+        {% if bond.last_snapshot %}
+          <tr><th>Accrued coupon</th>
+            <td>{% if bond.last_snapshot.accrued_coupon is not none %}{{ "{:,.2f}".format(bond.last_snapshot.accrued_coupon) }} XOF{% else %}—{% endif %}</td>
+          </tr>
+          <tr><th>Last payment</th>
+            <td>
+              {% if bond.last_snapshot.last_coupon_date %}
+                {{ bond.last_snapshot.last_coupon_date.isoformat() }}
+                {% if bond.last_snapshot.last_coupon_amount is not none %}
+                  · {{ "{:,.2f}".format(bond.last_snapshot.last_coupon_amount) }} XOF
+                {% endif %}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endif %}
+        {% if bond.yield_ %}
+          <tr><th>Current yield</th>
+            <td>
+              {% if bond.yield_.current_yield_pct is not none %}
+                {{ "%.2f"|format(bond.yield_.current_yield_pct) }}%
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          <tr><th>Yield to maturity</th>
+            <td>
+              {% if bond.yield_.ytm_pct is not none %}
+                {{ "%.2f"|format(bond.yield_.ytm_pct) }}%
+                <span class="dim">· bullet, annual</span>
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endif %}
+        {% if bond.schedule and bond.schedule.next_coupon_date %}
+          <tr><th>Next coupon</th>
+            <td>
+              {{ bond.schedule.next_coupon_date.isoformat() }}
+              <span class="dim">· {{ bond.schedule.coupons_remaining }} left</span>
+            </td>
+          </tr>
+        {% endif %}
+      </table>
+    </div>
+
+    {% if bond.issuer_equity_ticker or bond.prospectus_news %}
+      <div class="panel">
+        <h2>Related</h2>
+        <table class="kv">
+          {% if bond.issuer_equity_ticker %}
+            <tr><th>Issuer equity</th>
+              <td><a href="/s/{{ bond.issuer_equity_ticker }}">{{ bond.issuer_equity_ticker }}</a></td>
+            </tr>
+          {% endif %}
+        </table>
+        {% if bond.prospectus_news %}
+          <h3 style="margin-top:12px;">Prospectus / admission news</h3>
+          <ul class="dim">
+            {% for n in bond.prospectus_news %}
+              <li>
+                {% if n.published_at %}<span class="dim">{{ n.published_at[:10] }}</span> · {% endif %}
+                <a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+  {% if bond.source_url %}
+    <div class="dim" style="margin-top: 8px;">source: <a href="{{ bond.source_url }}" target="_blank" rel="noopener">brvm.org</a></div>
+  {% endif %}
+{% else %}
+  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+{% endif %}
