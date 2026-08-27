@@ -16,11 +16,15 @@ log = get(__name__)
 def run_once() -> None:
     counts = snapshot_bonds_once()
     log.info(
-        "bond snapshot wrote: securities=%d bars=%d",
+        "bond snapshot wrote: securities=%d bars=%d snapshots=%d",
         counts["securities"],
         counts["bars"],
+        counts["snapshots"],
     )
-    print(f"bonds: securities={counts['securities']} bars={counts['bars']}")
+    print(
+        f"bonds: securities={counts['securities']} bars={counts['bars']} "
+        f"snapshots={counts['snapshots']}"
+    )
 
 
 def main() -> None:

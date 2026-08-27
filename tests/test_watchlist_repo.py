@@ -10,8 +10,8 @@ def _init(tmp_db_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     with connect(tmp_db_path) as conn:
         ensure_migrations_table(conn)
-        conn.executescript((root / "migrations" / "0001_init.sql").read_text())
-        conn.executescript((root / "migrations" / "0002_watchlists.sql").read_text())
+        for f in sorted((root / "migrations").glob("*.sql")):
+            conn.executescript(f.read_text())
         conn.commit()
 
 
