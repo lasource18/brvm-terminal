@@ -2392,3 +2392,64 @@ behaviour change for the per-ticker News tab.
   not touch the URL, add `hx-push-url="false"` on the pager
   buttons.
 
+
+## Phase 8i — Refresh dividendes fixture (done 2026-08-27)
+
+Housekeeping mini-phase to get the sikafinance dividendes fixture back
+in sync with the upstream feed. SGBCI's 2026-08-21 ex-date detached
+between the original capture and today, dropping it from
+`/marches/dividendes` and putting the pinned assertion in
+`test_poll_all_ingests_and_dedupes` (which asserted SGBC was in the
+upcoming list) at risk. Refreshing the fixture forward closes the
+gap.
+
+**Delivered**
+
+- **`tests/fixtures/sikafinance/dividendes.html`** — recaptured
+  2026-08-27. Now leads with SAPH CI 2026-08-27, TOTAL CI
+  2026-08-28, NESTLE CI 2026-09-04, VIVO ENERGY CI 2026-09-24,
+  SERVAIR ABIDJAN 2026-09-29. The five "A préciser" rows
+  (SMB CI, LOTERIE NATIONALE DU BENIN, TRACTAFRIC MOTORS CI,
+  SODECI, NEI CEDA CI) persisted through the refresh with tweaked
+  yields.
+- **`FIXTURE_TODAY` moved from 2026-08-20 → 2026-08-27** to match
+  the recapture. Any test that reads
+  `list_corporate_actions_upcoming` from the fixture must pin
+  `today` here so ex-dates baked into the HTML remain "upcoming"
+  no matter when the test runs.
+- **Test assertions reshaped**:
+  * `test_upcoming_dividends_have_tickers` now checks
+    `{"SPHC", "TTLC", "NTLC"}` instead of the old
+    `{"SGBC", "SPHC", "TTLC"}`.
+  * `test_sgbci_row_shape` renamed to `test_sphc_row_shape` and
+    reshaped to assert SAPH CI's post-refresh values (ex-date
+    2026-08-27, amount 489.00 XOF, yield 5.32%).
+  * `test_poll_all_ingests_and_dedupes` checks the same
+    `{"SPHC", "TTLC", "NTLC"}` subset instead of the old
+    SGBC/TTLC/SPHC triple. NTLC seeded into `_seed_db` so the
+    dividend row survives the FK check.
+- **SGBC kept in `_seed_db`** because the communiques fixture still
+  names SGBCI as an issuer — the `hints.get("SGBCI") == "SGBC"`
+  ticker-hint assertion depends on it.
+
+**Definition of Done — met**
+
+- `just test` → **583 tests green** (no net change — same three
+  fixture tests updated, no adds or drops). Ruff clean.
+- Fixture capture command unchanged: `just refresh-fixtures` would
+  produce the same file, since it hits the same URL with the same
+  user agent.
+
+**Notes / follow-ups**
+
+- **Fixture will drift again.** The refresh cadence is
+  "whenever a pinned assertion falls out of window". A less
+  brittle approach would be to normalise fixture ex-dates
+  relative to a `data-sort` attribute (which is Unix nanoseconds
+  and shifts by one day per drift-day) — deferred because the
+  three assertions we pin are cheap to keep in step.
+- **No script.** `scripts/refresh_fixtures.py` already targets
+  this URL, so a full run bakes in the refresh; kept manual for
+  the SGBC case so we can verify the exchange feed hasn't gone
+  off in some other axis before committing the new HTML.
+
