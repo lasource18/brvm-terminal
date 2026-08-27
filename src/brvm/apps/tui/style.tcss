@@ -98,6 +98,26 @@ HomeView .home-section-title {
     padding: 0 0 0 0;
 }
 
+HomeView .home-brief-summary {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text-muted;
+}
+
+/* Collapsible daily brief. Height auto when collapsed (~1 row for the
+   header); when expanded, cap at ~40% of the viewport so the movers /
+   news above stay visible without scrolling the whole HomeView. */
+HomeView #home-brief {
+    height: auto;
+    max-height: 40%;
+}
+
+HomeView #home-brief-scroll {
+    height: auto;
+    max-height: 100%;
+}
+
 /* Ticker view */
 
 TickerView {
@@ -114,6 +134,21 @@ TickerView #quote-header {
 }
 
 TickerView TabbedContent {
+    height: 1fr;
+}
+
+/* Every non-DataTable TabPane wraps its body in VerticalScroll so
+   mouse-wheel / PgUp-PgDn works on the long Financials, Overview, and
+   Analyst-view bodies. Force the scroll container to fill the tab so
+   the scrollbar sits flush with the tab bottom. */
+TickerView TabPane VerticalScroll {
+    height: 1fr;
+}
+
+/* PlotextPlot needs an explicit height inside a TabPane, otherwise it
+   collapses to its intrinsic size (a single row) and the chart is a
+   sliver. */
+TickerView PlotextPlot {
     height: 1fr;
 }
 

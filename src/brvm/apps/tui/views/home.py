@@ -1,15 +1,23 @@
-"""Home view: indices strip + movers + high-relevance news feed.
+"""Home view: indices strip + movers + high-relevance news feed +
+collapsible daily brief.
 
 Mirrors the web `/` page. Read-only; refresh is idempotent.
+
+The daily brief is a *global* summary (movers + top-tagged news across
+the whole market), not a per-ticker artefact, so it lives here rather
+than on each `/s/{ticker}` page. Wrapped in `Collapsible` so it stays
+out of the way — one line by default, expands to the full markdown on
+click.
 """
 
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Label, Static
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.widgets import Collapsible, DataTable, Label, Markdown, Static
 
 from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, num
+from brvm.services import brief as brief_svc
 from brvm.services import market
 from brvm.services import news as news_svc
 
@@ -35,6 +43,15 @@ class HomeView(Vertical):
             nt = DataTable(id="home-news", cursor_type="row", zebra_stripes=True)
             nt.add_columns("When", "Rel", "Category", "Tickers", "Title")
             yield nt
+        # Collapsed by default so the fold-first area stays terse — the
+        # brief is a long-form artefact and would otherwise crowd the
+        # movers + news feed above the fold.
+        yield Static(id="home-brief-summary", classes="home-brief-summary")
+        with (
+            Collapsible(title="Daily brief", collapsed=True, id="home-brief"),
+            VerticalScroll(id="home-brief-scroll"),
+        ):
+            yield Markdown("", id="home-brief-md")
 
     def on_mount(self) -> None:
         self.refresh_data()
@@ -73,6 +90,27 @@ class HomeView(Vertical):
             )
         if feed.items:
             nt.move_cursor(row=min(cursor, len(feed.items) - 1), animate=False)
+
+        # Daily brief — one-line summary in the always-visible header,
+        # full markdown inside the collapsible body.
+        summary = self.query_one("#home-brief-summary", Static)
+        body_md = self.query_one("#home-brief-md", Markdown)
+        latest = brief_svc.latest_brief()
+        if latest is None:
+            summary.update(
+                f"[{DIM}]Daily brief · not yet generated "
+                "(runs Mon-Fri post-close)[/]"
+            )
+            body_md.update(
+                "*No brief on file. Run `just brief-run` after the market "
+                "closes to generate one.*"
+            )
+        else:
+            summary.update(
+                f"[{DIM}]Daily brief · [{ACCENT}]{latest.day}[/] · "
+                "expand below to read[/]"
+            )
+            body_md.update(f"# Daily brief — {latest.day}\n\n{latest.markdown or ''}")
 
 
 def _refill_movers(table: DataTable, rows) -> None:

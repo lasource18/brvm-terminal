@@ -318,6 +318,111 @@ async def test_chrome_shows_market_closed_off_hours(tui_db, monkeypatch):
         assert status.has_class("-closed")
 
 
+async def test_home_shows_brief_collapsed_and_expands(tui_db):
+    """Daily brief moved off the per-ticker view onto Home. It renders
+    collapsed by default, expands to show the full markdown."""
+    from textual.widgets import Collapsible, Markdown
+
+    from brvm.db import connect
+    from brvm.models import Brief
+    from brvm.store import briefs as briefs_repo
+
+    with connect(tui_db) as conn:
+        briefs_repo.upsert(
+            conn,
+            Brief(
+                day="2026-08-26",
+                markdown="# Test brief\n\nMarket up broadly.",
+                model="claude-haiku",
+                context_json="{}",
+            ),
+        )
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        collapsible = app.query_one("#home-brief", Collapsible)
+        # Collapsed by default so the fold-first area stays terse.
+        assert collapsible.collapsed is True
+        # Summary line always visible.
+        summary = app.query_one("#home-brief-summary", Static)
+        assert "2026-08-26" in _plain(summary.render())
+        # Body is present in the tree and populated even while collapsed.
+        body = app.query_one("#home-brief-md", Markdown)
+        assert "Test brief" in _plain(body._markdown or "")
+
+
+async def test_home_brief_summary_when_no_brief(tui_db):
+    """No brief on file → summary explains it, body has a run-it hint."""
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        summary = app.query_one("#home-brief-summary", Static)
+        assert "not yet generated" in _plain(summary.render())
+
+
+async def test_ticker_view_has_no_brief_tab(tui_db):
+    """The Brief tab was removed from the ticker view — the daily brief
+    is a global summary so it lives on Home now."""
+    from textual.widgets import TabbedContent
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        table = sb.query_one("#sidebar-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tabs = tv.query_one("#ticker-tabs", TabbedContent)
+        ids = {pane.id for pane in tabs.query("TabPane")}
+        assert "tab-brief" not in ids
+        # Non-Brief tabs still present.
+        assert {"tab-overview", "tab-chart", "tab-financials"}.issubset(ids)
+
+
+async def test_ticker_chart_tab_uses_plotext_widget(tui_db):
+    """Regression test for the "chart shows mix of description + pixels"
+    bug: the chart tab must render via textual-plotext's PlotextPlot
+    widget, not Static.update(plt.build()) (which dumps raw ANSI)."""
+    from textual_plotext import PlotextPlot
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        table = sb.query_one("#sidebar-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # The chart pane holds a PlotextPlot instance, not a Static.
+        assert tv.query_one("#chart-plot", PlotextPlot) is not None
+
+
+async def test_ticker_tabs_are_scrollable(tui_db):
+    """Regression test for the "can't scroll ticker tabs" bug: every
+    non-DataTable TabPane wraps its body in `VerticalScroll` so the
+    long Financials / Overview / Analyst bodies scroll with the wheel."""
+    from textual.containers import VerticalScroll
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        table = sb.query_one("#sidebar-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # Overview, Financials, and Analyst all live inside a scroll
+        # container so long content is reachable.
+        assert tv.query_one("#tab-overview VerticalScroll", VerticalScroll)
+        assert tv.query_one("#tab-financials VerticalScroll", VerticalScroll)
+        assert tv.query_one("#tab-analyst VerticalScroll", VerticalScroll)
+
+
 async def test_search_palette_opens_and_filters(tui_db):
     """Ctrl-K opens the palette, typing `SNT` shows SNTS."""
     from brvm.apps.tui.palette import SearchPalette
