@@ -1,0 +1,43 @@
+{% if bond and bond.schedule %}
+  <table class="quotes">
+    <thead>
+      <tr>
+        <th>DATE</th>
+        <th class="rt">COUPON</th>
+        <th class="rt">PRINCIPAL</th>
+        <th class="rt">TOTAL</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in bond.schedule.rows %}
+        <tr>
+          <td>{{ r.payment_date.isoformat() }}</td>
+          <td class="rt">{{ "{:,.2f}".format(r.coupon) }}</td>
+          <td class="rt">{% if r.principal > 0 %}{{ "{:,.0f}".format(r.principal) }}{% else %}—{% endif %}</td>
+          <td class="rt">{{ "{:,.2f}".format(r.total) }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="dim" style="margin-top: 12px;">
+    Schedule assumes <strong>bullet redemption</strong> + <strong>annual coupons</strong>
+    at a nominal of {{ "{:,.0f}".format(bond.schedule.nominal) }} XOF.
+    Coupon anchor:
+    {% if bond.last_snapshot and bond.last_snapshot.last_coupon_date %}
+      last-payment anniversary
+      ({{ bond.last_snapshot.last_coupon_date.isoformat() }})
+    {% elif bond.issue_date %}
+      issue-date anniversary
+      ({{ bond.issue_date.isoformat() }})
+    {% else %}—{% endif %}.
+    Amortising or non-annual issues (some FCTC / social bonds) will not
+    match — verify with the prospectus.
+  </p>
+{% elif bond %}
+  <div class="dim" style="padding: 16px;">
+    Cash-flow schedule unavailable — this bond is missing coupon rate,
+    maturity year, or a coupon-date anchor.
+  </div>
+{% else %}
+  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+{% endif %}
