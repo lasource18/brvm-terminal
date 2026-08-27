@@ -759,3 +759,90 @@ def fetch_dividendes(client: httpx.Client | None = None) -> list[CorporateAction
     finally:
         if close:
             client.close()
+
+
+# ---------- palmarès (gainers / losers / most active) --------------------
+
+# Sikafinance query-param values for the "Variation" dropdown on
+# `/marches/palmares`. Only one variation renders per fetch; the caller
+# chains three fetches to fill the full gainers/losers/most-active
+# trio into a `Palmares` view.
+PALMARES_VARIATIONS = {
+    "gainers": "h",       # Hausses
+    "losers": "b",        # Baisses
+    "most_active": "c",   # Capitaux échangés (turnover-ranked)
+    "top_volume": "v",    # Volumes en séance
+}
+
+
+def parse_palmares(html: str) -> list[Quote]:
+    """Parse one palmarès table into `Quote` rows.
+
+    The page shows a single ranking per fetch (Hausses / Baisses /
+    Volumes / Capitaux), always in the same `#tabQuotes` table with the
+    columns: Nom · Haut · Bas · Dernier · Volume · Variation jour ·
+    Variation (hidden). Turnover is not published on this view, so
+    `Quote.turnover` stays None; volume + last + change_pct are the
+    fields the caller can rank on.
+    """
+    tree = HTMLParser(html)
+    tbl = tree.css_first("table#tabQuotes")
+    if tbl is None:
+        return []
+    out: list[Quote] = []
+    for tr in tbl.css("tbody tr"):
+        a = tr.css_first("td.allf a")
+        if a is None:
+            continue
+        href = _href(a) or ""
+        # Palmarès hrefs are relative (`cotation_XXX.cc`) without the
+        # `/marches/` prefix — normalise before feeding the shared
+        # `_ticker_from_href` regex.
+        if href and not href.startswith("/"):
+            href = "/marches/" + href
+        try:
+            ticker, _cc = _ticker_from_href(href)
+        except ValueError:
+            continue
+        cells = _row_cells_text(tr)
+        if len(cells) < 6:
+            continue
+        try:
+            high = parse_number(cells[1])
+            low = parse_number(cells[2])
+            last = parse_number(cells[3])
+            volume = int(parse_number(cells[4]))
+            change_pct = parse_number(cells[5])
+        except ValueError:
+            continue
+        out.append(
+            Quote(
+                ticker=ticker,
+                source=SOURCE_NAME,
+                last=last,
+                high=high,
+                low=low,
+                volume=volume,
+                change_pct=change_pct,
+            )
+        )
+    return out
+
+
+def fetch_palmares(
+    variation: str = "gainers",
+    client: httpx.Client | None = None,
+) -> list[Quote]:
+    """`variation` is one of the `PALMARES_VARIATIONS` keys. Unknown
+    values fall back to gainers rather than raising so a stale caller
+    still gets a usable list."""
+    q = PALMARES_VARIATIONS.get(variation, "h")
+    close = client is None
+    client = client or make_client()
+    try:
+        r = client.get(f"{BASE}/marches/palmares?dlVariation={q}")
+        r.raise_for_status()
+        return parse_palmares(r.text)
+    finally:
+        if close:
+            client.close()
