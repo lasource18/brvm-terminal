@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlencode, urlparse
+
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
@@ -83,6 +85,38 @@ def search_frag(request: Request, q: str = ""):
     )
 
 
+def _news_canonical_url(
+    *,
+    ticker: str | None,
+    category: str | None,
+    date_from: str | None,
+    date_to: str | None,
+    min_relevance: int | None,
+) -> str:
+    """Canonical `/news?...` URL for a given filter set.
+
+    Feeds the `HX-Push-Url` response header on the news fragment so a
+    filtered view is shareable — pasting the URL into a fresh tab
+    lands on the same filtered `/news` page, not the fragment endpoint.
+    Empty filters are dropped so `/news` (bare) stays the canonical URL
+    for an unfiltered view.
+    """
+    params: list[tuple[str, str]] = []
+    if ticker:
+        params.append(("ticker", ticker))
+    if category:
+        params.append(("category", category))
+    if date_from:
+        params.append(("date_from", date_from))
+    if date_to:
+        params.append(("date_to", date_to))
+    if min_relevance is not None:
+        params.append(("min_relevance", str(min_relevance)))
+    if not params:
+        return "/news"
+    return f"/news?{urlencode(params)}"
+
+
 @router.get("/news", response_class=HTMLResponse)
 def news_frag(
     request: Request,
@@ -103,11 +137,27 @@ def news_frag(
         limit=max(1, min(100, limit)),
         offset=max(0, offset),
     )
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "_frag/news_feed.html",
         {"feed": feed, "feed_url": "/_frag/news"},
     )
+    # `HX-Push-Url` overrides HTMX's default push (which would be the
+    # fragment URL) with a canonical `/news?...` — a URL a user can
+    # share or bookmark. Scoped to the standalone `/news` page via the
+    # `HX-Current-URL` header; per-ticker News tabs (`/s/{ticker}/news`)
+    # keep their ticker-scoped URL because a push would erase it.
+    hx_current = request.headers.get("hx-current-url", "")
+    current_path = urlparse(hx_current).path if hx_current else ""
+    if current_path == "/news":
+        response.headers["HX-Push-Url"] = _news_canonical_url(
+            ticker=ticker or None,
+            category=category or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+            min_relevance=min_relevance,
+        )
+    return response
 
 
 def _rules_ctx() -> dict:

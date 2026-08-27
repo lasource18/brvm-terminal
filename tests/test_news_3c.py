@@ -231,6 +231,58 @@ def test_news_fragment_paginates(client):
     assert "Next" not in r2.text
 
 
+def test_news_page_form_has_hx_push_url(client):
+    """Phase 8h: filtered views should be shareable via the URL bar."""
+    _seed_feed(client, n=3)
+    r = client.get("/news")
+    assert r.status_code == 200
+    assert 'hx-push-url="true"' in r.text
+
+
+def test_news_fragment_pushes_canonical_url_from_news_page(client):
+    """When the filter form fires from `/news`, the fragment endpoint
+    responds with an `HX-Push-Url` header pointing back at the canonical
+    `/news?...` URL so a reload / paste lands on the same filtered view."""
+    _seed_feed(client, n=3)
+    r = client.get(
+        "/_frag/news?ticker=SNTS&min_relevance=5",
+        headers={"HX-Current-URL": "http://testserver/news"},
+    )
+    assert r.status_code == 200
+    push = r.headers.get("hx-push-url")
+    assert push is not None
+    # Order-agnostic on the query string, but both params must appear.
+    assert push.startswith("/news?")
+    assert "ticker=SNTS" in push
+    assert "min_relevance=5" in push
+
+
+def test_news_fragment_no_push_url_from_ticker_tab(client):
+    """The per-ticker News tab (`/s/{ticker}/news`) uses the same
+    fragment endpoint. It must not push a URL — the ticker-scoped path
+    is what the user is browsing and should stay intact."""
+    _seed_feed(client, n=3)
+    r = client.get(
+        "/_frag/news?ticker=SNTS",
+        headers={"HX-Current-URL": "http://testserver/s/SNTS/news"},
+    )
+    assert r.status_code == 200
+    assert "hx-push-url" not in r.headers
+
+
+def test_news_fragment_pushes_bare_news_when_no_filters(client):
+    """An empty filter set from `/news` pushes `/news` (no `?`), so a
+    "reset to unfiltered" click lands the URL on the canonical bare
+    view rather than `/news?ticker=&category=&…`."""
+    _seed_feed(client, n=3)
+    r = client.get(
+        "/_frag/news",
+        headers={"HX-Current-URL": "http://testserver/news"},
+    )
+    assert r.status_code == 200
+    assert r.headers.get("hx-push-url") == "/news"
+
+
 def test_overview_shows_corporate_calendar_strip(client):
     _seed_feed(client)
     r = client.get("/")
