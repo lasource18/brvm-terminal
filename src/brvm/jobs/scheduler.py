@@ -22,7 +22,7 @@ from brvm.services.fundamentals import extract_pending
 from brvm.services.history import backfill_all as backfill_history
 from brvm.services.news import poll_all as poll_news
 from brvm.services.ocr import ocr_pending
-from brvm.services.quotes import snapshot_once
+from brvm.services.quotes import snapshot_bonds_once, snapshot_once
 from brvm.services.tagging import tag_pending
 
 log = get(__name__)
@@ -36,6 +36,18 @@ def _snapshot_job() -> None:
         log.info("scheduled snapshot ok: %s", counts)
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled snapshot failed: %s", e)
+
+
+def _bonds_snapshot_job() -> None:
+    """Refresh brvm.org bond listings once per weekday post-close. Bond
+    prices update at most daily on the exchange page, so a single pass
+    after 15:00 Abidjan is enough — no need to run intraday."""
+    log.info("scheduled bond snapshot start")
+    try:
+        counts = snapshot_bonds_once()
+        log.info("scheduled bond snapshot ok: %s", counts)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled bond snapshot failed: %s", e)
 
 
 def _news_job() -> None:
@@ -176,6 +188,15 @@ def build_scheduler() -> BackgroundScheduler:
         _snapshot_job,
         CronTrigger(hour="*", minute="17", timezone=str(ABIDJAN)),
         id="snapshot_hourly_outside",
+        replace_existing=True,
+    )
+    # Bond snapshot: once per weekday at 15:20 Abidjan, ~20 min after close.
+    # brvm.org only refreshes bond prices at the end of the session, so
+    # intraday polls would just re-fetch identical numbers.
+    sched.add_job(
+        _bonds_snapshot_job,
+        CronTrigger(day_of_week="mon-fri", hour="15", minute="20", timezone=str(ABIDJAN)),
+        id="bonds_snapshot_daily",
         replace_existing=True,
     )
     # News poll: every 15 min during market hours, hourly otherwise.

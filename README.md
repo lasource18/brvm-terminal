@@ -459,6 +459,31 @@ Notes on the multiples:
   trail. Annual filings are surfaced above interims inside a given
   year (that's usually what the reader came for).
 
+## Try it (Phase 8 demo — bond ingestion)
+
+Bonds finally join the securities table. brvm.org publishes three
+category pages (state / regional / private); `just bonds-poll` walks
+all three and upserts the rows.
+
+```bash
+just migrate
+just bonds-poll        # first run: securities=~100 bars=~100
+just bonds-poll        # re-run:    all UPSERTs, no growth
+just dev               # /directory?kind=bond
+```
+
+`kind=bond` rows land in `securities` (with `sector` set to the French
+category label — `Obligations d'Etat` / `Obligations régionales` /
+`Obligations privées`), and today's price lands in `daily_bars.close`
+so the same period-return SQL that powers equities and indices covers
+bonds too. Period returns will read mostly 0% — bonds anchor to par
+(10 000 XOF) and only drift on rare secondary-market trades.
+
+State bond issuer country is derived from `ETAT DU {country}` in the
+name (mapping covers all eight WAEMU members). Regional and private
+bonds stay `country=NULL` — they aren't tied to a single country and
+we prefer honest nulls over guesses.
+
 ## Try it (Phase 1 demo)
 
 After `just migrate`, run one live snapshot cycle and print the top-10

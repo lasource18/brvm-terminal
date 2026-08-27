@@ -1669,3 +1669,99 @@ backlog.
   now includes the three new fields, so the next weekly Saturday
   Sonnet pass will implicitly get them. No prompt change was needed
   — the metrics dict is passed through wholesale.
+
+
+## Phase 8 — Bond ingestion (done 2026-08-27)
+
+Bonds finally join the securities table. `SecurityKind` already allowed
+`"bond"` in Phase 1's schema; Phase 8 wires the actual scraper and the
+daily snapshot job. The backlog memory called out sikafinance as the
+source, but sikafinance doesn't publish a consolidated bond table
+(surveyed 2026-08-27: `/marches/aaz_brvm_bonds`, `/marches/obligations`,
+and `/marches/palmares_obligations_brvm` all 404). The authoritative
+source is `brvm.org/fr/cours-obligations/{20,21,55}`, one page per
+category (state / regional / private).
+
+**Delivered**
+
+- **`sources/brvm_org_bonds.py`** — new module with a `BondCategory`
+  dataclass (id + French sector label), a `BOND_CATEGORIES` tuple
+  covering all three pages, and a `parse_bonds(html, category, today)`
+  pure function that scans every `<table>` for the "Code obligation"
+  header row and extracts one `Security(kind="bond")` + one `DailyBar`
+  per data row. Zero-price rows (freshly-admitted or long-matured
+  bonds with no cross) are skipped so period returns aren't sunk by
+  bogus 0 closes. `fetch_bonds` and `fetch_all_bonds` wrap the parser
+  with polite httpx I/O.
+- **Country derivation for state bonds** — `ETAT DU / DE X ...` names
+  map to ISO-2 via a small dictionary covering the eight WAEMU
+  members (ML/SN/BJ/CI/BF/NE/TG/GW). Regional and private bonds
+  aren't tied to a single country and stay `country=None`; a future
+  enrichment can revisit ticker-prefixed hints like `ECOC.O1 → CI`.
+- **`services.quotes.snapshot_bonds_once`** — mirrors the equity
+  `snapshot_once` shape but writes to `daily_bars` (bonds have no
+  intraday OHLC / turnover — just today's price). The unified prices
+  CTE in `services.directory` already unions `daily_bars.close` and
+  `index_levels.level`, so bonds surface on `/directory` with the
+  same period-return machinery equities and indices already use.
+- **Job + demo command** — `jobs/bonds_snapshot.py` (mirrors
+  `quote_snapshot.py`) + `just bonds-poll` for one-shot manual runs.
+  Scheduled Mon-Fri at 15:20 Abidjan (~20 min after close) since
+  brvm.org only refreshes bond prices end-of-session; intraday polls
+  would just re-fetch identical numbers.
+- **Fixtures for all three category pages** —
+  `tests/fixtures/brvm_org/cours_obligations_{20,21,55}.html`
+  captured 2026-08-27. `refresh_fixtures.py` includes them so a
+  site-layout drift is caught by tests.
+
+**Two invariants the tests pin**
+
+1. **State bonds carry the issuer's country; other bonds don't.**
+   `EOM.O10` (ETAT DU MALI) parses as `country="ML"` on the state
+   page; `BIDC.O4` (BIDC-EBID, a regional issuer that also appears
+   on the state category page for legacy classification reasons)
+   stays `country=None`; every regional-page row stays `country=None`.
+2. **The "Activités du marché" summary table above the bonds table
+   is not mistaken for bond rows.** The regional-page fixture carries
+   an "Activités du marché" preamble with rows like `BRVM-C`,
+   `BRVM-30`, `Valeur des transactions`. The parser keys off the
+   `<th>Code obligation` header, so none of those rows leak into the
+   bond output — a regression test asserts that explicitly.
+
+**Definition of Done — met**
+
+- `just test` → **491 tests green** (17 new: 14 for the parser
+  covering the three categories, sector/currency invariants, source
+  URL shape, country derivation, session-date propagation, zero-price
+  filtering, the "Activités du marché" skip; 3 for the service
+  wiring — writes both tables, idempotent rerun, correct kind/source).
+  Ruff clean.
+- `just bonds-poll` demo runs against the live pages and prints
+  `bonds: securities=N bars=N` (N ~= 100 across all three pages).
+- Scheduler registers `bonds_snapshot_daily` at 15:20 Abidjan
+  weekdays; no other jobs touched.
+
+**Notes / follow-ups**
+
+- **Bond period returns are almost always 0%.** Bond prices anchor
+  to par (10 000 XOF) and only drift with rare secondary-market
+  trades. The `/directory` 1W/1M/YTD columns will render mostly zero
+  for the bond section — that's correct, not a bug.
+- **Maturity date is not persisted yet.** The exchange leaves the
+  `Date maturité` cell blank in every current row (the maturity year
+  is embedded in the `Nom`, e.g. `ETAT DU MALI 6,20% 2022-2029`).
+  Extending `Security` with a `maturity_date` column and parsing it
+  from the name is a follow-up when the Bonds tab lands.
+- **No dedicated Bonds view yet.** Bonds appear via `/directory`
+  with a `kind=bond` filter (the option was already there from
+  Phase 4d). A dedicated `/bonds` page with coupon / duration / YTM
+  columns is a natural next step but out of scope for this phase.
+- **UEMOA sovereign bonds trade OTC and only partly on BRVM.** The
+  brvm.org page shows only the listed subset; the majority of
+  sovereign bond issuance in the region trades on the sub-regional
+  auction market (Agence UMOA-Titres). That's a separate corpus and
+  intentionally not in scope.
+- **Country derivation is name-based, not ISIN-based.** brvm.org
+  doesn't publish ISINs on the category page, so we can't do the
+  clean "first two letters of ISIN" mapping equities use. If the
+  BOC PDF exposes bond ISINs, a Phase 8.5 pass could tighten this.
