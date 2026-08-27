@@ -2332,3 +2332,63 @@ the model sees.
   intraday-locking the two — the read is directional, not
   intraday-actionable.
 
+
+## Phase 8h — Shareable filtered `/news` URLs (done 2026-08-27)
+
+The `/news` filter form now updates the URL bar as the user types.
+Sharing or bookmarking the resulting URL loads the same filtered view
+on a fresh page load. Small quality-of-life item off the backlog; no
+behaviour change for the per-ticker News tab.
+
+**Delivered**
+
+- **`news_frag` response now sets `HX-Push-Url`** when the request
+  came from `/news`. The pushed URL is a canonical
+  `/news?ticker=…&category=…&min_relevance=…` string built from the
+  non-empty filter values; empty filters are dropped so an
+  "everything cleared" state pushes bare `/news` rather than
+  `/news?ticker=&category=&…`.
+- **Scoped via `HX-Current-URL` header.** The per-ticker News tab
+  (`/s/{ticker}/news`) shares the fragment endpoint; a URL push
+  there would erase the ticker-scoped path the reader is browsing.
+  The path check is exact (`current_path == "/news"`) so
+  `/s/SNTS/news` — which also ends with `/news` — doesn't
+  accidentally trigger the push.
+- **`hx-push-url="true"` on the `/news` filter form.** Together with
+  the response header override this gives us: the browser accepts
+  the push, and the server picks the URL to push.
+
+**Two invariants the tests pin**
+
+1. **A fragment call from `/news` sets `HX-Push-Url`; the same call
+   from `/s/SNTS/news` does not.** The `HX-Current-URL` header path
+   check is exact, so ticker-scoped News tabs stay on their
+   ticker URL.
+2. **An empty filter set pushes bare `/news`.** No trailing `?`,
+   no empty `ticker=&category=&…` string.
+
+**Definition of Done — met**
+
+- `just test` → **583 tests green** (+4 new: `hx-push-url="true"`
+  on the form; canonical URL pushed on `/news`; no push on
+  `/s/{ticker}/news`; empty filters push bare `/news`). Ruff clean.
+- No behaviour change for the pagination buttons — they hit the
+  same fragment endpoint but from a different current URL so the
+  push still fires (adding `offset=N` to the URL bar is
+  intentional and matches directory-page behaviour).
+
+**Notes / follow-ups**
+
+- **Back button restores prior filter state via HTMX's history
+  cache.** Because `hx-push-url` also stores the swap on the
+  history stack, Back re-swaps the previous fragment without
+  re-hitting the server. Works out-of-the-box; no template change
+  needed.
+- **`_frag/news` pagination buttons don't override the push.** They
+  don't set `hx-push-url` explicitly, so HTMX defaults to using
+  the fragment's URL — but the `HX-Push-Url` server header wins
+  regardless, so the URL bar ends up with the canonical
+  `/news?...&offset=N` shape. If a follow-up wants pagination to
+  not touch the URL, add `hx-push-url="false"` on the pager
+  buttons.
+
