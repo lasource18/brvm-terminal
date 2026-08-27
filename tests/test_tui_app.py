@@ -423,6 +423,197 @@ async def test_ticker_tabs_are_scrollable(tui_db):
         assert tv.query_one("#tab-analyst VerticalScroll", VerticalScroll)
 
 
+async def test_news_tables_have_link_column(tui_db):
+    """Home / ticker / standalone news tables all expose a `Link` column
+    that renders the source URL as an OSC-8 hyperlink (clickable in
+    modern terminals). Cell content is a Rich `Text` with the `link`
+    style — not a plain string — so we assert the style rather than
+    the visible label.
+
+    Regression pins the column *shape* — the exact styled-Text rendering
+    varies across terminal emulators, but the presence of the column
+    and the `link` style is the invariant that matters."""
+    from datetime import UTC, datetime, timedelta
+
+    from rich.text import Text
+    from textual.widgets import DataTable
+
+    from brvm.db import connect
+    from brvm.models import NewsItem
+    from brvm.store import news as news_repo
+
+    with connect(tui_db) as conn:
+        now = datetime.now(UTC)
+        news_repo.upsert_news_items(
+            conn,
+            [
+                NewsItem(
+                    source="sikafinance", kind="news",
+                    url="https://sikafinance.com/marches/actualites/foo",
+                    url_hash="hash-foo",
+                    title="Big earnings beat", chapeau=None,
+                    ticker_hint="SNTS",
+                    published_at=(now - timedelta(hours=1)).isoformat(),
+                ),
+            ],
+        )
+        # Backfill the relevance so the row passes home-news's min-6 filter.
+        conn.execute(
+            "UPDATE news_items SET relevance = 8, category_llm = 'earnings' "
+            "WHERE title = ?",
+            ("Big earnings beat",),
+        )
+        conn.commit()
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        # Home news feed.
+        home = app.query_one("#home-news", DataTable)
+        assert len(home.columns) == 6
+        assert list(home.columns.values())[-1].label.plain == "Link"
+        link = home.get_row_at(0)[-1]
+        assert isinstance(link, Text)
+        assert "https://sikafinance.com" in link.style
+
+        # Ticker view News tab.
+        sb = app.query_one(Sidebar)
+        table = sb.query_one("#sidebar-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # Force a repaint against the SNTS feed so the row lands.
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        ticker_news = tv.query_one("#ticker-news", DataTable)
+        assert len(ticker_news.columns) == 5
+        assert list(ticker_news.columns.values())[-1].label.plain == "Link"
+        if ticker_news.row_count:
+            cell = ticker_news.get_row_at(0)[-1]
+            assert isinstance(cell, Text)
+            assert "https://sikafinance.com" in cell.style
+
+        # Standalone /news view.
+        await pilot.press("f5")
+        await pilot.pause()
+        news_view = app.query_one(NewsView)
+        news_table = news_view.query_one("#news-table", DataTable)
+        assert len(news_table.columns) == 6
+        assert list(news_table.columns.values())[-1].label.plain == "Link"
+
+
+async def test_pressing_o_on_home_news_opens_the_story_url(tui_db, monkeypatch):
+    """DataTable eats mouse clicks so an OSC-8 hyperlink in a cell is
+    unreliable. The `o` binding is the fix: read the highlighted news
+    row's URL and call `App.open_url(url)`."""
+    from datetime import UTC, datetime, timedelta
+
+    from textual.widgets import DataTable
+
+    from brvm.db import connect
+    from brvm.models import NewsItem
+    from brvm.store import news as news_repo
+
+    with connect(tui_db) as conn:
+        now = datetime.now(UTC)
+        news_repo.upsert_news_items(
+            conn,
+            [
+                NewsItem(
+                    source="sikafinance", kind="news",
+                    url="https://sikafinance.com/marches/actualites/o-bind",
+                    url_hash="hash-obind",
+                    title="Story to open", chapeau=None,
+                    ticker_hint="SNTS",
+                    published_at=(now - timedelta(hours=1)).isoformat(),
+                ),
+            ],
+        )
+        conn.execute(
+            "UPDATE news_items SET relevance = 8, category_llm = 'earnings' "
+            "WHERE title = ?",
+            ("Story to open",),
+        )
+        conn.commit()
+
+    opened: list[str] = []
+    app = BRVMTerminalApp()
+    monkeypatch.setattr(app, "open_url", lambda url, **_kw: opened.append(url))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        home_news = app.query_one("#home-news", DataTable)
+        home_news.focus()
+        await pilot.pause()
+        # Cursor is on row 0 by default — press `o` to open its URL.
+        await pilot.press("o")
+        await pilot.pause()
+        assert opened == ["https://sikafinance.com/marches/actualites/o-bind"]
+
+
+async def test_pressing_o_on_ticker_news_tab_opens_the_story_url(tui_db, monkeypatch):
+    """Same story as Home but from the per-ticker News tab."""
+    from datetime import UTC, datetime, timedelta
+
+    from textual.widgets import DataTable, TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import NewsItem
+    from brvm.store import news as news_repo
+
+    with connect(tui_db) as conn:
+        now = datetime.now(UTC)
+        news_repo.upsert_news_items(
+            conn,
+            [
+                NewsItem(
+                    source="sikafinance", kind="news",
+                    url="https://sikafinance.com/marches/actualites/ticker",
+                    url_hash="hash-tickernews",
+                    title="Ticker-scoped story", chapeau=None,
+                    ticker_hint="SNTS",
+                    published_at=(now - timedelta(hours=1)).isoformat(),
+                ),
+            ],
+        )
+        conn.commit()
+
+    opened: list[str] = []
+    app = BRVMTerminalApp()
+    monkeypatch.setattr(app, "open_url", lambda url, **_kw: opened.append(url))
+
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        sb_table = sb.query_one("#sidebar-table", DataTable)
+        sb_table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        tabs = tv.query_one("#ticker-tabs", TabbedContent)
+        tabs.active = "tab-news"
+        await pilot.pause()
+        news_table = tv.query_one("#ticker-news", DataTable)
+        news_table.focus()
+        await pilot.pause()
+        await pilot.press("o")
+        await pilot.pause()
+        assert opened == ["https://sikafinance.com/marches/actualites/ticker"]
+
+
+async def test_link_cell_falls_back_to_dash_when_url_missing():
+    """Some scrapers (older communiqués) land without a URL — the Link
+    cell must not raise; it renders as `—`."""
+    from brvm.apps.tui.format import link_cell
+
+    assert link_cell(None) == "—"
+    assert link_cell("") == "—"
+
+
 async def test_search_palette_opens_and_filters(tui_db):
     """Ctrl-K opens the palette, typing `SNT` shows SNTS."""
     from brvm.apps.tui.palette import SearchPalette

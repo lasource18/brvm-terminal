@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import DataTable, Input, Label
 
+from brvm.apps.tui.format import link_cell
 from brvm.services import news as news_svc
 
 
@@ -18,6 +19,7 @@ class NewsView(Vertical):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("/", "focus_search", "filter", show=True),
+        Binding("o", "open_news_url", "open story", show=True),
     ]
 
     class TickerSelected(Message):
@@ -31,15 +33,19 @@ class NewsView(Vertical):
         self._category: str | None = None
         self._min_rel: int | None = None
         self._row_ticker: dict[str, str] = {}
+        self._row_url: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
-        yield Label("News  (/: filter, Enter: open ticker)", classes="home-section-title")
+        yield Label(
+            "News  (/: filter, Enter: open ticker, o: open story)",
+            classes="home-section-title",
+        )
         with Horizontal(id="news-filters"):
             yield Input(placeholder="ticker (blank = all)", id="news-ticker")
             yield Input(placeholder="category (earnings/dividend/...)", id="news-category")
             yield Input(placeholder="min relevance 0-10", id="news-min-rel")
         table = DataTable(id="news-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("When", "Rel", "Category", "Tickers", "Title")
+        table.add_columns("When", "Rel", "Category", "Tickers", "Title", "Link")
         yield table
 
     def on_mount(self) -> None:
@@ -56,19 +62,25 @@ class NewsView(Vertical):
         cursor = table.cursor_row
         table.clear()
         # Keep the primary ticker for row-open — first entry in `tickers`,
-        # else the LLM-attributed one.
+        # else the LLM-attributed one. Also keep the source URL for the
+        # `o` binding so it opens the story in the browser without a
+        # DB round-trip.
         self._row_ticker: dict[str, str] = {}
+        self._row_url = {}
         for row in feed.items:
             when = (row.published_at or row.fetched_utc or "")[:16].replace("T", " ")
             key = str(row.id)
             primary = row.tickers[0] if row.tickers else ""
             self._row_ticker[key] = primary
+            if row.url:
+                self._row_url[key] = row.url
             table.add_row(
                 when,
                 str(row.relevance) if row.relevance is not None else "—",
                 row.category or "—",
                 ",".join(row.tickers) or "—",
                 (row.title or "").strip()[:80],
+                link_cell(row.url),
                 key=key,
             )
         if feed.items:
@@ -98,3 +110,25 @@ class NewsView(Vertical):
         ticker = self._row_ticker.get(key, "")
         if ticker:
             self.post_message(self.TickerSelected(ticker))
+
+    def action_open_news_url(self) -> None:
+        """Open the highlighted story URL in the default browser.
+
+        Textual's DataTable eats mouse clicks for row selection so the
+        OSC-8 link inside a cell rarely reaches the terminal. This
+        binding is the reliable path — falls back to a notification
+        when the row has no URL (older communiqués can land empty)."""
+        table = self.query_one("#news-table", DataTable)
+        if table.row_count == 0:
+            return
+        try:
+            row_key = table.coordinate_to_cell_key(
+                (table.cursor_row, 0)
+            ).row_key.value
+        except Exception:
+            return
+        url = self._row_url.get(str(row_key)) if row_key else None
+        if not url:
+            self.notify("No source URL on file for this row.", severity="warning")
+            return
+        self.app.open_url(url)
