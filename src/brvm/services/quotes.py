@@ -9,6 +9,7 @@ from brvm.db import connect
 from brvm.logging import get
 from brvm.services.providers import QuoteProvider, select_provider
 from brvm.sources import brvm_org_bonds
+from brvm.store import bonds as bonds_repo
 from brvm.store import quotes as quotes_repo
 from brvm.store import securities as sec_repo
 
@@ -44,21 +45,28 @@ def snapshot_once(provider: QuoteProvider | None = None) -> dict[str, int]:
 def snapshot_bonds_once() -> dict[str, int]:
     """Refresh brvm.org bond listings.
 
-    Bonds don't publish OHLC or turnover — just today's price — so they
-    land in `daily_bars.close` alongside equities. The unified prices CTE
-    in `services.directory` then surfaces bonds on the /directory page
-    with the same period-return machinery.
+    Bonds don't publish OHLC or turnover — just today's price, accrued
+    coupon, and the last-payment date/amount — so price lands in
+    `daily_bars.close` (feeding the same directory / period-return SQL
+    as equities and indices) and the two coupon-related fields land in
+    `bond_snapshots`. Bond reference fields (coupon rate, maturity year,
+    issue date, issuer name) are parsed from `Nom` and stamped on
+    `securities` via the same upsert.
     """
-    securities, bars = brvm_org_bonds.fetch_all_bonds()
-    log.info("brvm.org bonds: securities=%d bars=%d", len(securities), len(bars))
+    securities, bars, snaps = brvm_org_bonds.fetch_all_bonds()
+    log.info(
+        "brvm.org bonds: securities=%d bars=%d snapshots=%d",
+        len(securities), len(bars), len(snaps),
+    )
 
     db_path = Path(settings.db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         n_sec = sec_repo.upsert(conn, securities)
         n_bars = quotes_repo.upsert_daily_bars(conn, bars)
+        n_snaps = bonds_repo.upsert_snapshots(conn, snaps)
 
-    return {"securities": n_sec, "bars": n_bars}
+    return {"securities": n_sec, "bars": n_bars, "snapshots": n_snaps}
 
 
 def top_by_turnover(limit: int = 10) -> list[dict]:

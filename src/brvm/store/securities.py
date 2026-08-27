@@ -11,7 +11,14 @@ from brvm.models import Security
 
 def upsert(conn: sqlite3.Connection, items: Iterable[Security]) -> int:
     """Insert new securities, or refresh name/country/sector/source_url and
-    bump `last_seen_utc` for existing ones. Returns rows touched."""
+    bump `last_seen_utc` for existing ones. Returns rows touched.
+
+    Bond-specific reference fields (`coupon_rate`, `maturity_year`,
+    `issue_date`, `issuer_name`) COALESCE onto the existing row on
+    conflict — a parser regression that briefly returns NULL for a
+    field shouldn't wipe a value we already had. Correct as a bond's
+    reference fields don't change over its lifetime.
+    """
     now = utc_iso()
     n = 0
     for s in items:
@@ -19,16 +26,21 @@ def upsert(conn: sqlite3.Connection, items: Iterable[Security]) -> int:
             """
             INSERT INTO securities
                 (ticker, isin, name, kind, country, sector, currency,
-                 source_url, first_seen_utc, last_seen_utc, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 source_url, first_seen_utc, last_seen_utc, active,
+                 coupon_rate, maturity_year, issue_date, issuer_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
             ON CONFLICT(ticker) DO UPDATE SET
-                name        = excluded.name,
-                isin        = COALESCE(excluded.isin, securities.isin),
-                country     = COALESCE(excluded.country, securities.country),
-                sector      = COALESCE(excluded.sector, securities.sector),
-                source_url  = COALESCE(excluded.source_url, securities.source_url),
+                name          = excluded.name,
+                isin          = COALESCE(excluded.isin, securities.isin),
+                country       = COALESCE(excluded.country, securities.country),
+                sector        = COALESCE(excluded.sector, securities.sector),
+                source_url    = COALESCE(excluded.source_url, securities.source_url),
                 last_seen_utc = excluded.last_seen_utc,
-                active      = 1
+                active        = 1,
+                coupon_rate   = COALESCE(excluded.coupon_rate, securities.coupon_rate),
+                maturity_year = COALESCE(excluded.maturity_year, securities.maturity_year),
+                issue_date    = COALESCE(excluded.issue_date, securities.issue_date),
+                issuer_name   = COALESCE(excluded.issuer_name, securities.issuer_name)
             """,
             (
                 s.ticker,
@@ -41,6 +53,10 @@ def upsert(conn: sqlite3.Connection, items: Iterable[Security]) -> int:
                 s.source_url,
                 now,
                 now,
+                s.coupon_rate,
+                s.maturity_year,
+                s.issue_date.isoformat() if s.issue_date else None,
+                s.issuer_name,
             ),
         )
         n += 1
