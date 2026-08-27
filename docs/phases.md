@@ -2159,3 +2159,99 @@ explicitly so the model quotes concrete numbers instead.
   when max/min ratio > 10x) is available if it ever produces bad
   reads.
 
+
+## Phase 8f — Palmarès parser + BOC row extraction (done 2026-08-27)
+
+Two deferred Phase-1 items finally shipped together: the sikafinance
+palmarès (ranked movers) parser and structured row extraction from
+the brvm.org BOC PDF. First real cross-check between our
+sikafinance-driven `daily_bars.close` and the official exchange
+bulletin.
+
+**Delivered**
+
+- **`sikafinance.parse_palmares(html)`** — parses the single
+  `#tabQuotes` table on `/marches/palmares` into `Quote` rows
+  (ticker, last, high, low, volume, change_pct; turnover stays None
+  because the palmarès view doesn't publish it).
+- **`sikafinance.PALMARES_VARIATIONS`** — maps English keys
+  (`gainers`/`losers`/`most_active`/`top_volume`) to the French
+  `dlVariation` query-param values (`h`/`b`/`c`/`v`) so callers
+  don't need to know the French labels.
+- **`sikafinance.fetch_palmares(variation)`** — network wrapper;
+  unknown variations fall back to gainers rather than raising so a
+  stale caller still gets a usable list.
+- **`brvm_org.BocRow`** — new dataclass holding
+  `(ticker, close, previous, change_pct)`. Deliberately narrow:
+  volume/value/YTD/dividend columns are on the same PDF row but
+  pypdf's text stream splits multi-line company names, and getting
+  those five fields reliable would triple the parser's surface
+  area. The four columns we do extract are what the reconciliation
+  needs.
+- **`brvm_org.parse_boc_rows(pdf_bytes)`** — walks the extracted
+  text line-by-line, matches `(CB|CD|ENE|FIN|IND|SPU) TICKER ...
+  previous open close change%` on each row. Rows that wrapped
+  (long company names split across a text-stream break) are
+  skipped rather than mis-parsed. Extracts 32 clean rows out of
+  the 47 listed equities on the 2026-08-18 BOC fixture.
+- **`services.reconcile.check_boc_close`** — read-only cross-check
+  that fetches today's BOC PDF, extracts the equity rows, and
+  reports tickers whose local `daily_bars.close` disagrees with
+  the bulletin by more than a tolerance percent (default 0.01%).
+  Returns a `ReconcileReport(session_date, boc_rows, matched,
+  drift)`; each `CloseDrift(ticker, boc_close, local_close,
+  delta_pct)` carries enough context that a caller can decide
+  whether to log, alert, or backfill.
+
+**Three invariants the tests pin**
+
+1. **Palmarès parser survives the malformed-page case.** A page
+   without `#tabQuotes` returns `[]` rather than raising, so a
+   layout drift on sikafinance surfaces as an empty list — the
+   fixture test flags the real regression, the graceful-fallback
+   test guards the call site.
+2. **BOC row-parser produces no duplicate tickers.** Rows we can't
+   parse cleanly are dropped, so any ticker that does appear
+   should be unique — a duplicate would mean the multi-line
+   name-wrap check leaked through.
+3. **A missing local row surfaces with `local_close=None,
+   delta_pct=None`.** Reconciliation must not divide by a phantom
+   local value; the reader can see the gap without a fabricated
+   percent.
+
+**Definition of Done — met**
+
+- `just test` → **574 tests green** (+14 new: 5 palmarès parser
+  covering row shape / top-gainer figures / empty-html fallback /
+  no-fabricated-turnover / variation-key mapping, 5 BOC row
+  parser covering row count / two specific tickers / dedup / all
+  closes positive / gated by pypdf marker, 4 reconcile service
+  covering match / drift / missing local / empty PDF). Ruff clean.
+- Palmarès fixture (`tests/fixtures/sikafinance/palmares.html`)
+  and BOC PDF fixture (`tests/fixtures/brvm_org/boc_eng_20260818_2.pdf`)
+  both already committed from Phase 1.
+
+**Notes / follow-ups**
+
+- **Reconcile isn't wired into the scheduler yet.** The service is
+  fully callable but no cron job runs it. Suggested cadence:
+  daily at 17:00 Africa/Abidjan (~2 hours after close, once the
+  BOC PDF is published). One-liner add when we're comfortable
+  paging on the drift count.
+- **Palmarès parser doesn't drive the home page yet.** The
+  existing `services.market.gainers/losers/top_by_turnover`
+  compute from `daily_bars` so the palmarès fetch is redundant
+  for the current UI. Wiring it in as a source-of-truth override
+  (or an intraday supplement pre-close) is a follow-up.
+- **BOC parser skips ~1/3 of listed equities.** Company names
+  that wrap across two text lines (e.g. `AFRICA GLOBAL LOGISTICS
+  CI` on the fixture) don't match the one-line regex. The
+  reconciliation report surfaces these as absent, not wrong —
+  we'll always get a signal on drift for the tickers we do parse.
+  A two-line-aware parser is a natural follow-up if the
+  reconciliation coverage matters for a specific ticker.
+- **English BOC only.** The parser is tuned for the `boc_eng_*`
+  filenames; the French BOC has different column headers.
+  Extending is straightforward but not necessary while the
+  bulletin's English edition is always published in parallel.
+
