@@ -42,6 +42,11 @@ refresh-fixtures:
 snapshot:
     uv run python -m brvm.jobs.quote_snapshot --once
 
+# Phase 8 demo: fetch brvm.org bond listings (state / regional / private)
+# and upsert them as `kind='bond'` securities + daily_bars rows.
+bonds-poll:
+    uv run python -m brvm.jobs.bonds_snapshot --once
+
 # Bulk-populate daily_bars for every equity so the Directory's period-return
 # columns (1W/1M/3M/YTD/1Y/ALL%) render values for the whole universe rather
 # than only the tickers a user has personally clicked into. Idempotent within

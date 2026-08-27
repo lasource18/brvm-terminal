@@ -93,6 +93,19 @@ def _targets() -> list[Target]:
             f"{brvm}/fr/rapports-societe-cotes/sonatel",
             FIXTURES / "brvm_org" / "rapports_societe_cotes_sonatel.html",
         ),
+        # Phase 8: bond category listings (state / regional / private).
+        Target(
+            f"{brvm}/fr/cours-obligations/20",
+            FIXTURES / "brvm_org" / "cours_obligations_20.html",
+        ),
+        Target(
+            f"{brvm}/fr/cours-obligations/21",
+            FIXTURES / "brvm_org" / "cours_obligations_21.html",
+        ),
+        Target(
+            f"{brvm}/fr/cours-obligations/55",
+            FIXTURES / "brvm_org" / "cours_obligations_55.html",
+        ),
     ]
 
 
