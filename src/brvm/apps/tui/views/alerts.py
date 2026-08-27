@@ -8,14 +8,14 @@ depending on kind).
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, get_args
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Input, Label, Select
+from textual.widgets import DataTable, Input, Label, Select, SelectionList
 
-from brvm.models import AlertRule
+from brvm.models import AlertRule, FilingDocType
 from brvm.services import alerts as alerts_svc
 
 _KIND_OPTIONS = [
@@ -23,6 +23,15 @@ _KIND_OPTIONS = [
     ("new_filing", "new_filing"),
     ("news", "news"),
 ]
+
+# Phase 8j: the FilingDocType Literal drives the SelectionList so a new
+# doc_type is picked up without duplicating the tuple here.
+_DOC_TYPE_VALUES: tuple[str, ...] = tuple(get_args(FilingDocType))
+# `SelectionList` expects `(prompt, value, initial_state)` triples.
+# Prompts are the same string as the value — the tab uses machine-
+# readable identifiers rather than French labels so a CSV round-trip
+# through `AlertRule.doc_types` stays lossless.
+_DOC_TYPE_ITEMS: list[tuple[str, str]] = [(v, v) for v in _DOC_TYPE_VALUES]
 
 
 class AlertsView(Vertical):
@@ -50,7 +59,15 @@ class AlertsView(Vertical):
             yield Select(_KIND_OPTIONS, id="new-kind", allow_blank=False, value="price_move")
             yield Input(placeholder="ticker (blank = all)", id="new-ticker")
             yield Input(placeholder="threshold_pct / min_relevance", id="new-arg")
-            yield Input(placeholder="doc_types csv (new_filing only)", id="new-doctypes")
+            # Phase 8j: `SelectionList` replaces the CSV-shaped Input for
+            # doc_types when kind == 'new_filing'. Space toggles a
+            # selection, arrows navigate. Read via `.selected` at submit
+            # time — no manual CSV parsing on the caller side. Kept
+            # visible for every kind (Textual doesn't ship an inline
+            # multi-select combo, and hiding it on kind-change would
+            # complicate the compose tree); ignored at submit when the
+            # kind isn't `new_filing`.
+            yield SelectionList[str](*_DOC_TYPE_ITEMS, id="new-doctypes")
 
     def on_mount(self) -> None:
         self.refresh_data()
@@ -117,12 +134,17 @@ class AlertsView(Vertical):
     def on_input_submitted(self, event: Input.Submitted) -> None:
         # Only the "new rule" row triggers rule creation; any submit in it
         # commits the whole row.
-        if event.input.id not in {"new-ticker", "new-arg", "new-doctypes"}:
+        if event.input.id not in {"new-ticker", "new-arg"}:
             return
         kind = str(self.query_one("#new-kind", Select).value)
         ticker = self.query_one("#new-ticker", Input).value.strip().upper() or None
         arg_raw = self.query_one("#new-arg", Input).value.strip()
-        doctypes = self.query_one("#new-doctypes", Input).value.strip() or None
+        # Phase 8j: doc_types come from the SelectionList's checked items
+        # joined into a CSV — the canonical shape `AlertRule.doc_types`
+        # persists. Reading `.selected` on a fresh SelectionList returns
+        # `[]` so no doc_types → None down below.
+        doctypes_list = list(self.query_one("#new-doctypes", SelectionList).selected)
+        doctypes = ",".join(doctypes_list) if doctypes_list else None
 
         threshold = None
         min_rel = None
@@ -141,6 +163,12 @@ class AlertsView(Vertical):
             except ValueError:
                 self.notify(f"min_relevance must be an int, got {arg_raw!r}", severity="warning")
                 return
+        elif kind == "new_filing" and not doctypes_list:
+            self.notify(
+                "new_filing needs at least one doc_type — space to select",
+                severity="warning",
+            )
+            return
 
         rule = AlertRule(
             kind=kind,
@@ -151,8 +179,9 @@ class AlertsView(Vertical):
             enabled=True,
         )
         alerts_svc.create_rule(rule)
-        for input_id in ("new-ticker", "new-arg", "new-doctypes"):
+        for input_id in ("new-ticker", "new-arg"):
             self.query_one(f"#{input_id}", Input).value = ""
+        self.query_one("#new-doctypes", SelectionList).deselect_all()
         self.refresh_data()
 
     # -- helpers -----------------------------------------------------------

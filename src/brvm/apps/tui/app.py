@@ -23,6 +23,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
+from brvm.apps.tui.news_ticker import NewsTicker
 from brvm.apps.tui.palette import SearchPalette
 from brvm.apps.tui.sidebar import Sidebar
 from brvm.apps.tui.views.alerts import AlertsView
@@ -93,6 +94,11 @@ class BRVMTerminalApp(App):
                 alerts = AlertsView()
                 alerts.id = "alerts"
                 yield alerts
+        # Phase 8j: one-line news ticker between the body and the Footer.
+        # Rotates through top-relevance news during market hours; pauses
+        # (but stays on screen with the last headline) once the market
+        # closes.
+        yield NewsTicker()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -107,12 +113,18 @@ class BRVMTerminalApp(App):
         clock.update(f"{now_abidjan().strftime('%Y-%m-%d %H:%M:%S')} Abidjan")
 
         status = self.query_one("#market-status", Static)
-        if is_market_open():
+        market_open = is_market_open()
+        if market_open:
             status.update("[b]● OPEN[/]  ")
             status.remove_class("-closed")
         else:
             status.update("[b]○ CLOSED[/]  ")
             status.add_class("-closed")
+        # Phase 8j: pause the ticker rotation off-hours so a reader
+        # coming back after close doesn't see the pool loop against
+        # a stale market.
+        with contextlib.suppress(Exception):  # pragma: no cover - defensive
+            self.query_one(NewsTicker).set_paused(not market_open)
 
         last = self.query_one("#last-updated", Static)
         try:
