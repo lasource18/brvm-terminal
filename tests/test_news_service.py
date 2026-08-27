@@ -18,7 +18,9 @@ from .conftest import apply_migrations
 # dividendes.html are dated relative to this. Any test that reads
 # `list_corporate_actions_upcoming` from those rows must pin `today` here
 # so the assertion doesn't drift as the wall clock moves past ex-dates.
-FIXTURE_TODAY = date(2026, 8, 20)
+# Refreshed 2026-08-27 alongside the fixture — SGBCI's ex-date rolled
+# off the upstream feed so the pinned window advanced by a week.
+FIXTURE_TODAY = date(2026, 8, 27)
 
 
 def _seed_db(db_path: Path) -> None:
@@ -28,9 +30,13 @@ def _seed_db(db_path: Path) -> None:
             conn,
             [
                 # Names chosen to match the fixture data so ticker_hint fires.
+                # SGBC kept in the seed because the communiques fixture
+                # still names SGBCI as an issuer even though its dividend
+                # dropped off /marches/dividendes.
                 Security(ticker="SGBC", name="SGBCI", kind="equity", country="CI"),
                 Security(ticker="TTLC", name="TOTAL CI", kind="equity", country="CI"),
                 Security(ticker="SPHC", name="SAPH CI", kind="equity", country="CI"),
+                Security(ticker="NTLC", name="NESTLE CI", kind="equity", country="CI"),
                 Security(ticker="ETIT", name="ETI TG", kind="equity", country="TG"),
             ],
         )
@@ -90,14 +96,16 @@ def test_poll_all_ingests_and_dedupes(monkeypatch, tmp_path, fixtures_dir):
         assert hints.get("SAPH CI") == "SPHC"
         assert hints.get("SGBCI") == "SGBC"
 
-        # Dividends -> corporate_actions carries at least SGBC/TTLC/SPHC.
-        # Pin `today` to the fixture-capture date so ex-dates baked into
-        # dividendes.html remain "upcoming" no matter when the test runs.
+        # Dividends -> corporate_actions carries at least SPHC/TTLC/NTLC
+        # (SGBCI's ex-date rolled off the upstream feed on the 2026-08-27
+        # refresh). Pin `today` to the fixture-capture date so ex-dates
+        # baked into dividendes.html remain "upcoming" no matter when the
+        # test runs.
         rows = news_repo.list_corporate_actions_upcoming(
             conn, days=60, today=FIXTURE_TODAY,
         )
         tickers = {r["ticker"] for r in rows}
-        assert {"SGBC", "TTLC", "SPHC"}.issubset(tickers)
+        assert {"SPHC", "TTLC", "NTLC"}.issubset(tickers)
 
 
 def test_poll_all_survives_ticker_miss(monkeypatch, tmp_path, fixtures_dir):

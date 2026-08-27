@@ -81,17 +81,25 @@ class TestParseDividendes:
         actions = parse_dividendes(_read(fixtures_dir, "sikafinance/dividendes.html"))
         assert len(actions) >= 5
         tickers = {a.ticker for a in actions}
-        assert {"SGBC", "SPHC", "TTLC"}.issubset(tickers)
+        # SGBCI's 2026-08-21 ex-date rolled off the upstream feed after
+        # the coupon detached; the fixture was refreshed 2026-08-27 to
+        # capture the resulting shape. SPHC / TTLC / NTLC are the three
+        # non-"A préciser" rows expected to persist across a refresh.
+        assert {"SPHC", "TTLC", "NTLC"}.issubset(tickers)
 
-    def test_sgbci_row_shape(self, fixtures_dir):
+    def test_sphc_row_shape(self, fixtures_dir):
+        # SAPH CI is the top-of-list dated dividend on the refreshed
+        # 2026-08-27 fixture. Ex-date is the coupon detachment date on
+        # 2026-08-27; amount and yield are the exchange's published
+        # figures verbatim.
         actions = parse_dividendes(_read(fixtures_dir, "sikafinance/dividendes.html"))
-        sgb = next(a for a in actions if a.ticker == "SGBC")
-        assert sgb.kind == "dividend"
-        assert sgb.ex_date == date(2026, 8, 21)
-        assert sgb.amount == 2606.0
-        assert sgb.yield_pct == 6.52
-        assert sgb.currency == "XOF"
-        assert sgb.source == "sikafinance"
+        sphc = next(a for a in actions if a.ticker == "SPHC")
+        assert sphc.kind == "dividend"
+        assert sphc.ex_date == date(2026, 8, 27)
+        assert sphc.amount == 489.0
+        assert sphc.yield_pct == 5.32
+        assert sphc.currency == "XOF"
+        assert sphc.source == "sikafinance"
 
     def test_tbd_rows_have_null_ex_date_and_note(self, fixtures_dir):
         actions = parse_dividendes(_read(fixtures_dir, "sikafinance/dividendes.html"))
