@@ -2086,3 +2086,76 @@ aligned sessions). Fourth item off the post-6c backlog.
   low-volatility regime. If the LLM flags the field as "flaky",
   bumping to 30 is one line.
 
+
+## Phase 8e — Sector-median peer table for analyst notes (done 2026-08-27)
+
+Fifth item off the post-6c backlog. Notes had been falling back to
+vague "normal range" phrasing in the Ratios read-across section
+because the model was being asked to eyeball medians from a 3-8-row
+peer list. Now `gather_context` computes the medians in Python and
+injects them alongside the peer list; the prompt names them
+explicitly so the model quotes concrete numbers instead.
+
+**Delivered**
+
+- **`_peer_medians(rows)`** — median of `pe`, `roe`, `net_margin`,
+  `change_ytd_pct`, `market_cap` over non-None values. Fields with
+  fewer than 2 samples are omitted so the model can't misread a
+  one-peer sample as a stable sector reference. Empty dict when no
+  field clears the floor.
+- **`_peers_lite` gains `medians` + `self` blocks.** The `medians`
+  dict is the sector reference; the `self` dict carries the
+  subject's own values for the same five fields, extracted from
+  the `is_self=True` row on `PeersView`. Sonnet can now do a direct
+  `self.pe vs medians.pe` compare without having to hunt for the
+  subject's numbers on the top-level `ratios` block.
+- **`_SYSTEM_PROMPT` — Ratios read-across section rewritten.** Now
+  instructs the model to compare against `peers.medians` with
+  concrete numbers ("P/E 12x vs sector median 9x"), and to say
+  "no sector median available this window" when the block is
+  empty — an explicit ban on the "normal range" fallback that was
+  the original motivation.
+
+**Two invariants the tests pin**
+
+1. **Median floor is 2 samples per field.** A three-peer set where
+   two peers report P/E but only one reports ROE surfaces a P/E
+   median and omits ROE — the omission is what teaches the model
+   to skip that comparison rather than treat a single peer as the
+   sector average.
+2. **`self` is only emitted when the fetch succeeds.** A raised
+   exception in `get_peers_with_ratios` returns `{sector: None,
+   source: "none", peers: [], medians: {}}` with no `self` key,
+   so downstream renderers can rely on its presence implying a
+   live peer set.
+
+**Definition of Done — met**
+
+- `just test` → **560 tests green** (+7 new: 4 `_peer_medians`
+  covering empty / <2-sample-drops / odd + even sample sizes /
+  all-fields-populated, 3 `gather_context` covering the `medians`
+  + `self` wiring + all-null suppression + fetch-failure
+  suppression of `self`). Ruff clean.
+- Existing peer + corporate-action test unchanged — the new fields
+  are additive on the `peers` payload.
+
+**Notes / follow-ups**
+
+- **Peer set is Sikafinance-defined.** BRVM sector membership on
+  sikafinance sometimes strays from what a global screen would
+  call a peer (e.g. Ecobank ETI grouped with telecom in the
+  fixture). The median is only as sharp as the peer set;
+  a manual override lives as a follow-up if a reader consistently
+  flags a mis-grouping.
+- **No cross-country adjustment.** A P/E-10 Ivorian telco is
+  compared to a P/E-15 Senegalese one straight up. Currency and
+  country risk aren't factored into the median. Acceptable for
+  WAEMU (single currency, harmonised regulation); revisit if the
+  peer universe ever grows outside the union.
+- **Market cap median can be lopsided.** Two peers at very
+  different sizes yield a median that's neither, but the field
+  still surfaces because it clears the ≥2-sample floor. Sonnet
+  handles this gracefully in practice; a further floor (e.g. skip
+  when max/min ratio > 10x) is available if it ever produces bad
+  reads.
+

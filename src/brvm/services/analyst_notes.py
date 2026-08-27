@@ -356,20 +356,47 @@ def _security_meta(sec_view) -> dict[str, Any]:
     }
 
 
+_PEER_MEDIAN_FIELDS: tuple[str, ...] = (
+    "pe", "roe", "net_margin", "change_ytd_pct", "market_cap",
+)
+
+
+def _peer_medians(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Median of each numeric peer field over non-None values.
+
+    Fields with fewer than 2 non-None samples are omitted so Sonnet
+    can't misread a one-peer sample as a stable sector reference.
+    Returns an empty dict when no field clears the floor — the prompt
+    then falls back to "no peer median available" rather than inventing
+    a normal range.
+    """
+    out: dict[str, float] = {}
+    for field_name in _PEER_MEDIAN_FIELDS:
+        values = [r[field_name] for r in rows if r.get(field_name) is not None]
+        if len(values) >= 2:
+            out[field_name] = statistics.median(values)
+    return out
+
+
 def _peers_lite(ticker: str) -> dict[str, Any]:
     """Peer list for competitive positioning. Best-effort: an outbound
     HTTP failure downgrades to an empty list rather than aborting the
-    whole note."""
+    whole note.
+
+    The `medians` block is computed here (not by Sonnet) because a
+    Python median beats letting the model eyeball a small sample —
+    without it, notes reliably fell back to vague "normal range"
+    language instead of concrete comparisons.
+    """
     try:
         view = company_svc.get_peers_with_ratios(ticker)
     except Exception as e:
         log.warning("peers fetch failed for %s: %s", ticker, e)
-        return {"sector": None, "source": "none", "peers": []}
+        return {"sector": None, "source": "none", "peers": [], "medians": {}}
+    self_row: dict[str, Any] | None = None
     rows: list[dict[str, Any]] = []
     for p in view.peers:
-        if p.is_self:
-            continue
-        rows.append({
+        row = {
             "ticker": p.ticker,
             "name": p.name,
             "country": p.country,
@@ -379,8 +406,25 @@ def _peers_lite(ticker: str) -> dict[str, Any]:
             "pe": p.pe,
             "roe": p.roe,
             "net_margin": p.net_margin,
-        })
-    return {"sector": view.sector, "source": view.source, "peers": rows}
+        }
+        if p.is_self:
+            self_row = row
+            continue
+        rows.append(row)
+    payload: dict[str, Any] = {
+        "sector": view.sector,
+        "source": view.source,
+        "peers": rows,
+        "medians": _peer_medians(rows),
+    }
+    if self_row is not None:
+        # Include the subject's own ratios in the payload so Sonnet can
+        # do a direct self-vs-median compare without having to look them
+        # up on the top-level `ratios` block.
+        payload["self"] = {
+            field: self_row.get(field) for field in _PEER_MEDIAN_FIELDS
+        }
+    return payload
 
 
 def _corporate_actions_lite(ticker: str, week_start: date, lookback_days: int) -> list[dict[str, Any]]:
@@ -591,10 +635,15 @@ ratios are null, say "no peer data available this window" — do not \
 invent peers or numbers.
 
 # Ratios read-across
-2-3 sentences on how the ratios compare to a normal range for the \
-company's sector (e.g. Sonatel telecom peers, a bank vs sector \
-average). Flag anything that stands out (very high P/E, negative \
-growth, unusual payout).
+2-3 sentences on how the ratios compare to the sector medians in \
+`peers.medians` (computed across the peer list, with fields dropped \
+when fewer than 2 peers had a value). Where a median is present, \
+compare the company's own value (either from the `ratios` block or \
+`peers.self`) to it explicitly with concrete numbers — e.g. \
+"P/E 12x vs sector median 9x". Flag anything that stands out (very \
+high P/E, negative growth, unusual payout). If `peers.medians` is \
+empty, say "no sector median available this window" — do not fall \
+back to a generic "normal range" phrasing.
 
 # Risks & watch items
 Bullet list of forward-looking risks the reader should track: known \
