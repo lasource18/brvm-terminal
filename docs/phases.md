@@ -2255,3 +2255,80 @@ bulletin.
   Extending is straightforward but not necessary while the
   bulletin's English edition is always published in parallel.
 
+
+## Phase 8g — Peer median + mean on the Peers tab (done 2026-08-27)
+
+The Peers tab now shows sector median + mean rows beneath the peer
+list on both the web and TUI. Sonnet has been reading these
+statistics since Phase 8e via analyst-notes' `_peer_medians`; the
+tab now surfaces them so a reader can eyeball the same comparison
+the model sees.
+
+**Delivered**
+
+- **`services._view.PeerStats`** — new model holding
+  `(median, mean, n)`. Both stats are None when `n < 2` so a
+  single-peer sample can't masquerade as a stable sector reference
+  (the row still records `n=1` so the UI can dim a warning tag if
+  ever needed).
+- **`services._view.PeersView.stats`** — new dict keyed by ratio
+  name (`pe` / `roe` / `net_margin` / `change_ytd_pct` /
+  `change_day_pct`), populated by `services.company._peer_stats`.
+- **`services.company._peer_stats(rows)`** — median + mean of each
+  ratio across the non-self peer list. Uses `statistics.median` +
+  `statistics.fmean`; self row is excluded so its numbers can't
+  skew the reference (which would defeat the point of a
+  self-vs-peers comparison).
+- **`get_peers_with_ratios`** now attaches `stats=_peer_stats(...)`
+  to the returned view so both front-ends get the block for free.
+- **Web `_tab/peers.html`** — two new rows below the peer list
+  labelled **MEDIAN** and **MEAN** with the same five numeric
+  columns. Each cell dims to "—" when the corresponding
+  `PeerStats.median` / `.mean` is None, so a thinly-covered sector
+  reads honestly instead of showing a false number.
+- **TUI `_render_peers`** — same shape. `DataTable.add_row` gets
+  two synthetic-key rows (`__peer_median__`, `__peer_mean__`)
+  under the peer set. Synthetic keys avoid a collision with real
+  tickers on refresh.
+
+**Two invariants the tests pin**
+
+1. **Self row is excluded from the stats.** With three peers and
+   one self row, `stats["pe"].n == 3` (not 4) and the median +
+   mean are computed over the three non-self samples only.
+2. **A single sample records `n=1` but leaves median/mean None.**
+   The row exists (so the UI can render "n=1" as a warning tag)
+   but the numbers stay unset so a caller can't accidentally
+   treat a one-peer field as a stable reference.
+
+**Definition of Done — met**
+
+- `just test` → **579 tests green** (+5 new: 4 for `_peer_stats`
+  covering self-row exclusion / single-sample tag / no-samples
+  omission / all-five-fields-populated; 1 wiring test on
+  `get_peers_with_ratios` + 1 rendered-page assertion checking
+  that MEDIAN / MEAN / a computed value all appear in the HTML).
+  Ruff clean.
+- Live smoke test on `/s/SNTS/peers` — MEDIAN + MEAN rows render
+  with the expected `peers-stat` CSS class hook.
+
+**Notes / follow-ups**
+
+- **No highlight when the subject beats/lags the median.** A
+  ratio cell for the self row that sits above or below the peer
+  median could be colour-coded (`pos` / `neg`) to make the
+  comparison instant. Left out because "beats the peer median" is
+  a mixed signal for cost ratios vs return ratios, and colouring
+  the wrong direction is worse than not colouring at all.
+- **Median is unweighted.** All peers contribute equally,
+  regardless of market cap. For small BRVM sectors (typically 3-6
+  peers) this is fine; a market-cap-weighted variant would need
+  the market_cap field populated on every peer, which the
+  extraction pipeline doesn't guarantee.
+- **`change_day_pct` stats can be misleading intraday.** Peers
+  refresh on the sikafinance cache TTL (60 min), so an early-day
+  spike on one peer can move the peer-set day median while the
+  subject's day change hasn't yet caught up. Not worth
+  intraday-locking the two — the read is directional, not
+  intraday-actionable.
+

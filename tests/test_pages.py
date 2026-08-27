@@ -90,6 +90,11 @@ def test_security_peers_tab(client, monkeypatch):
     assert "ONTBF" in r.text
     # Self excluded
     assert "TELECOMMUNICATIONS" in r.text
+    # Phase 8g: median + mean summary rows land underneath the peer list.
+    # ORAC + ONTBF ytd = 36.91 + 18.51 → median 27.71, mean 27.71.
+    assert "MEDIAN" in r.text
+    assert "MEAN" in r.text
+    assert "+27.71%" in r.text
 
 
 def test_security_fundamentals_tabs_empty_state(client):

@@ -35,6 +35,33 @@
             <td>{% if p.net_margin is not none %}{{ "{:,.1f}%".format(p.net_margin) }}{% else %}<span class="dim">—</span>{% endif %}</td>
           </tr>
         {% endfor %}
+        {% if peers.stats %}
+          {% set day_s = peers.stats.get('change_day_pct') %}
+          {% set ytd_s = peers.stats.get('change_ytd_pct') %}
+          {% set pe_s = peers.stats.get('pe') %}
+          {% set roe_s = peers.stats.get('roe') %}
+          {% set nm_s = peers.stats.get('net_margin') %}
+          <tr class="peers-stat" style="border-top: 1px solid var(--fg-dim);">
+            <td><strong>MEDIAN</strong> <span class="dim">(peers)</span></td>
+            <td>—</td>
+            <td>{% if day_s and day_s.median is not none %}{{ "%+.2f"|format(day_s.median) }}%{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if ytd_s and ytd_s.median is not none %}{{ "%+.2f"|format(ytd_s.median) }}%{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>—</td>
+            <td>{% if pe_s and pe_s.median is not none %}{{ "{:,.2f}x".format(pe_s.median) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if roe_s and roe_s.median is not none %}{{ "{:,.1f}%".format(roe_s.median) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if nm_s and nm_s.median is not none %}{{ "{:,.1f}%".format(nm_s.median) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+          </tr>
+          <tr class="peers-stat">
+            <td><strong>MEAN</strong> <span class="dim">(peers)</span></td>
+            <td>—</td>
+            <td>{% if day_s and day_s.mean is not none %}{{ "%+.2f"|format(day_s.mean) }}%{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if ytd_s and ytd_s.mean is not none %}{{ "%+.2f"|format(ytd_s.mean) }}%{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>—</td>
+            <td>{% if pe_s and pe_s.mean is not none %}{{ "{:,.2f}x".format(pe_s.mean) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if roe_s and roe_s.mean is not none %}{{ "{:,.1f}%".format(roe_s.mean) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+            <td>{% if nm_s and nm_s.mean is not none %}{{ "{:,.1f}%".format(nm_s.mean) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+          </tr>
+        {% endif %}
       </tbody>
     </table>
   {% else %}

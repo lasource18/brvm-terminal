@@ -311,6 +311,36 @@ class TickerView(Vertical):
                 num(p.net_margin, decimals=1) if p.net_margin is not None else "—",
                 key=p.ticker,
             )
+        # Phase 8g: median + mean summary rows underneath the peer list so
+        # the TUI matches the web tab's Bloomberg-style cross-compare.
+        # DataTable's `key` must be unique — use a synthetic key so a
+        # subsequent refresh doesn't collide with a real ticker.
+        stats = getattr(view, "stats", {}) or {}
+        if stats:
+            pe_s = stats.get("pe")
+            roe_s = stats.get("roe")
+            nm_s = stats.get("net_margin")
+            ytd_s = stats.get("change_ytd_pct")
+            table.add_row(
+                "  ─ MEDIAN",
+                "(peers)",
+                "—",
+                coloured_pct(ytd_s.median) if ytd_s and ytd_s.median is not None else "—",
+                num(pe_s.median, decimals=1) if pe_s and pe_s.median is not None else "—",
+                num(roe_s.median, decimals=1) if roe_s and roe_s.median is not None else "—",
+                num(nm_s.median, decimals=1) if nm_s and nm_s.median is not None else "—",
+                key="__peer_median__",
+            )
+            table.add_row(
+                "  ─ MEAN",
+                "(peers)",
+                "—",
+                coloured_pct(ytd_s.mean) if ytd_s and ytd_s.mean is not None else "—",
+                num(pe_s.mean, decimals=1) if pe_s and pe_s.mean is not None else "—",
+                num(roe_s.mean, decimals=1) if roe_s and roe_s.mean is not None else "—",
+                num(nm_s.mean, decimals=1) if nm_s and nm_s.mean is not None else "—",
+                key="__peer_mean__",
+            )
         if view.peers:
             table.move_cursor(row=min(cursor, len(view.peers) - 1), animate=False)
 

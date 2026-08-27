@@ -159,10 +159,28 @@ class PeerRow(BaseModel):
     is_self: bool = False
 
 
+class PeerStats(BaseModel):
+    """Median + mean of a single ratio across the non-self peer list.
+
+    Both are None when fewer than 2 peers reported the field (a single
+    sample is not a stable central tendency). `n` is the sample size so
+    the UI can dim the row / show a tooltip when the stats are thin.
+    """
+
+    median: float | None = None
+    mean: float | None = None
+    n: int = 0
+
+
 class PeersView(BaseModel):
     sector: str | None = None
     source: str
     peers: list[PeerRow] = Field(default_factory=list)
+    # Phase 8g: per-ratio median + mean across the peer set (self row
+    # excluded). Sonnet has been reading these for a while via
+    # analyst-notes' `_peer_medians`; the Peers tab now surfaces them too
+    # so a reader can eyeball the same comparison the model sees.
+    stats: dict[str, PeerStats] = Field(default_factory=dict)
 
 
 class NewsRow(BaseModel):
