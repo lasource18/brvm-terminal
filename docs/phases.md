@@ -1857,3 +1857,147 @@ flow, Yield & Duration, and Related bonds all pivot on this data.
   automatically until the tagger's ticker list grows to accept
   issuer-name matches. 8c's News tab will match on issuer-name
   substring at read time as a bridging fallback.
+
+
+## Phase 8c — Bond-specific tabs (done 2026-08-27)
+
+Bonds finally get their own Bloomberg-style screens instead of the
+equity-shaped Peers / Financials / Ownership / Segments defaults. Six
+tab endpoints on the web + one composite "Bond details" tab in the
+TUI, all driven by a single `services.bonds.get_bond_view` view-model
+so the two front-ends stay in sync.
+
+Nice-to-haves shipped alongside: cross-link to the issuer's equity
+when it exists (`ECOBANK CI` bond → `ETIT` equity), and a
+prospectus-news surfacer matching `news_items` on
+`(issuer_name, obligation | cotation | admission)` keywords. Credit
+ratings were skipped — no free live source for WAEMU sovereigns and
+the charter (`CLAUDE.md`) is anti-hardcoding.
+
+**Delivered**
+
+- **`services/bonds.py`** — bond math + view service:
+  * `build_schedule(coupon_rate, maturity_year, last_coupon_date,
+    issue_date, today, nominal=10 000)` returns a `BondSchedule` of
+    `CashFlowRow(payment_date, coupon, principal, total,
+    year_fraction)`. Anchor for the coupon walk is `last_coupon_date`
+    when known (real disbursements beat derived anniversaries) and
+    falls back to `issue_date` for freshly-admitted bonds. Missing
+    anchor → schedule is None so the tab renders "unavailable"
+    instead of fabricating dates.
+  * `solve_ytm(rows, dirty_price)` — bisection on `[-0.5, 1.0]`, 100
+    iterations, 1e-7 tolerance. Bisection avoids the coupon-year
+    discontinuity that snaps a Newton solver.
+  * `macaulay_duration`, `modified_duration`, `convexity` — closed-
+    form Σ over the schedule.
+  * `current_yield(coupon_rate, price)` — coupon / price on 10 000
+    nominal.
+  * `get_bond_view(ticker)` composes `Security` reference block +
+    latest `BondSnapshot` + latest close + schedule + yield summary +
+    related bonds + issuer-equity cross-link + prospectus news in
+    one query burst.
+- **Web tabs** on `/s/{bond}` (`_tab/bond_overview.html`,
+  `bond_cashflow.html`, `bond_yield.html`, `bond_related.html`):
+  * **Overview** — DES-style reference block (issuer, category,
+    country, coupon, issue date, maturity year, nominal) + latest
+    price / accrued / last payment + current yield + YTM + next
+    coupon date + cross-links.
+  * **Cash flow** — full coupon + terminal schedule with a
+    "assumes bullet + annual coupons; verify with prospectus for
+    amortising issues" footnote.
+  * **Yield & Duration** — clean/accrued/dirty price + current yield
+    + YTM + Macaulay/modified duration + convexity.
+  * **Related bonds** — every other bond from the same
+    `issuer_name`, sorted by maturity; matured issues dimmed.
+- **TUI Bond details tab** — single composite screen (yield block
+  + full schedule + related list + cross-links) reusing the same
+  view-model. Existing tabs (Financials / Peers / Corporate actions
+  / Analyst view) gate on `kind == 'bond'` and render "not
+  applicable" strings so the tab bar stays stable across kinds.
+  Overview tab body branches to a bond-specific reference block
+  when kind='bond'.
+- **Tabs registry (`apps/web/tabs.py`)** — refactored so
+  `hidden_for_kinds` on the equity tabs now includes both `"index"`
+  and `"bond"`. Four new bond-only tabs
+  (`overview`/`cashflow`/`yield`/`related`) hidden for equity/index.
+  Cross-kind tabs (`chart`, `news`) unchanged.
+  `default_tab_for(kind)` picks `overview` for bonds, `chart` for
+  everything else — `/s/{bond}` redirects land on Overview instead
+  of an empty Chart.
+- **News fallback for bonds** — `services.news.list_feed_from_rows`
+  wraps a caller-provided row list in the standard `NewsFeed` shape.
+  `services.bonds.list_issuer_news` supplies rows via
+  `issuer_name = ?` OR `title LIKE '%issuer%'` because the LLM
+  tagger only stamps equity tickers.
+- **Chart for bonds** — `services.history.get_history` grew a `bond`
+  branch that reads `daily_bars` directly (no sikafinance historique
+  fallback, which 404s on bond tickers) so the Chart tab doesn't
+  spin on a failing fetch.
+- **Issuer-equity cross-link** — `services.bonds._find_issuer_equity`
+  extracts the first non-stopword token from `issuer_name` (skipping
+  `ETAT`, `TRESOR`, `PUBLIC`, `REPUBLIQUE`, `DU`, `DE`, `DES`, `LA`,
+  `LE`) and matches any active equity whose `name` contains it. Bail
+  for tokens under 3 chars to avoid false positives like `CI` → any
+  Côte d'Ivoire equity.
+- **Prospectus-news surfacer** — matches `news_items` on
+  `(issuer_name = ? OR title LIKE issuer)` AND title contains one of
+  `obligat`, `cotation`, `admission`. Cheap read-time query — no
+  new schema, no LLM cost. Newest-first, capped at 5.
+
+**Three invariants the tests pin**
+
+1. **At-par YTM equals coupon rate.** Foundation of the pricing math:
+   `solve_ytm` on a 5y bullet with 6% coupon at price 10 000 returns
+   `0.06`. Discount below par pushes YTM above coupon; premium
+   pushes it below.
+2. **`EOM.O10` bare URL redirects to `/s/EOM.O10/overview`;
+   `SNTS` bare URL still redirects to `/s/SNTS/chart`.** The
+   kind-aware default_tab_for change must not regress equity flow.
+3. **Bond tabs list only bond concerns; hidden tabs 404 cleanly.**
+   `GET /s/{bond}/financials` (and Peers / Corporate actions /
+   Ownership / Segments / Analyst / plain Description) all 404, so a
+   stale bookmark surfaces the mismatch rather than rendering an
+   empty equity template.
+
+**Definition of Done — met**
+
+- `just test` → **542 tests green** (+31: 23 for `services.bonds`
+  covering schedule / YTM / duration / convexity / current_yield /
+  view composition / related exclusion / issuer-equity cross-link /
+  stopword handling, 8 for the bond page routes covering redirect /
+  four tab bodies / hidden-tab 404s / regression on equity flow).
+  Ruff clean.
+- Smoke test against a seeded `data/brvm.sqlite`:
+  `just dev` → `/s/EOM.O10` redirects to `/overview`, Cash flow
+  shows the 620 XOF coupon rows + terminal 10 000 payment, Related
+  lists sibling bonds, all with the correct bullet-and-annual
+  footnote.
+- `services.history.get_history` bond branch tested via the
+  service-level suite (`test_bonds_service` composes a bond +
+  daily_bar and reads the view).
+
+**Notes / follow-ups**
+
+- **Bullet + annual is the assumption.** Amortising and quarterly-
+  pay bonds (some FCTC / social bonds) will show a wrong schedule.
+  The Cash flow footnote calls this out; a prospectus-driven
+  override lives in a follow-up.
+- **Nominal defaults to 10 000 XOF.** A handful of legacy BRVM bonds
+  are 1 000 XOF nominal. Storing an explicit `nominal_value` column
+  on `securities` would let the schedule stop guessing; deferred
+  until the mismatch surfaces on a real reader-reported bond.
+- **Credit rating tab dropped.** No free live source for WAEMU
+  sovereign ratings (S&P/Moody's/Fitch don't publish machine-
+  readable feeds), and the charter is anti-hardcoding. If Trading
+  Economics or a similar screen-scrape becomes available, a Ratings
+  tab is a natural add.
+- **Prospectus news surfacer is keyword-based.** It matches on
+  `obligat`, `cotation`, `admission` in the title — a French-first
+  heuristic that misses English releases. Fine because ~all BRVM
+  primary-market news is in French, but a Haiku-tagged
+  `is_prospectus` bit would be strictly better if we ever expand
+  the tagger's schema.
+- **TUI's Bond details tab renders even for equities** (with an
+  "N/A" body). Textual's TabbedContent doesn't expose a clean
+  hide-tab API mid-lifecycle, so keeping the tab visible everywhere
+  was the shortest path to a stable tab bar across kinds.

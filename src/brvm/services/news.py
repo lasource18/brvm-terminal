@@ -164,6 +164,28 @@ def _row_to_news(r: sqlite3.Row) -> NewsRow:
     )
 
 
+def list_feed_from_rows(rows: list, *, limit: int = 25) -> NewsFeed:
+    """Wrap a caller-provided row list in the standard NewsFeed shape.
+
+    Used by the bond News tab (`services.bonds.list_issuer_news`) which
+    matches on `issuer_name` substring rather than the ticker/relevance
+    machinery that `list_feed` gates on. The `total` matches the row
+    count because there's no separate count query — this is a
+    small-result fallback, not a paginated feed.
+    """
+    items = [_row_to_news(r) for r in rows]
+    return NewsFeed(
+        items=items,
+        total=len(items),
+        limit=limit,
+        offset=0,
+        filters={
+            "ticker": "", "category": "", "date_from": "",
+            "date_to": "", "min_relevance": "",
+        },
+    )
+
+
 def list_feed(
     *,
     ticker: str | None = None,

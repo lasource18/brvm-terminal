@@ -1,0 +1,40 @@
+{% if bond and bond.related %}
+  <table class="quotes">
+    <thead>
+      <tr>
+        <th>TICKER</th>
+        <th>NAME</th>
+        <th class="rt">COUPON</th>
+        <th class="rt">MATURITY</th>
+        <th>COUNTRY</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in bond.related %}
+        <tr class="{% if r.is_matured %}dim{% endif %}">
+          <td><a href="/s/{{ r.ticker }}">{{ r.ticker }}</a></td>
+          <td>{{ r.name }}</td>
+          <td class="rt">{% if r.coupon_rate is not none %}{{ "%.2f"|format(r.coupon_rate) }}%{% else %}—{% endif %}</td>
+          <td class="rt">
+            {% if r.maturity_year %}{{ r.maturity_year }}{% else %}—{% endif %}
+            {% if r.is_matured %}<span class="dim">· matured</span>{% endif %}
+          </td>
+          <td>{{ r.country or "—" }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="dim" style="margin-top: 12px;">
+    All bonds from
+    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}this issuer{% endif %},
+    sorted by maturity. Matured issues appear dimmed for context.
+  </p>
+{% elif bond %}
+  <div class="dim" style="padding: 16px;">
+    No other bonds from
+    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}this issuer{% endif %}
+    are currently listed.
+  </div>
+{% else %}
+  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+{% endif %}

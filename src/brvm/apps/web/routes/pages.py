@@ -14,6 +14,7 @@ from brvm.services import (
     alerts as alerts_svc,
 )
 from brvm.services import analyst_notes as notes_svc
+from brvm.services import bonds as bonds_svc
 from brvm.services import brief as brief_svc
 from brvm.services import company, directory, fundamentals, market, ratios, watchlist
 from brvm.services import news as news_svc
@@ -32,8 +33,12 @@ def index(request: Request):
 
 @router.get("/s/{ticker}", response_class=HTMLResponse)
 def security_root(ticker: str):
-    # Deep-link stability: redirect the bare URL to the Chart tab.
-    return RedirectResponse(url=f"/s/{ticker}/chart", status_code=307)
+    # Kind-aware redirect: bonds land on Overview (their DES-equivalent),
+    # equities + indices land on Chart. Unknown tickers still 307 to
+    # /chart which surfaces a clean 404 from the tab route.
+    sec = market.get_security(ticker)
+    kind = sec.kind if sec else None
+    return RedirectResponse(url=f"/s/{ticker}/{tabs.default_tab_for(kind)}", status_code=307)
 
 
 @router.get("/s/{ticker}/{tab}", response_class=HTMLResponse)
@@ -64,8 +69,21 @@ def security_tab(request: Request, ticker: str, tab: str):
         # comparison in-place.
         ctx["peers"] = company.get_peers_with_ratios(sec.ticker)
     elif spec.key == "news":
-        # Per-ticker feed: matches ticker_hint OR the LLM-tagged CSV.
-        ctx["feed"] = news_svc.list_feed(ticker=sec.ticker, limit=25)
+        # Per-ticker feed: matches ticker_hint OR the LLM-tagged CSV for
+        # equities/indices. Bonds have no equity ticker in the tagger's
+        # vocabulary, so `services.bonds.list_issuer_news` bridges via
+        # issuer_name substring — imperfect but non-zero coverage.
+        if sec.kind == "bond":
+            ctx["feed"] = news_svc.list_feed_from_rows(
+                bonds_svc.list_issuer_news(sec.ticker, limit=25)
+            )
+        else:
+            ctx["feed"] = news_svc.list_feed(ticker=sec.ticker, limit=25)
+    elif spec.key in {"overview", "cashflow", "yield", "related"}:
+        # Phase 8c: bond tabs share a single view-model that composes
+        # reference data + latest snapshot + derived schedule + yield
+        # summary + related list in one query burst.
+        ctx["bond"] = bonds_svc.get_bond_view(sec.ticker)
     elif spec.key == "corporate-actions":
         ctx["actions"] = news_svc.list_upcoming_actions(ticker=sec.ticker, days=90)
     elif spec.key == "financials":

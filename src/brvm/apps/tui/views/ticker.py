@@ -31,6 +31,9 @@ from brvm.services import (
     market,
 )
 from brvm.services import (
+    bonds as bonds_svc,
+)
+from brvm.services import (
     news as news_svc,
 )
 
@@ -82,6 +85,11 @@ class TickerView(Vertical):
                 yield actions
             with TabPane("Analyst view", id="tab-analyst"), VerticalScroll():
                 yield Markdown("", id="analyst-md")
+            # Phase 8c: composite bond DES + CSHF + YAS + REL screen.
+            # Only meaningful when kind='bond'; renders "N/A" otherwise
+            # so the tab bar stays stable across kinds.
+            with TabPane("Bond details", id="tab-bond"), VerticalScroll():
+                yield Static(id="bond-body")
 
     def set_ticker(self, ticker: str) -> None:
         self._ticker = ticker.upper()
@@ -102,6 +110,7 @@ class TickerView(Vertical):
         self._render_peers()
         self._render_actions()
         self._render_analyst()
+        self._render_bond()
 
     # -- individual sections ----------------------------------------------
 
@@ -132,6 +141,13 @@ class TickerView(Vertical):
 
     def _render_overview(self) -> None:
         body = self.query_one("#overview-body", Static)
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            # Bonds share the Overview tab with equities but the payload is
+            # the DES reference block. The full CSHF + YAS + REL screen
+            # lives on the dedicated Bond details tab.
+            self._render_bond_overview(body)
+            return
         try:
             profile = company.get_description(self._ticker or "")
         except Exception as e:
@@ -203,7 +219,15 @@ class TickerView(Vertical):
         table = self.query_one("#ticker-news", DataTable)
         cursor = table.cursor_row
         table.clear()
-        feed = news_svc.list_feed(ticker=self._ticker, limit=50)
+        # Bonds don't get equity-ticker tags from the news tagger; the
+        # issuer-name substring fallback in `services.bonds` bridges the
+        # gap so the tab isn't empty.
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            rows = bonds_svc.list_issuer_news(self._ticker or "", limit=50)
+            feed = news_svc.list_feed_from_rows(rows)
+        else:
+            feed = news_svc.list_feed(ticker=self._ticker, limit=50)
         self._news_urls = {}
         for row in feed.items:
             when = (row.published_at or row.fetched_utc or "")[:16].replace("T", " ")
@@ -224,8 +248,12 @@ class TickerView(Vertical):
     def _render_financials(self) -> None:
         body = self.query_one("#financials-body", Static)
         assert self._ticker
-        if self._sec and getattr(self._sec, "kind", "") == "index":
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "index":
             body.update(f"[{DIM}]not applicable for indices[/]")
+            return
+        if kind == "bond":
+            body.update(f"[{DIM}]not applicable for bonds — see the Bond details tab[/]")
             return
         fs = fundamentals.get_financials_series(self._ticker)
         interim = fundamentals.get_latest_interim(self._ticker)
@@ -260,7 +288,8 @@ class TickerView(Vertical):
     def _render_peers(self) -> None:
         table = self.query_one("#peers-table", DataTable)
         assert self._ticker
-        if self._sec and getattr(self._sec, "kind", "") == "index":
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind in {"index", "bond"}:
             table.clear()
             return
         try:
@@ -288,6 +317,13 @@ class TickerView(Vertical):
     def _render_actions(self) -> None:
         table = self.query_one("#actions-table", DataTable)
         assert self._ticker
+        # Bonds pay coupons, not dividends — the schedule lives on Bond
+        # details. Blank the equity Corporate actions table so it doesn't
+        # show a stale ex-div row from another ticker.
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            table.clear()
+            return
         rows = news_svc.list_upcoming_actions(ticker=self._ticker, days=365)
         cursor = table.cursor_row
         table.clear()
@@ -307,8 +343,12 @@ class TickerView(Vertical):
     def _render_analyst(self) -> None:
         md = self.query_one("#analyst-md", Markdown)
         assert self._ticker
-        if self._sec and getattr(self._sec, "kind", "") == "index":
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "index":
             md.update("*Not applicable for indices.*")
+            return
+        if kind == "bond":
+            md.update("*Not applicable for bonds — analyst notes are per-equity.*")
             return
         note = analyst_notes.latest_note(self._ticker)
         if note is None:
@@ -319,6 +359,140 @@ class TickerView(Vertical):
             )
             return
         md.update(note.markdown or "")
+
+    def _render_bond(self) -> None:
+        """Populate the Bond details tab. Renders "N/A" for non-bonds so
+        the tab bar stays stable across kinds — Textual TabbedContent
+        doesn't expose a clean hide-tab API mid-lifecycle."""
+        body = self.query_one("#bond-body", Static)
+        assert self._ticker
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind != "bond":
+            body.update(f"[{DIM}]This tab is only meaningful for bonds.[/]")
+            return
+        view = bonds_svc.get_bond_view(self._ticker)
+        if view is None:
+            body.update(f"[{DIM}]bond details unavailable[/]")
+            return
+
+        lines: list[str] = []
+        # Yield / duration block first — it's the summary a scanner
+        # wants at the top.
+        if view.yield_:
+            y = view.yield_
+            lines.append(f"[b {ACCENT}]Yield & Duration[/]")
+            lines.append(
+                f"  YTM {num(y.ytm_pct, decimals=2)}%  "
+                f"CurYld {num(y.current_yield_pct, decimals=2)}%"
+            )
+            lines.append(
+                f"  ModDur {num(y.modified_duration_years, decimals=2)} yrs  "
+                f"MacDur {num(y.macaulay_duration_years, decimals=2)} yrs  "
+                f"Convex {num(y.convexity, decimals=2)}"
+            )
+            lines.append(
+                f"  Clean {num(y.clean_price, decimals=2)}  "
+                f"Accrued {num(y.accrued_coupon, decimals=2)}  "
+                f"Dirty {num(y.dirty_price, decimals=2)}"
+            )
+            lines.append("")
+
+        # Cash-flow schedule.
+        if view.schedule:
+            s = view.schedule
+            lines.append(
+                f"[b {ACCENT}]Cash flow[/]  "
+                f"({s.coupons_remaining} left, nominal "
+                f"{num(s.nominal, decimals=0)} XOF, bullet + annual)"
+            )
+            hdr = f"  {'DATE':<12} {'COUPON':>12} {'PRINCIPAL':>12} {'TOTAL':>12}"
+            lines.append(hdr)
+            lines.append("  " + "-" * (len(hdr) - 2))
+            for r in s.rows:
+                principal = num(r.principal, decimals=0) if r.principal > 0 else "—"
+                lines.append(
+                    f"  {r.payment_date.isoformat():<12} "
+                    f"{num(r.coupon, decimals=2):>12} "
+                    f"{principal:>12} "
+                    f"{num(r.total, decimals=2):>12}"
+                )
+            lines.append("")
+        else:
+            lines.append(f"[{DIM}]Cash-flow schedule unavailable (missing coupon anchor).[/]")
+            lines.append("")
+
+        # Related bonds.
+        if view.related:
+            lines.append(f"[b {ACCENT}]Related bonds[/]  (same issuer)")
+            hdr = f"  {'TICKER':<10} {'COUPON':>7}  {'MATURITY':>9}  NAME"
+            lines.append(hdr)
+            lines.append("  " + "-" * (len(hdr) - 2))
+            for r in view.related:
+                coupon = f"{r.coupon_rate:.2f}%" if r.coupon_rate is not None else "—"
+                my = str(r.maturity_year) if r.maturity_year else "—"
+                matured = "  · matured" if r.is_matured else ""
+                lines.append(
+                    f"  {r.ticker:<10} {coupon:>7}  {my:>9}  {r.name[:60]}{matured}"
+                )
+            lines.append("")
+
+        # Nice-to-haves.
+        if view.issuer_equity_ticker:
+            lines.append(
+                f"[b]Issuer equity:[/] {view.issuer_equity_ticker}"
+            )
+        if view.prospectus_news:
+            lines.append(f"[b {ACCENT}]Prospectus / admission news[/]")
+            for n in view.prospectus_news:
+                when = (n.published_at or "")[:10] or "—"
+                lines.append(f"  {when}  {n.title[:80]}")
+
+        body.update("\n".join(lines) if lines else f"[{DIM}]no bond data on file[/]")
+
+    def _render_bond_overview(self, body: Static) -> None:
+        """Populate the Overview tab body for a bond ticker."""
+        view = bonds_svc.get_bond_view(self._ticker or "")
+        if view is None:
+            body.update(f"[{DIM}]bond details unavailable[/]")
+            return
+        coupon = f"{view.coupon_rate:.2f}%" if view.coupon_rate is not None else "—"
+        maturity = str(view.maturity_year) if view.maturity_year else "—"
+        issue = view.issue_date.isoformat() if view.issue_date else "—"
+        lines: list[str] = [
+            f"[b {ACCENT}]{view.ticker}[/]  {view.name}",
+            f"  Issuer:   {view.issuer_name or '—'}",
+            f"  Category: {view.sector or '—'}"
+            + (f"  ·  {view.country}" if view.country else ""),
+            f"  Coupon:   {coupon}  (annual)",
+            f"  Issue:    {issue}",
+            f"  Maturity: {maturity}",
+        ]
+        if view.last_snapshot:
+            lc = view.last_snapshot.last_coupon_date
+            la = view.last_snapshot.last_coupon_amount
+            lines.append(
+                f"  Accrued:  {num(view.last_snapshot.accrued_coupon, decimals=2)}"
+            )
+            if lc:
+                lines.append(
+                    f"  Last pmt: {lc.isoformat()}"
+                    + (f"  · {num(la, decimals=2)}" if la is not None else "")
+                )
+        if view.yield_:
+            lines.append("")
+            lines.append(
+                f"  Current yield: {num(view.yield_.current_yield_pct, decimals=2)}%  "
+                f"YTM: {num(view.yield_.ytm_pct, decimals=2)}%"
+            )
+        if view.schedule and view.schedule.next_coupon_date:
+            lines.append(
+                f"  Next coupon:   {view.schedule.next_coupon_date.isoformat()}  "
+                f"({view.schedule.coupons_remaining} left)"
+            )
+        if view.issuer_equity_ticker:
+            lines.append("")
+            lines.append(f"  Issuer equity: [b]{view.issuer_equity_ticker}[/]")
+        body.update("\n".join(lines))
 
     # -- bindings ---------------------------------------------------------
 
