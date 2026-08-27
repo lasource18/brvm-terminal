@@ -14,7 +14,10 @@ clipped at the tab area's height.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
 from textual_plotext import PlotextPlot
@@ -35,10 +38,17 @@ from brvm.services import (
 class TickerView(Vertical):
     """Renders one security at a time. `set_ticker` swaps the target."""
 
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("o", "open_news_url", "open story", show=True),
+    ]
+
     def __init__(self) -> None:
         super().__init__()
         self._ticker: str | None = None
         self._sec: object | None = None
+        # Row-id → URL for the currently-rendered News tab feed. Populated
+        # in `_render_news` so `o` opens the highlighted story.
+        self._news_urls: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Static("Select a ticker…", id="quote-header")
@@ -194,15 +204,19 @@ class TickerView(Vertical):
         cursor = table.cursor_row
         table.clear()
         feed = news_svc.list_feed(ticker=self._ticker, limit=50)
+        self._news_urls = {}
         for row in feed.items:
             when = (row.published_at or row.fetched_utc or "")[:16].replace("T", " ")
+            row_key = str(row.id)
+            if row.url:
+                self._news_urls[row_key] = row.url
             table.add_row(
                 when,
                 str(row.relevance) if row.relevance is not None else "—",
                 row.category or "—",
                 (row.title or "").strip()[:80],
                 link_cell(row.url),
-                key=str(row.id),
+                key=row_key,
             )
         if feed.items:
             table.move_cursor(row=min(cursor, len(feed.items) - 1), animate=False)
@@ -305,3 +319,27 @@ class TickerView(Vertical):
             )
             return
         md.update(note.markdown or "")
+
+    # -- bindings ---------------------------------------------------------
+
+    def action_open_news_url(self) -> None:
+        """Open the currently-highlighted News tab row in the browser.
+
+        DataTable eats mouse clicks for row selection so an OSC-8 click on
+        the visible "open" link is unreliable across terminals — this
+        binding is the reliable path. No-op unless the News tab is active
+        and a URL is on file for the row."""
+        table = self.query_one("#ticker-news", DataTable)
+        if table.row_count == 0:
+            return
+        try:
+            row_key = table.coordinate_to_cell_key(
+                (table.cursor_row, 0)
+            ).row_key.value
+        except Exception:
+            return
+        url = self._news_urls.get(str(row_key)) if row_key else None
+        if not url:
+            self.notify("No source URL on file for this row.", severity="warning")
+            return
+        self.app.open_url(url)

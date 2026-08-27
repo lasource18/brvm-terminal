@@ -12,7 +12,10 @@ click.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Collapsible, DataTable, Label, Markdown, Static
 
@@ -24,6 +27,16 @@ from brvm.services import news as news_svc
 
 class HomeView(Vertical):
     """Overview dashboard — the default landing view."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("o", "open_news_url", "open story", show=True),
+    ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Row-id → URL for the currently-rendered news feed, so the
+        # `o` binding can open the highlighted row without re-querying.
+        self._news_urls: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield Static(id="home-indices")
@@ -78,8 +91,12 @@ class HomeView(Vertical):
         nt = self.query_one("#home-news", DataTable)
         cursor = nt.cursor_row
         nt.clear()
+        self._news_urls = {}
         for row in feed.items:
             when = (row.published_at or row.fetched_utc or "")[:16].replace("T", " ")
+            row_key = str(row.id)
+            if row.url:
+                self._news_urls[row_key] = row.url
             nt.add_row(
                 when,
                 str(row.relevance) if row.relevance is not None else "—",
@@ -87,7 +104,7 @@ class HomeView(Vertical):
                 ",".join(row.tickers) or "—",
                 (row.title or "").strip()[:80],
                 link_cell(row.url),
-                key=str(row.id),
+                key=row_key,
             )
         if feed.items:
             nt.move_cursor(row=min(cursor, len(feed.items) - 1), animate=False)
@@ -112,6 +129,29 @@ class HomeView(Vertical):
                 "expand below to read[/]"
             )
             body_md.update(f"# Daily brief — {latest.day}\n\n{latest.markdown or ''}")
+
+
+    def action_open_news_url(self) -> None:
+        """Open the highlighted news row's story URL in the default browser.
+
+        Textual's DataTable intercepts mouse clicks for row selection so an
+        OSC-8 hyperlink click inside a cell never reaches the terminal;
+        this binding is the reliable path. Falls back to a notification
+        when no URL is on file for the row (e.g. an older communiqué)."""
+        nt = self.query_one("#home-news", DataTable)
+        if nt.row_count == 0:
+            return
+        try:
+            row_key = nt.coordinate_to_cell_key(
+                (nt.cursor_row, 0)
+            ).row_key.value
+        except Exception:
+            return
+        url = self._news_urls.get(str(row_key)) if row_key else None
+        if not url:
+            self.notify("No source URL on file for this row.", severity="warning")
+            return
+        self.app.open_url(url)
 
 
 def _refill_movers(table: DataTable, rows) -> None:
