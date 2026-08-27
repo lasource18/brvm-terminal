@@ -648,3 +648,212 @@ def _directory_cols():
     from brvm.apps.tui.views.directory import _COLS
 
     return _COLS
+
+
+# --- Phase 8j: TUI polish batch ------------------------------------------
+
+
+async def test_news_ticker_is_mounted_and_hidden_off_hours(tui_db, monkeypatch):
+    """The NewsTicker sits between #body and Footer, and is paused
+    (with a "market closed" message) whenever `is_market_open()` is
+    False. On the wall-clock this test runs off-hours; if the wall
+    clock happens to fall in market hours we monkeypatch."""
+    from brvm.apps.tui.news_ticker import NewsTicker
+
+    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: False)
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # The ticker is on-screen (with a paused-state message).
+        nt = app.query_one(NewsTicker)
+        assert nt is not None
+        rendered = _plain(nt.render())
+        assert "paused" in rendered.lower() or "closed" in rendered.lower()
+
+
+async def test_news_ticker_shows_headlines_when_pool_populated(tui_db, monkeypatch):
+    """During market hours the ticker cycles through recent news items."""
+    from brvm.apps.tui.news_ticker import NewsTicker
+    from brvm.services._view import NewsFeed, NewsRow
+
+    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: True)
+
+    def _fake_feed(**_kwargs):
+        return NewsFeed(
+            items=[
+                NewsRow(
+                    id=1, source="sikafinance", kind="news",
+                    url="https://x/a", title="Sonatel posts strong H1",
+                    tickers=["SNTS"], relevance=9,
+                    published_at="2026-08-27T09:15:00Z",
+                    fetched_utc="2026-08-27T09:20:00Z",
+                ),
+                NewsRow(
+                    id=2, source="sikafinance", kind="news",
+                    url="https://x/b", title="Orange CI expands network",
+                    tickers=["ORAC"], relevance=7,
+                    published_at="2026-08-27T10:15:00Z",
+                    fetched_utc="2026-08-27T10:20:00Z",
+                ),
+            ],
+            total=2, limit=10, offset=0,
+            filters={
+                "ticker": "", "category": "", "date_from": "",
+                "date_to": "", "min_relevance": "6",
+            },
+        )
+
+    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        nt = app.query_one(NewsTicker)
+        nt.refresh_pool()
+        nt._render_current()
+        text = _plain(nt.render())
+        # The first-round headline is on screen.
+        assert "Sonatel" in text or "Orange" in text
+
+
+async def test_chart_render_is_lazy_until_tab_activated(tui_db, monkeypatch):
+    """Regression for #11: the Chart tab's `history.get_history` fetch
+    should not fire on a scheduled refresh while the user is on a
+    different tab. Opening Chart triggers exactly one render."""
+    fetch_calls: list[str] = []
+    real_get_history = None
+
+    def _tracking_get_history(ticker, country=None):
+        fetch_calls.append(ticker)
+        # Call the real function so the chart still renders (may be empty).
+        if real_get_history is not None:
+            return real_get_history(ticker, country)
+        return []
+
+    from brvm.services import history as history_mod
+    real_get_history = history_mod.get_history
+    monkeypatch.setattr(
+        "brvm.apps.tui.views.ticker.history.get_history",
+        _tracking_get_history,
+    )
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        table = sb.query_one("#sidebar-table", DataTable)
+        table.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+        # Ticker view opens on the Overview tab. Chart hasn't rendered
+        # yet — so no history fetch.
+        initial_fetches = list(fetch_calls)
+        assert initial_fetches == []
+        # Trigger a scheduled refresh; still on Overview → still no fetch.
+        tv = app.query_one(TickerView)
+        tv.refresh_data()
+        assert fetch_calls == initial_fetches
+        # Switch to the Chart tab → fetches once.
+        from textual.widgets import TabbedContent
+        tabs = tv.query_one(TabbedContent)
+        tabs.active = "tab-chart"
+        await pilot.pause()
+        assert len(fetch_calls) == 1
+
+
+async def test_alerts_new_row_uses_selection_list_for_doctypes(tui_db):
+    """Regression for #12: the new-rule row exposes doc_types as a
+    multi-select SelectionList, not an Input."""
+    from typing import get_args as _get_args
+
+    from textual.widgets import SelectionList
+
+    from brvm.models import FilingDocType
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(AlertsView)
+        sel = av.query_one("#new-doctypes", SelectionList)
+        assert sel is not None
+        # SelectionList prompts + values cover every FilingDocType.
+        offered = {opt.value for opt in sel._options}
+        assert offered == set(_get_args(FilingDocType))
+
+
+async def test_alerts_new_filing_rule_persists_selected_doctypes(
+    tui_db, monkeypatch
+):
+    """The full flow: pick kind=new_filing, tick two doc_types, submit
+    → the resulting AlertRule carries the CSV of the ticks."""
+    from textual.widgets import Input, Select, SelectionList
+
+    from brvm.services import alerts as alerts_svc
+
+    created: list = []
+    monkeypatch.setattr(
+        alerts_svc, "create_rule",
+        lambda r: created.append(r) or 1,
+    )
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(AlertsView)
+        av.query_one("#new-kind", Select).value = "new_filing"
+        sel = av.query_one("#new-doctypes", SelectionList)
+        sel.select("rapport_annuel")
+        sel.select("resultats")
+        arg = av.query_one("#new-arg", Input)
+        arg.value = ""
+        # Submit via the ticker Input (matches the on_input_submitted
+        # gate condition — new-ticker or new-arg both trigger commit).
+        ticker = av.query_one("#new-ticker", Input)
+        ticker.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert len(created) == 1
+    rule = created[0]
+    assert rule.kind == "new_filing"
+    # CSV order matches the SelectionList's insertion order (Textual
+    # preserves selection order, which for us follows toggle order).
+    assert set(rule.doc_types.split(",")) == {"rapport_annuel", "resultats"}
+
+
+async def test_alerts_new_filing_needs_at_least_one_doctype(tui_db, monkeypatch):
+    """Submitting new_filing with an empty SelectionList should surface
+    a warning notify and NOT create a rule."""
+    from textual.widgets import Input, Select
+
+    from brvm.services import alerts as alerts_svc
+
+    created: list = []
+    monkeypatch.setattr(
+        alerts_svc, "create_rule",
+        lambda r: created.append(r) or 1,
+    )
+    notifications: list = []
+    from brvm.apps.tui.views.alerts import AlertsView as AV
+
+    def _fake_notify(self, message, *, severity="information"):
+        notifications.append((severity, message))
+
+    monkeypatch.setattr(AV, "notify", _fake_notify)
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(AlertsView)
+        av.query_one("#new-kind", Select).value = "new_filing"
+        av.query_one("#new-arg", Input).value = ""
+        ticker = av.query_one("#new-ticker", Input)
+        ticker.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert created == []
+    assert any("doc_type" in msg for _, msg in notifications)

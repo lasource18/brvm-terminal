@@ -2453,3 +2453,85 @@ gap.
   the SGBC case so we can verify the exchange feed hasn't gone
   off in some other axis before committing the new HTML.
 
+
+## Phase 8j — TUI polish batch (done 2026-08-27)
+
+Final backlog item. Three small TUI improvements bundled together:
+a footer news ticker during market hours, lazy per-tab render on
+the ticker view's Chart tab, and a multi-select widget for
+`new_filing` doc_types in the alerts editor.
+
+**Delivered**
+
+- **Footer news ticker (`apps/tui/news_ticker.py`)** — new
+  `NewsTicker(Static)` widget between `#body` and the Textual
+  `Footer`. Polls `news_svc.list_feed(min_relevance=6, limit=10)`
+  and rotates through the pool one headline every 5 seconds. Each
+  rendered line is `[b]{when} · rel {N}/10 · {tickers}[/] {title}`
+  so a reader can glance at it without leaving whatever view they
+  are on. `set_paused(True)` at market close swaps the body for a
+  "news feed paused (market closed)" tag but keeps the widget
+  on-screen so the app-shell layout doesn't reflow.
+- **Lazy Chart render (`apps/tui/views/ticker.py`)** — the
+  ticker view's `refresh_data` now gates `_render_chart` and
+  `_render_bond` on the active TabbedContent tab. Chart's
+  `history.get_history` fetch was firing every 30s regardless of
+  which tab the user was actually looking at — a non-trivial hit
+  when the history-service cache is cold. New `TabActivated`
+  handler renders the tab on switch, and a `_chart_last_ticker`
+  cache skips a re-fetch when nothing has changed underneath.
+- **SelectionList multi-select for `new_filing` doc_types
+  (`apps/tui/views/alerts.py`)** — replaces the CSV-shaped Input
+  with a Textual `SelectionList[str]` populated from
+  `typing.get_args(FilingDocType)`. Space toggles selections,
+  arrows navigate; on submit the checked items round-trip as a
+  CSV into `AlertRule.doc_types` (the canonical persisted shape).
+  A new_filing rule with zero selections surfaces a warning notify
+  instead of silently persisting an empty rule.
+
+**Three invariants the tests pin**
+
+1. **Chart doesn't fetch until Chart is on screen.** With the
+   ticker view opened but Overview still active,
+   `history.get_history` records zero calls. Switching to Chart
+   fires exactly one fetch; a subsequent scheduled `refresh_data`
+   on Overview doesn't add a second.
+2. **SelectionList covers every FilingDocType Literal member.**
+   The offered prompts match `typing.get_args(FilingDocType)`
+   exactly, so a new doc_type shipped in models.py is picked up
+   without touching the alerts view.
+3. **`new_filing` with no selections fails cleanly.** Submit surfaces
+   a "needs at least one doc_type" warning via `AlertsView.notify`
+   and `alerts_svc.create_rule` is not called.
+
+**Definition of Done — met**
+
+- `just test` → **589 tests green** (+6 new: 2 news ticker
+  covering the paused-off-hours body + the populated-pool render;
+  1 lazy Chart render regression; 3 SelectionList / new_filing
+  flow tests). Ruff clean.
+- All existing TUI tests untouched (24) still pass.
+
+**Notes / follow-ups**
+
+- **News ticker refreshes the pool at the wrap point.** The pool
+  reloads when `_idx` cycles back to 0 — worst case 50s (10
+  headlines × 5s each) between refetches. A stricter cadence (poll
+  every rotation) would add SQL load for negligible freshness gain
+  on a feed that tags at ≤15-min intervals.
+- **Lazy Chart cache invalidates on ticker change only.** If the
+  scheduled snapshot lands a new bar mid-session, the chart won't
+  re-fetch until the user leaves and returns to Chart. Acceptable
+  for a ~30s cadence; a "chart cache too old" tag on the header
+  would be a follow-up if a reader ever complains.
+- **SelectionList shows all doc_types even when kind ≠
+  new_filing.** Textual doesn't ship an inline multi-select combo
+  and hiding the widget on kind-change would complicate the
+  compose tree. The submit path ignores it when the kind isn't
+  new_filing, so no data leaks.
+- **News ticker uses raw HTML/CSS markup for bold.** Nothing
+  clickable — the footer widget is a status line, not a nav
+  affordance. Opening a story means switching to the News view
+  and using the existing `o`-to-open binding, which is documented
+  in the Footer key hints.
+

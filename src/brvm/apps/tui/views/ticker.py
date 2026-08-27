@@ -52,6 +52,17 @@ class TickerView(Vertical):
         # Row-id → URL for the currently-rendered News tab feed. Populated
         # in `_render_news` so `o` opens the highlighted story.
         self._news_urls: dict[str, str] = {}
+        # Phase 8j lazy tabs: which tab is currently on screen. Chart's
+        # `_render_chart` hits `services.history.get_history` which for a
+        # cold cache walks the DB + can trigger a sikafinance fetch — a
+        # non-trivial cost on every 30s scheduled refresh. Skip it unless
+        # the Chart tab is active. Same treatment for the Bond details
+        # tab (the only kind='bond' consumer of `services.bonds.get_bond_view`).
+        self._active_tab: str = "tab-overview"
+        # Signature of the last successful Chart render so switching to
+        # Chart mid-refresh replays the cached figure instead of
+        # re-fetching when nothing has changed underneath.
+        self._chart_last_ticker: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("Select a ticker…", id="quote-header")
@@ -94,7 +105,28 @@ class TickerView(Vertical):
     def set_ticker(self, ticker: str) -> None:
         self._ticker = ticker.upper()
         self._sec = market.get_security(self._ticker)
+        # Fresh ticker → the lazy Chart cache is stale.
+        self._chart_last_ticker = None
         self.refresh_data()
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Rerender the newly-activated tab when it holds a lazy body.
+
+        Chart's `get_history` fetch was firing every 30s regardless of
+        which tab the user was actually looking at. Now the render is
+        triggered on-activation and cached until the ticker changes."""
+        tab_id = event.pane.id if event.pane else None
+        if not tab_id:
+            return
+        self._active_tab = tab_id
+        if self._ticker is None:
+            return
+        if tab_id == "tab-chart" and self._chart_last_ticker != self._ticker:
+            self._render_chart()
+        elif tab_id == "tab-bond":
+            self._render_bond()
 
     def refresh_data(self) -> None:
         if self._ticker is None:
@@ -104,13 +136,20 @@ class TickerView(Vertical):
 
         self._render_header()
         self._render_overview()
-        self._render_chart()
+        # Phase 8j: gate the expensive tabs on tab activation. Chart's
+        # history fetch and Bond details' composed view are the only two
+        # that touch the network / heavy SQL joins; Financials / Peers /
+        # News / Actions / Analyst read from cheap local queries and
+        # stay eager so tab-switch feels instant.
+        if self._active_tab == "tab-chart":
+            self._render_chart()
         self._render_news()
         self._render_financials()
         self._render_peers()
         self._render_actions()
         self._render_analyst()
-        self._render_bond()
+        if self._active_tab == "tab-bond":
+            self._render_bond()
 
     # -- individual sections ----------------------------------------------
 
@@ -214,6 +253,10 @@ class TickerView(Vertical):
         # PlotextPlot sizes itself to the widget's rect on the next paint;
         # explicit plot_size would fight the layout.
         plot.refresh()
+        # Mark the cache slot so a subsequent scheduled refresh on a
+        # non-Chart tab doesn't re-fetch. Cleared by `set_ticker` when
+        # the user opens a new company.
+        self._chart_last_ticker = self._ticker
 
     def _render_news(self) -> None:
         table = self.query_one("#ticker-news", DataTable)
