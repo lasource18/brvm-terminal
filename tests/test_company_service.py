@@ -302,3 +302,114 @@ def test_peers_with_ratios_self_row_shows_when_no_peers_available(
     assert len(view.peers) == 1
     assert view.peers[0].is_self is True
     assert view.peers[0].ticker == "SNTS"
+
+
+# --- Phase 8g: peer median + mean stats block ----------------------------
+
+
+class TestPeerStats:
+    """Pure helper — uses PeerRow instances directly, no DB."""
+
+    def _rows(self):
+        from brvm.services._view import PeerRow
+        return [
+            PeerRow(ticker="A", name="A", last=100.0, change_ytd_pct=2.0,
+                    pe=8.0, roe=10.0, net_margin=5.0),
+            PeerRow(ticker="B", name="B", last=200.0, change_ytd_pct=4.0,
+                    pe=12.0, roe=None, net_margin=15.0),
+            PeerRow(ticker="C", name="C", last=300.0, change_ytd_pct=6.0,
+                    pe=10.0, roe=20.0, net_margin=None),
+            PeerRow(ticker="SELF", name="SELF", last=400.0, change_ytd_pct=100.0,
+                    pe=999.0, roe=999.0, net_margin=999.0, is_self=True),
+        ]
+
+    def test_excludes_self_row(self):
+        from brvm.services.company import _peer_stats
+        stats = _peer_stats(self._rows())
+        # If self were included, pe median would be ~11 (10+12/2) and
+        # mean would be shifted upward. Excluding it: {8, 10, 12} →
+        # median 10, mean 10.
+        assert stats["pe"].median == 10.0
+        assert stats["pe"].mean == 10.0
+        assert stats["pe"].n == 3
+
+    def test_omits_median_mean_when_only_one_sample(self):
+        from brvm.services._view import PeerRow
+        from brvm.services.company import _peer_stats
+        # Only one peer reports ROE (10.0); B has None, C has 20.0.
+        # Wait — my helper's rows() has ROE None on B and 20 on C plus
+        # 10 on A → 2 samples. Build a fresh rows list where only one
+        # non-self peer reports the field.
+        rows = [
+            PeerRow(ticker="A", name="A", roe=10.0),
+            PeerRow(ticker="B", name="B", roe=None),
+            PeerRow(ticker="SELF", name="SELF", roe=99.0, is_self=True),
+        ]
+        stats = _peer_stats(rows)
+        assert stats["roe"].n == 1
+        assert stats["roe"].median is None
+        assert stats["roe"].mean is None
+
+    def test_omits_field_entirely_when_no_samples(self):
+        from brvm.services._view import PeerRow
+        from brvm.services.company import _peer_stats
+        rows = [
+            PeerRow(ticker="A", name="A"),
+            PeerRow(ticker="B", name="B"),
+        ]
+        stats = _peer_stats(rows)
+        assert "pe" not in stats
+        assert "roe" not in stats
+
+    def test_covers_all_five_fields_when_populated(self):
+        from brvm.services.company import _peer_stats
+        stats = _peer_stats(self._rows())
+        # net_margin has 2 samples (5.0 + 15.0), roe has 2 (10 + 20).
+        assert stats["net_margin"].median == 10.0
+        assert stats["net_margin"].mean == 10.0
+        assert stats["roe"].median == 15.0
+        assert stats["roe"].mean == 15.0
+        assert stats["change_ytd_pct"].median == 4.0
+        assert stats["change_ytd_pct"].mean == pytest.approx(4.0)
+
+
+def test_get_peers_with_ratios_includes_stats_block(company_env, monkeypatch, tmp_path):
+    """Wiring test: `stats` should be populated in the returned view so
+    the web + TUI Peers tabs can render MEDIAN / MEAN rows."""
+    from brvm.models import Quote
+    from brvm.store import quotes as quotes_repo
+
+    def fake_secteur(ticker, country, client=None):
+        return {
+            "sector": "TELECOMS",
+            "peers": [
+                {"ticker": "SNTS", "country": "SN", "name": "SONATEL",
+                 "last": 32500, "change_day_pct": 1.0, "change_ytd_pct": 5.0,
+                 "volume": 100},
+                {"ticker": "ORAC", "country": "CI", "name": "ORANGE CI",
+                 "last": 19000, "change_day_pct": 2.0, "change_ytd_pct": 3.0,
+                 "volume": 200},
+                {"ticker": "ONTBF", "country": "BF", "name": "ONATEL BF",
+                 "last": 3500, "change_day_pct": -1.0, "change_ytd_pct": 7.0,
+                 "volume": 50},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+    )
+    db_path = tmp_path / "brvm.sqlite"
+    with connect(db_path) as conn:
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="SNTS", source="sikafinance",
+                  last=32500.0, change_pct=1.0, volume=100),
+        ])
+
+    view = company_env.get_peers_with_ratios("SNTS")
+    # change_ytd_pct is populated on all three non-self peers (5/3/7).
+    # Median = 5, mean = 5.
+    ytd = view.stats.get("change_ytd_pct")
+    assert ytd is not None
+    assert ytd.n == 2  # SNTS is the self row → excluded; ORAC + ONTBF remain
+    assert ytd.median == pytest.approx(5.0)  # median of [3, 7]
+    assert ytd.mean == pytest.approx(5.0)

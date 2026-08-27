@@ -7,6 +7,7 @@ carries less data but a superset of tickers with reliable uptime.
 
 from __future__ import annotations
 
+import statistics
 import time
 from pathlib import Path
 from threading import Lock
@@ -15,7 +16,13 @@ from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
 from brvm.services import ratios as ratios_svc
-from brvm.services._view import CompanyProfile, PeerRow, PeersView, Shareholder
+from brvm.services._view import (
+    CompanyProfile,
+    PeerRow,
+    PeerStats,
+    PeersView,
+    Shareholder,
+)
 from brvm.sources import afx_kwayisi, sikafinance
 
 log = get(__name__)
@@ -242,6 +249,37 @@ def _self_row(ticker: str) -> PeerRow | None:
     )
 
 
+_PEER_STAT_FIELDS: tuple[str, ...] = (
+    "pe", "roe", "net_margin", "change_ytd_pct", "change_day_pct",
+)
+
+
+def _peer_stats(rows: list[PeerRow]) -> dict[str, PeerStats]:
+    """Median + mean per ratio across non-self peers.
+
+    Fields with fewer than 2 samples record `n` but leave median/mean
+    None, so the UI can render "n=1" as a warning tag rather than a
+    number that could be misread as the sector reference.
+    """
+    non_self = [p for p in rows if not p.is_self]
+    out: dict[str, PeerStats] = {}
+    for field_name in _PEER_STAT_FIELDS:
+        values = [
+            getattr(p, field_name) for p in non_self
+            if getattr(p, field_name, None) is not None
+        ]
+        n = len(values)
+        if n >= 2:
+            out[field_name] = PeerStats(
+                median=statistics.median(values),
+                mean=statistics.fmean(values),
+                n=n,
+            )
+        elif n == 1:
+            out[field_name] = PeerStats(median=None, mean=None, n=1)
+    return out
+
+
 def get_peers_with_ratios(ticker: str) -> PeersView:
     """`get_peers` plus a ratio annotation pass on every returned peer,
     with the currently-viewed company appended as a `is_self=True` row
@@ -257,8 +295,10 @@ def get_peers_with_ratios(ticker: str) -> PeersView:
     self_row = _self_row(ticker)
     if self_row is not None:
         rows.append(self_row)
+    annotated = _annotate_with_ratios(rows)
     return PeersView(
         sector=view.sector,
         source=view.source,
-        peers=_annotate_with_ratios(rows),
+        peers=annotated,
+        stats=_peer_stats(annotated),
     )
