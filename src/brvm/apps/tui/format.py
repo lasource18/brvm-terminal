@@ -91,3 +91,21 @@ def local_hm(iso: str | None, *, tz: str = "Africa/Abidjan") -> str:
         return "—"
     z = ABIDJAN if tz == "Africa/Abidjan" else ZoneInfo(tz)
     return dt.astimezone(z).strftime("%H:%M")
+
+
+def link_cell(url: str | None, *, label: str = "open"):
+    """DataTable cell that opens `url` in the terminal's browser.
+
+    Rich `Text` with a `link` style renders as an OSC-8 hyperlink escape
+    sequence — every modern terminal (iTerm2, Kitty, Alacritty, WezTerm,
+    macOS Terminal 2.14+, VSCode) makes it clickable. Older terminals
+    just show the label as underlined text; the URL isn't lost.
+
+    Building a `Text` object (not a `[link=...]` markup string) sidesteps
+    Rich markup escaping — URLs frequently contain `[` in query strings.
+    """
+    from rich.text import Text
+
+    if not url:
+        return "—"
+    return Text(label, style=f"link {url}", overflow="fold")

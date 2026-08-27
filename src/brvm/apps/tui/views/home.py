@@ -16,7 +16,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Collapsible, DataTable, Label, Markdown, Static
 
-from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, num
+from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, link_cell, num
 from brvm.services import brief as brief_svc
 from brvm.services import market
 from brvm.services import news as news_svc
@@ -41,7 +41,7 @@ class HomeView(Vertical):
         with Vertical(classes="home-section"):
             yield Label("Top news (high relevance)", classes="home-section-title")
             nt = DataTable(id="home-news", cursor_type="row", zebra_stripes=True)
-            nt.add_columns("When", "Rel", "Category", "Tickers", "Title")
+            nt.add_columns("When", "Rel", "Category", "Tickers", "Title", "Link")
             yield nt
         # Collapsed by default so the fold-first area stays terse — the
         # brief is a long-form artefact and would otherwise crowd the
@@ -86,6 +86,7 @@ class HomeView(Vertical):
                 row.category or "—",
                 ",".join(row.tickers) or "—",
                 (row.title or "").strip()[:80],
+                link_cell(row.url),
                 key=str(row.id),
             )
         if feed.items:

@@ -10,6 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import DataTable, Input, Label
 
+from brvm.apps.tui.format import link_cell
 from brvm.services import news as news_svc
 
 
@@ -39,7 +40,7 @@ class NewsView(Vertical):
             yield Input(placeholder="category (earnings/dividend/...)", id="news-category")
             yield Input(placeholder="min relevance 0-10", id="news-min-rel")
         table = DataTable(id="news-table", cursor_type="row", zebra_stripes=True)
-        table.add_columns("When", "Rel", "Category", "Tickers", "Title")
+        table.add_columns("When", "Rel", "Category", "Tickers", "Title", "Link")
         yield table
 
     def on_mount(self) -> None:
@@ -69,6 +70,7 @@ class NewsView(Vertical):
                 row.category or "—",
                 ",".join(row.tickers) or "—",
                 (row.title or "").strip()[:80],
+                link_cell(row.url),
                 key=key,
             )
         if feed.items:

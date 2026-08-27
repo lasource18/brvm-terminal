@@ -19,7 +19,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
 from textual_plotext import PlotextPlot
 
-from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, num
+from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, link_cell, num
 from brvm.services import (
     analyst_notes,
     company,
@@ -58,7 +58,7 @@ class TickerView(Vertical):
                 yield PlotextPlot(id="chart-plot")
             with TabPane("News", id="tab-news"):
                 news_table = DataTable(id="ticker-news", cursor_type="row", zebra_stripes=True)
-                news_table.add_columns("When", "Rel", "Category", "Title")
+                news_table.add_columns("When", "Rel", "Category", "Title", "Link")
                 yield news_table
             with TabPane("Financials", id="tab-financials"), VerticalScroll():
                 yield Static(id="financials-body")
@@ -201,6 +201,7 @@ class TickerView(Vertical):
                 str(row.relevance) if row.relevance is not None else "—",
                 row.category or "—",
                 (row.title or "").strip()[:80],
+                link_cell(row.url),
                 key=str(row.id),
             )
         if feed.items:
