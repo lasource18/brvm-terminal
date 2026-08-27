@@ -73,6 +73,7 @@ def security_tab(request: Request, ticker: str, tab: str):
         ctx["interim"] = fundamentals.get_latest_interim(sec.ticker)
         ctx["ratios_series"] = ratios.get_ratios_series(sec.ticker)
         ctx["interim_ratios"] = ratios.get_ratios_for_interim(sec.ticker)
+        ctx["filing_refs"] = fundamentals.get_financials_source_filings(sec.ticker)
     elif spec.key == "ownership":
         ctx["ownership"] = fundamentals.get_ownership(sec.ticker)
     elif spec.key == "segments":

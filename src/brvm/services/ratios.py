@@ -56,6 +56,9 @@ class FinancialsInput:
     total_equity: float | None = None
     eps: float | None = None
     dividend_per_share: float | None = None
+    cash_flow_ops: float | None = None
+    capex: float | None = None
+    free_cash_flow: float | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,9 @@ class RatiosView:
     pe: Ratio | None = None
     pb: Ratio | None = None
     ps: Ratio | None = None
+    pfcf: Ratio | None = None
+    fcf_yield: Ratio | None = None
+    ev_ebitda: Ratio | None = None
     dividend_yield: Ratio | None = None
     payout_ratio: Ratio | None = None
     earnings_yield: Ratio | None = None
@@ -122,7 +128,8 @@ class RatiosView:
     @property
     def has_any(self) -> bool:
         for attr in (
-            "pe", "pb", "ps", "dividend_yield", "payout_ratio", "earnings_yield",
+            "pe", "pb", "ps", "pfcf", "fcf_yield", "ev_ebitda",
+            "dividend_yield", "payout_ratio", "earnings_yield",
             "roe", "roa", "net_margin", "operating_margin",
             "revenue_growth", "net_income_growth", "eps_growth",
             "financial_leverage", "equity_ratio",
@@ -172,10 +179,53 @@ def valuation_ratios(
             return None
         return Ratio(value=v, provenance=f"price / {field}", unit="x")
 
+    # Cash-flow multiples use market cap as the numerator (share-count
+    # x price), which cancels the "same-currency-for-EPS" mismatch
+    # concern because FCF is denominated in the *financials* currency
+    # and market_cap is in the *price* currency. We therefore reuse the
+    # `currency_mismatch` gate that P/E / P/S already respect.
+    pfcf: Ratio | None = None
+    fcf_yield: Ratio | None = None
+    ev_ebitda: Ratio | None = None
+    if not currency_mismatch and market_cap is not None:
+        if fin.free_cash_flow is not None and fin.free_cash_flow > 0:
+            pfcf = Ratio(
+                value=market_cap / fin.free_cash_flow,
+                provenance="market_cap / free_cash_flow",
+                unit="x",
+            )
+            fcf_yield = Ratio(
+                value=fin.free_cash_flow / market_cap * 100.0,
+                provenance="free_cash_flow / market_cap",
+                unit="pct",
+            )
+        elif fin.free_cash_flow is not None and fin.free_cash_flow <= 0:
+            # Negative FCF: report the yield (informative — reads as a
+            # negative %) but suppress P/FCF (a negative multiple is a
+            # trap for a reader skimming the table).
+            fcf_yield = Ratio(
+                value=fin.free_cash_flow / market_cap * 100.0,
+                provenance="free_cash_flow / market_cap (negative)",
+                unit="pct",
+            )
+        # EV/EBITDA proxy — until we ingest net debt + D&A, EV=market_cap
+        # and EBITDA≈operating_income (RBE). Provenance makes the proxy
+        # explicit so a reader isn't misled into thinking this is the
+        # textbook multiple.
+        if fin.operating_income is not None and fin.operating_income > 0:
+            ev_ebitda = Ratio(
+                value=market_cap / fin.operating_income,
+                provenance="market_cap / operating_income (EV proxy, no net debt / D&A yet)",
+                unit="x",
+            )
+
     return {
         "pe": _price_ratio("EPS", fin.eps),
         "pb": _price_ratio("book_value_per_share", book_value_per_share),
         "ps": _price_ratio("revenue_per_share", revenue_per_share),
+        "pfcf": pfcf,
+        "fcf_yield": fcf_yield,
+        "ev_ebitda": ev_ebitda,
         "dividend_yield": (
             None if currency_mismatch else (
                 Ratio(
@@ -314,6 +364,7 @@ def compute_ratios(
 
 
 def _row_to_input(row: sqlite3.Row) -> FinancialsInput:
+    keys = row.keys()
     return FinancialsInput(
         ticker=row["ticker"],
         period_year=int(row["period_year"]),
@@ -326,6 +377,12 @@ def _row_to_input(row: sqlite3.Row) -> FinancialsInput:
         total_equity=row["total_equity"],
         eps=row["eps"],
         dividend_per_share=row["dividend_per_share"],
+        # `_row_to_input` is called from two paths — the annual `SELECT *`
+        # and the interim projection query. Fall back to None so a
+        # projection that omits these columns doesn't KeyError.
+        cash_flow_ops=row["cash_flow_ops"] if "cash_flow_ops" in keys else None,
+        capex=row["capex"] if "capex" in keys else None,
+        free_cash_flow=row["free_cash_flow"] if "free_cash_flow" in keys else None,
     )
 
 
@@ -396,7 +453,8 @@ def get_ratios_for_interim(ticker: str) -> RatiosView | None:
             """
             SELECT ticker, period_year, period_kind, currency, revenue,
                    operating_income, net_income, total_assets, total_equity,
-                   eps, dividend_per_share
+                   eps, dividend_per_share, cash_flow_ops, capex,
+                   free_cash_flow
             FROM financials
             WHERE ticker = ? AND period_kind IN ('H1', 'Q1', 'Q3', 'other')
             ORDER BY period_year DESC,

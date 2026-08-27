@@ -101,6 +101,12 @@ class FundamentalsExtract(BaseModel):
     total_equity: float | None = None
     eps: float | None = None
     dividend_per_share: float | None = None
+    # Cash-flow (Phase 7). All in FULL UNITS, same currency as the P&L.
+    # `free_cash_flow` is optional: derived from CFO - capex at persist
+    # time when the model omits it but supplies the components.
+    cash_flow_ops: float | None = None
+    capex: float | None = None
+    free_cash_flow: float | None = None
     segments: list[SegmentExtract] = Field(default_factory=list)
     ownership: list[OwnerExtract] = Field(default_factory=list)
 
@@ -234,6 +240,24 @@ otherwise leave null (do NOT annualise).
 - dividend_per_share: dividend proposed for this period, per share, in \
 the report's currency. Interim reports usually omit this — leave null. \
 Zero if a resolution explicitly says none was paid.
+- cash_flow_ops: "Flux de trésorerie liés à l'activité" / \
+"Flux nets de trésorerie générés par l'activité opérationnelle" / \
+"Trésorerie provenant de l'exploitation" (CFO). The consolidated \
+cash-flow statement usually reports this as a subtotal after working- \
+capital changes; take THAT line, not gross operating cash. Sign convention: \
+positive when the business generated cash.
+- capex: capital expenditure for the period. In the "Flux de trésorerie \
+liés aux investissements" section look for "Acquisitions d'immobilisations" \
+(corporelles + incorporelles) — the outflow line. Return the amount as a \
+POSITIVE number (drop the minus sign that many French reports show). If \
+only a combined "investissements" line is given, use that; do NOT try to \
+split acquisitions from disposals.
+- free_cash_flow: leave NULL when the report doesn't publish a "Free cash \
+flow" line explicitly. When it does (some issuers give a "FCF" or "Flux \
+de trésorerie disponible" figure), return that value in full units. The \
+persistence layer will derive `cash_flow_ops - capex` when this is null \
+and both components are present, so an unlabelled cash-flow statement \
+still yields a usable FCF.
 - segments: business or geographic revenue breakdown. Each item: \
 {name, segment_kind ('business' | 'geo'), revenue (in the same currency), \
 share_pct (0-100)}. Use whichever breakdown the report actually gives; \
@@ -269,6 +293,9 @@ _RESULT_SCHEMA: dict[str, Any] = {
         "total_equity": {"type": ["number", "null"]},
         "eps": {"type": ["number", "null"]},
         "dividend_per_share": {"type": ["number", "null"]},
+        "cash_flow_ops": {"type": ["number", "null"]},
+        "capex": {"type": ["number", "null"]},
+        "free_cash_flow": {"type": ["number", "null"]},
         "segments": {
             "type": "array",
             "items": {
@@ -362,6 +389,23 @@ def _validate(raw_text: str) -> FundamentalsExtract:
         v = getattr(extract, field_name)
         if v is not None and v < 0:
             setattr(extract, field_name, None)
+
+    # Capex is reported as an outflow in the cash-flow statement (often
+    # a negative number in the source). We store it as a positive amount
+    # so the FCF derivation (`CFO - capex`) has the conventional sign.
+    if extract.capex is not None:
+        extract.capex = abs(extract.capex)
+
+    # Derive free cash flow when the model omits it but supplies both
+    # components. Doing this here (rather than at read time) means the
+    # store is always self-consistent — a later ratio query never has to
+    # branch on "was FCF present or derived?".
+    if (
+        extract.free_cash_flow is None
+        and extract.cash_flow_ops is not None
+        and extract.capex is not None
+    ):
+        extract.free_cash_flow = extract.cash_flow_ops - extract.capex
 
     # A period_year of 1900 or 3000 is a hallucination; drop it.
     if extract.period_year is not None and not (1990 <= extract.period_year <= 2100):

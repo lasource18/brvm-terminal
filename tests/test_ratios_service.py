@@ -197,6 +197,84 @@ def test_ratio_dataclass_carries_provenance_string():
 
 
 # ---------------------------------------------------------------------------
+# Cash-flow ratios (Phase 7) — P/FCF, FCF yield, EV/EBITDA proxy.
+# ---------------------------------------------------------------------------
+
+
+def test_valuation_ratios_computes_pfcf_and_fcf_yield_when_fcf_positive():
+    fin = _fin(free_cash_flow=100.0)  # market cap = 80 * 100_000 = 8_000_000
+    got = valuation_ratios(fin, _mkt(), currency_mismatch=False)
+    # P/FCF = 8_000_000 / 100 = 80_000x
+    assert got["pfcf"].value == pytest.approx(80_000.0)
+    assert got["pfcf"].unit == "x"
+    # FCF yield = 100 / 8_000_000 * 100 = 0.00125%
+    assert got["fcf_yield"].value == pytest.approx(0.00125)
+    assert got["fcf_yield"].unit == "pct"
+
+
+def test_valuation_ratios_suppresses_pfcf_when_fcf_negative_but_keeps_yield():
+    """A negative multiple would trap a skimming reader — hide P/FCF, but
+    the yield (as a signed percent) still communicates the direction."""
+    fin = _fin(free_cash_flow=-50.0)
+    got = valuation_ratios(fin, _mkt(), currency_mismatch=False)
+    assert got["pfcf"] is None
+    assert got["fcf_yield"] is not None
+    assert got["fcf_yield"].value < 0
+
+
+def test_valuation_ratios_ev_ebitda_proxy_when_operating_income_positive():
+    got = valuation_ratios(_fin(operating_income=200.0), _mkt(), currency_mismatch=False)
+    # Proxy: market_cap / operating_income = 8_000_000 / 200 = 40_000x
+    assert got["ev_ebitda"].value == pytest.approx(40_000.0)
+    # Provenance must flag the proxy so a reader isn't misled.
+    assert "EV proxy" in got["ev_ebitda"].provenance
+    assert "operating_income" in got["ev_ebitda"].provenance
+
+
+def test_valuation_ratios_ev_ebitda_none_when_operating_income_zero_or_negative():
+    for oi in (0.0, -10.0, None):
+        got = valuation_ratios(_fin(operating_income=oi), _mkt(), currency_mismatch=False)
+        assert got["ev_ebitda"] is None
+
+
+def test_valuation_ratios_cashflow_ratios_none_on_currency_mismatch():
+    fin = _fin(free_cash_flow=100.0, operating_income=200.0, currency="EUR")
+    got = valuation_ratios(fin, _mkt(), currency_mismatch=True)
+    assert got["pfcf"] is None
+    assert got["fcf_yield"] is None
+    assert got["ev_ebitda"] is None
+
+
+def test_valuation_ratios_cashflow_ratios_none_when_no_market_cap():
+    """No shares → no market cap → nothing to divide by."""
+    got = valuation_ratios(
+        _fin(free_cash_flow=100.0), _mkt(shares_outstanding=None),
+        currency_mismatch=False,
+    )
+    assert got["pfcf"] is None
+    assert got["fcf_yield"] is None
+    assert got["ev_ebitda"] is None
+
+
+def test_ratios_view_has_any_true_when_only_cashflow_ratio_populated():
+    """A ticker with only cash-flow data should still light up the ratios
+    table — `has_any` gates the whole section, so the new fields need
+    to count."""
+    view = compute_ratios(
+        _fin(
+            revenue=None, operating_income=None, net_income=None,
+            total_assets=None, total_equity=None, eps=None,
+            dividend_per_share=None, free_cash_flow=100.0,
+        ),
+        _mkt(),
+    )
+    # Nothing except the cash-flow multiples should be populated.
+    assert view.pe is None and view.roe is None
+    assert view.pfcf is not None
+    assert view.has_any is True
+
+
+# ---------------------------------------------------------------------------
 # Integration — the DB-facing helpers that the templates and Peers path use.
 # ---------------------------------------------------------------------------
 

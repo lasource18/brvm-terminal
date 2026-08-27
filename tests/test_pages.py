@@ -156,6 +156,11 @@ def test_security_fundamentals_tabs_render_extracted_data(client):
     assert "2024" in r.text
     assert "1,500,000,000" in r.text
     assert "No extracted financials" not in r.text
+    # References subsection links back to the source PDF so a reader can
+    # audit each number against the filing that produced it.
+    assert "References" in r.text
+    assert "https://brvm.org/sonatel/2024.pdf" in r.text
+    assert "rapport_annuel" in r.text
 
     r = client.get("/s/SNTS/ownership")
     assert r.status_code == 200

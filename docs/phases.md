@@ -21,6 +21,7 @@ project charter and `README.md` for the current "Try it" quickstart.
 | 6a | Alerts — price-move / new-filing / news rules + Discord delivery | done | 2026-08-24 |
 | 6b | Daily brief (post-close, Haiku) | done | 2026-08-25 |
 | 6c | Analyst-note synthesis (weekly per-ticker, Sonnet) | done | 2026-08-25 |
+| 7  | Cash-flow extraction (P/FCF, FCF yield, EV/EBITDA) + filings-link references on the Financials tab | done | 2026-08-26 |
 
 **Backlog** (raised during earlier phases; each becomes its own mini-phase
 when we pick it up):
@@ -29,13 +30,11 @@ when we pick it up):
   different page and no parser exists yet. `SecurityKind` already allows
   `"bond"`; needs a source survey + parser + `kind="bond"` branch. Flag
   raised in Phase 1's notes.
-- **Cash-flow extraction (unlocks P/FCF, FCF yield, EV/EBITDA).** Phase
-  4d ships every ratio computable from the current P&L + balance-sheet
-  extract. Adding `cash_flow_ops`, `capex`, and a derived
-  `free_cash_flow` to `services/extraction` + `financials` unlocks the
-  cash-flow-adjacent ratios and a proper EV multiple. One-off Haiku
-  re-run against the ~200 extracted filings; keeps the same $2/day cap.
-  Flagged in 4d's writeup.
+- **~~Cash-flow extraction (unlocks P/FCF, FCF yield, EV/EBITDA)~~ done
+  in Phase 7** — `cash_flow_ops`, `capex`, `free_cash_flow` are now
+  extracted and the three multiples render on the Financials tab.
+  EV/EBITDA is still a proxy (market cap / operating income) until we
+  ingest net debt + D&A; noted in Phase 7's follow-ups.
 - **Palmarès parser + BOC row extraction.** Deferred from Phase 1.
 - **`hx-push-url` on the `/news` filter form** so filtered views become
   shareable links. Small polish, not currently needed.
@@ -1549,3 +1548,124 @@ headroom.
   wall time, well inside a weekend cron slot. If we ever want that
   faster, the store dedupe key means it's safe to parallelize; the
   0.5s pause is the rate-limit safety valve.
+
+---
+
+## Phase 7 — Cash-flow extraction + filings-link references (done 2026-08-26)
+
+Three new columns on `financials` (`cash_flow_ops`, `capex`,
+`free_cash_flow`), three new ratios on the Financials tab (P/FCF, FCF
+yield, EV/EBITDA proxy), and a **References** subsection on the same
+tab that lists every filing currently backing the persisted rows with
+a link out to the source PDF. First mini-phase off the post-6c
+backlog.
+
+**Delivered**
+
+- **Migration `0012_cash_flow.sql`** — `ALTER TABLE financials ADD
+  COLUMN` for the three cash-flow fields. Additive-only, so the
+  existing corpus survives the schema bump untouched.
+- **`services/extraction.py`** — `FundamentalsExtract` gains
+  `cash_flow_ops`, `capex`, `free_cash_flow`; the `_SYSTEM_PROMPT` names
+  the French source lines ("Flux de trésorerie liés à l'activité",
+  "Acquisitions d'immobilisations", "Flux de trésorerie disponible");
+  the JSON schema declares the three fields as nullable numbers;
+  `_validate` flips a negative capex to positive (French reports show
+  it as an outflow) and derives FCF from `CFO - capex` when the model
+  omits it but supplies both components. An explicit FCF line in the
+  reply wins over the derived value.
+- **`store/financials.replace_period`** — INSERT columns extended;
+  `FinancialsRow` carries the three new fields. `_METRIC_KEYS` in
+  `services/fundamentals` follows so the Financials tab picks them up
+  automatically.
+- **`services/ratios.py`** — `RatiosView` gains `pfcf`, `fcf_yield`,
+  `ev_ebitda`. `valuation_ratios` computes them from market cap:
+  * **P/FCF** = market_cap / FCF, suppressed when FCF ≤ 0 (a negative
+    multiple is a trap for a skimming reader).
+  * **FCF yield** = FCF / market_cap × 100 — always shown as a signed
+    percent so the direction is legible when FCF is negative.
+  * **EV/EBITDA proxy** = market_cap / operating_income, provenance
+    string spells out the proxy (no net debt, no D&A yet) so a reader
+    hovering the cell knows what they're looking at.
+  All three respect the same currency-mismatch gate that P/E already
+  did — no multiple when the price and financials currencies disagree.
+- **`services.fundamentals.get_financials_source_filings(ticker)`** —
+  new read helper that returns one `FilingRef` per `(period_year,
+  period_kind)` currently persisted in `financials`, joined onto
+  `filings` for `doc_type`, `published_date`, `source`, `source_url`.
+  Sorted newest-first, annual periods before interims inside a tied
+  year (annuals are usually what the user came for).
+- **Financials tab renderers**:
+  * Web (`_tab/financials.html`) — three new metric rows in the
+    P&L table, three new ratio rows in the ratios table with an
+    `EV/EBITDA*` footnote calling out the proxy, plus a References
+    table below with external-link anchors (`target="_blank"
+    rel="noopener noreferrer"`) to each source PDF.
+  * TUI (`apps/tui/views/ticker.py`) — the metrics dict is data-driven
+    so the three new rows appear automatically; a References section
+    is appended below the interim block listing period / doc_type /
+    published date / URL for each source filing.
+- **`services.fundamentals.reset_missing_cashflow`** — one-shot
+  recovery: finds every annual `financials` row where all three
+  cash-flow columns are NULL and clears `extracted_utc` on the
+  backing filing so it re-enters `list_needing_extraction`. Interim
+  rows are skipped (they rarely publish a cash-flow statement).
+- **`jobs/fundamentals_recover.py --cash-flow`** flag + two justfile
+  targets (`just fundamentals-recover-cashflow` + `-dry`). The
+  existing $2/day extraction cap gates the actual re-run.
+
+**Two invariants the tests pin**
+
+1. **Capex is always stored positive, FCF derivation matches sign
+   convention.** `test_extract_filing_flips_negative_capex_to_positive`
+   feeds `capex=-200_000_000` + `cash_flow_ops=500_000_000` + FCF=None
+   and asserts `capex == 200_000_000`, `free_cash_flow == 300_000_000`.
+2. **The Financials tab renders the References subsection with a live
+   link to the source PDF.** `test_security_fundamentals_tabs_render_
+   extracted_data` was extended: after seeding a `Filing` with
+   `source_url="https://brvm.org/sonatel/2024.pdf"` and a matching
+   `financials` row, `GET /s/SNTS/financials` must contain both
+   `References` and the raw URL.
+
+**Definition of Done — met**
+
+- `just test` → **467 tests green** (19 new): 8 for the cash-flow
+  ratios (P/FCF positive/negative, FCF yield sign, EV/EBITDA proxy
+  provenance, `has_any` on cash-flow-only rows, currency mismatch, no
+  market cap), 5 for extraction (populate fields, flip capex sign,
+  derive FCF, prefer reported over derived, leave nulls when absent),
+  3 for `get_financials_source_filings` (annual+interim ordering,
+  empty case, one row per period), 3 for `reset_missing_cashflow`
+  (unstamp Phase-7-missing rows, dry-run, skip interims). Ruff clean.
+- Migration is idempotent (`ALTER TABLE` runs once — SQLite migrations
+  are guarded by `_schema_migrations`).
+- README gains a "Try it (Phase 7 demo)" section with the recover +
+  re-extract loop.
+
+**Notes / follow-ups**
+
+- **EV/EBITDA is a proxy, not the textbook multiple.** We use market
+  cap for EV (missing net debt) and operating income for EBITDA
+  (missing D&A). Directionally informative for intra-BRVM comparison,
+  but not comparable to global screens. Fixing it needs a balance-
+  sheet debt line + a D&A extraction line — both a follow-on Haiku
+  pass on the same corpus.
+- **Backfill is manual.** `just fundamentals-recover-cashflow`
+  followed by `just fundamentals-extract` covers the ~200 filings in
+  one or two daily-cap windows. Not auto-wired into the scheduler
+  because it's a one-time migration event.
+- **Peers tab still shows the pre-Phase-7 columns.** `Peers` renders
+  P/E, ROE, and net margin — the cash-flow multiples aren't in that
+  compact five-column view. Adding P/FCF as a sixth column is a small
+  template + `services.company._annotate_with_ratios` change if a
+  reader asks for it.
+- **References list respects the current `financials.filing_id` link.**
+  If two filings for the same period were both extracted, only the
+  one whose extract landed last (i.e. the row currently in
+  `financials`) appears in References. That's the same "richer filing
+  wins" logic PR #13 codified — not a Phase 7 regression.
+- **Analyst notes don't yet see cash-flow numbers.** `gather_context`
+  pulls from `services.fundamentals.get_financials_series`, which
+  now includes the three new fields, so the next weekly Saturday
+  Sonnet pass will implicitly get them. No prompt change was needed
+  — the metrics dict is passed through wholesale.

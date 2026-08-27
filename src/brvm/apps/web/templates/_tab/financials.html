@@ -11,6 +11,9 @@
      ('total_equity',       'Total equity'),
      ('eps',                'EPS'),
      ('dividend_per_share', 'Dividend / share'),
+     ('cash_flow_ops',      'Cash flow from ops'),
+     ('capex',              'Capex'),
+     ('free_cash_flow',     'Free cash flow'),
    ] %}
 <div class="panel">
   <h2>Financials · {{ sec.ticker }}</h2>
@@ -125,6 +128,9 @@
         ('P/E',              'pe',                 'x'),
         ('P/B',              'pb',                 'x'),
         ('P/S',              'ps',                 'x'),
+        ('P/FCF',            'pfcf',               'x'),
+        ('FCF yield',        'fcf_yield',          'pct'),
+        ('EV/EBITDA*',       'ev_ebitda',          'x'),
         ('Dividend yield',   'dividend_yield',     'pct'),
         ('Payout ratio',     'payout_ratio',       'pct'),
         ('Earnings yield',   'earnings_yield',     'pct'),
@@ -176,6 +182,45 @@
                 {% endfor %}
               </tr>
             {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="dim" style="margin-top: 6px; font-size: 0.85em;">
+        * EV/EBITDA uses market cap as an EV proxy and operating income
+        (RBE) as an EBITDA proxy — we don't yet ingest net debt or D&A,
+        so the multiple is directionally informative but not comparable
+        to a full EV/EBITDA screen.
+      </div>
+    </div>
+  {% endif %}
+
+  {% if filing_refs %}
+    <div style="margin-top: 16px;">
+      <div class="dim" style="margin-bottom: 8px;">
+        References · filings used to populate the rows above · click to
+        open the source PDF
+      </div>
+      <table class="quotes">
+        <thead>
+          <tr>
+            <th>PERIOD</th>
+            <th>DOC TYPE</th>
+            <th>PUBLISHED</th>
+            <th>SOURCE</th>
+            <th>LINK</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in filing_refs %}
+            <tr>
+              <td>{{ f.period_kind }} {{ f.period_year }}</td>
+              <td>{{ f.doc_type }}</td>
+              <td>{{ f.published_date or '—' }}</td>
+              <td>{{ f.source }}</td>
+              <td>
+                <a href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">open</a>
+              </td>
+            </tr>
           {% endfor %}
         </tbody>
       </table>

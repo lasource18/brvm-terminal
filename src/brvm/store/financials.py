@@ -34,6 +34,9 @@ class FinancialsRow:
     total_equity: float | None = None
     eps: float | None = None
     dividend_per_share: float | None = None
+    cash_flow_ops: float | None = None
+    capex: float | None = None
+    free_cash_flow: float | None = None
 
 
 @dataclass(frozen=True)
@@ -94,8 +97,10 @@ def replace_period(
         INSERT INTO financials
             (ticker, period_year, period_kind, currency,
              revenue, operating_income, net_income, total_assets,
-             total_equity, eps, dividend_per_share, filing_id, extracted_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             total_equity, eps, dividend_per_share,
+             cash_flow_ops, capex, free_cash_flow,
+             filing_id, extracted_utc)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             financials.ticker,
@@ -109,6 +114,9 @@ def replace_period(
             financials.total_equity,
             financials.eps,
             financials.dividend_per_share,
+            financials.cash_flow_ops,
+            financials.capex,
+            financials.free_cash_flow,
             filing_id,
             now,
         ),
