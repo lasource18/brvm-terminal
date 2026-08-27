@@ -15,7 +15,7 @@ Covers:
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from brvm.config import reset_settings_cache
@@ -539,3 +539,215 @@ def test_generate_for_all_dry_run_reports_but_persists_nothing(monkeypatch, tmp_
     assert counts.dry_run_count == 3
     assert counts.generated == 0
     assert svc.latest_note("SNTS") is None
+
+
+# --- Phase 7b: price-stats enrichment (max drawdown + beta vs BRVMC) -----
+
+
+class TestMaxDrawdown:
+    """Pure helper — no DB / fixtures."""
+
+    def test_none_when_series_too_short(self):
+        from brvm.services.analyst_notes import _max_drawdown_pct
+        assert _max_drawdown_pct([]) is None
+        assert _max_drawdown_pct([100.0]) is None
+
+    def test_monotonic_series_is_zero(self):
+        from brvm.services.analyst_notes import _max_drawdown_pct
+        # Newest-first ascending (i.e. price only went up chronologically).
+        assert _max_drawdown_pct([120.0, 110.0, 100.0]) == 0.0
+
+    def test_measures_peak_to_trough(self):
+        # Chronological: 100 → 90 → 110 → 80. Peak 110, trough 80 →
+        # 27.27% drawdown. Series comes in newest-first.
+        from brvm.services.analyst_notes import _max_drawdown_pct
+        dd = _max_drawdown_pct([80.0, 110.0, 90.0, 100.0])
+        assert dd is not None
+        assert abs(dd - 27.2727272727) < 1e-6
+
+    def test_peak_only_ratchets_from_prior_prices(self):
+        # A single early spike should still register — the walk is
+        # chronological and the peak ratchet cannot look backwards.
+        from brvm.services.analyst_notes import _max_drawdown_pct
+        # Chronological: 100 → 200 → 150 → 180. Peak 200, trough 150 = 25%.
+        dd = _max_drawdown_pct([180.0, 150.0, 200.0, 100.0])
+        assert dd is not None
+        assert abs(dd - 25.0) < 1e-6
+
+
+class TestBetaVsMarket:
+    """Pure helper — feed it aligned bar lists directly."""
+
+    def _bars(self, closes: list[float], start_date: date):
+        # Newest-first bars: closes[0] is the latest session.
+        from brvm.models import DailyBar
+        n = len(closes)
+        return [
+            DailyBar(
+                ticker="X", session_date=start_date - timedelta(days=n - 1 - i),
+                close=closes[i], source="test",
+            )
+            for i in range(n)
+        ]
+
+    def test_none_when_market_missing(self):
+        from brvm.services.analyst_notes import _beta_vs_market
+        stock = self._bars([100.0, 99.0, 98.0], date(2026, 8, 27))
+        assert _beta_vs_market(stock, None) is None
+        assert _beta_vs_market(stock, []) is None
+
+    def test_none_when_fewer_than_20_aligned_returns(self):
+        from brvm.services.analyst_notes import _beta_vs_market
+        stock = self._bars([100 + i for i in range(15)], date(2026, 8, 27))
+        market = self._bars([50 + i for i in range(15)], date(2026, 8, 27))
+        # 15 bars → 14 returns → below the 20-return floor.
+        assert _beta_vs_market(stock, market) is None
+
+    def test_beta_equals_scaling_when_stock_is_scaled_market(self):
+        # Stock = 2x market (exact linear scaling) → beta = 2.
+        # 25 sessions gives 24 aligned returns, over the floor.
+        import math
+
+        from brvm.services.analyst_notes import _beta_vs_market
+        n = 25
+        # Build a market with non-flat returns so var(market) > 0.
+        # Use a simple random-ish sinusoid so the covariance is exact.
+        market_closes = [100 * (1 + 0.02 * math.sin(i / 3)) for i in range(n)]
+        stock_closes = [50 * m / 100 for m in market_closes]  # stock = 0.5 * market → beta = 1
+        # Reverse for newest-first shape.
+        market_closes = list(reversed(market_closes))
+        stock_closes = list(reversed(stock_closes))
+        market_bars = self._bars(market_closes, date(2026, 8, 27))
+        stock_bars = self._bars(stock_closes, date(2026, 8, 27))
+        beta = _beta_vs_market(stock_bars, market_bars)
+        assert beta is not None
+        # Perfect linear scaling → beta = 1 regardless of the multiplier
+        # (because log returns are scale-invariant).
+        assert abs(beta - 1.0) < 1e-9
+
+    def test_beta_positive_when_series_move_together(self):
+        # Different-magnitude but correlated series → positive beta.
+        import math
+
+        from brvm.services.analyst_notes import _beta_vs_market
+        n = 30
+        market_closes = list(reversed(
+            [100 * (1 + 0.01 * math.sin(i / 2)) for i in range(n)]
+        ))
+        # Stock moves in the same direction with 2x sensitivity:
+        # stock_ret = 2 * market_ret => stock_close = market_close ** 2 (scaled).
+        market_chrono = list(reversed(market_closes))
+        stock_chrono: list[float] = [1000.0]
+        for i in range(1, n):
+            m_ret = math.log(market_chrono[i] / market_chrono[i - 1])
+            stock_chrono.append(stock_chrono[i - 1] * math.exp(2 * m_ret))
+        stock_closes = list(reversed(stock_chrono))
+        beta = _beta_vs_market(
+            self._bars(stock_closes, date(2026, 8, 27)),
+            self._bars(market_closes, date(2026, 8, 27)),
+        )
+        assert beta is not None
+        assert abs(beta - 2.0) < 1e-6
+
+    def test_beta_alignment_ignores_market_only_sessions(self):
+        # Market has a session the stock doesn't — that day must be
+        # dropped from the alignment rather than mis-pairing consecutive
+        # stock closes with non-consecutive market closes.
+        import math
+
+        from brvm.models import DailyBar
+        from brvm.services.analyst_notes import _beta_vs_market
+        n = 30
+        market_chrono = [100 * (1 + 0.01 * math.sin(i / 2)) for i in range(n)]
+        stock_chrono = [c * 0.5 for c in market_chrono]
+
+        base = date(2026, 8, 27)
+        # Build bars newest-first with matching dates on both sides
+        # except for one extra market session on day base-100 (not in
+        # stock's window).
+        market_bars = [
+            DailyBar(ticker="BRVMC", session_date=base - timedelta(days=n - 1 - i),
+                     close=market_chrono[i], source="test")
+            for i in range(n)
+        ]
+        market_bars.append(DailyBar(ticker="BRVMC",
+                                    session_date=base - timedelta(days=200),
+                                    close=99.0, source="test"))
+        stock_bars = [
+            DailyBar(ticker="X", session_date=base - timedelta(days=n - 1 - i),
+                     close=stock_chrono[i], source="test")
+            for i in range(n)
+        ]
+        # Newest-first.
+        stock_bars = list(reversed(stock_bars))
+        market_bars = list(reversed(market_bars))
+        beta = _beta_vs_market(stock_bars, market_bars)
+        assert beta is not None
+        assert abs(beta - 1.0) < 1e-9
+
+
+class TestPriceStatsPayload:
+    def test_max_drawdown_populated_when_series_present(self):
+        from brvm.models import DailyBar
+        from brvm.services.analyst_notes import _price_stats
+        # Chronological: 100 → 200 → 150 (peak-to-trough = 25%).
+        bars = [
+            DailyBar(ticker="X", session_date=date(2026, 8, 27),
+                     close=150.0, source="test"),
+            DailyBar(ticker="X", session_date=date(2026, 8, 26),
+                     close=200.0, source="test"),
+            DailyBar(ticker="X", session_date=date(2026, 8, 25),
+                     close=100.0, source="test"),
+        ]
+        stats = _price_stats(bars)
+        assert stats is not None
+        assert stats["max_drawdown_pct"] == 25.0
+
+    def test_beta_populated_when_market_bars_supplied(self, monkeypatch, tmp_path):
+        # Round-trip through gather_context — verifies the wiring, not
+        # just the pure helpers.
+        db_path, svc = _setup(monkeypatch, tmp_path)
+        # Seed 30 aligned close pairs so beta clears the 20-return floor.
+        import math
+
+        from brvm.models import DailyBar
+        n = 30
+        base = date(2026, 8, 20)
+        market_chrono = [300 + 5 * math.sin(i / 2) for i in range(n)]
+        stock_chrono = [30000 + 500 * math.sin(i / 2) for i in range(n)]
+
+        from brvm.models import IndexLevel
+        with connect(db_path) as conn:
+            quotes_repo.upsert_daily_bars(conn, [
+                DailyBar(
+                    ticker="SNTS",
+                    session_date=base - timedelta(days=n - 1 - i),
+                    close=stock_chrono[i], source="test",
+                )
+                for i in range(n)
+            ])
+            # BRVMC lives in index_levels; history.get_history reads it
+            # from there when kind='index'.
+            quotes_repo.upsert_index_levels(conn, [
+                IndexLevel(
+                    ticker="BRVMC",
+                    session_date=base - timedelta(days=n - 1 - i),
+                    level=market_chrono[i],
+                    source="test",
+                )
+                for i in range(n)
+            ])
+        # history.get_history caches — reset so we pick up the fresh rows.
+        from brvm.services import history as history_mod
+        history_mod.clear_cache()
+        ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
+        assert ctx is not None
+        ps = ctx["price_stats"]
+        assert ps is not None
+        # The stock closes and market levels are both scaled sinusoids —
+        # `log(stock_i / stock_{i-1})` and `log(market_i / market_{i-1})`
+        # are highly correlated but not identical, so beta is well-defined
+        # and non-zero.
+        assert "beta_vs_market" in ps
+        assert ps["beta_vs_market"] > 0
+        assert "max_drawdown_pct" in ps
