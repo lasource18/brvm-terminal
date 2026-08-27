@@ -2001,3 +2001,88 @@ the charter (`CLAUDE.md`) is anti-hardcoding.
   "N/A" body). Textual's TabbedContent doesn't expose a clean
   hide-tab API mid-lifecycle, so keeping the tab visible everywhere
   was the shortest path to a stable tab bar across kinds.
+
+
+## Phase 8d — Richer `_price_stats` for analyst notes (done 2026-08-27)
+
+The 90-day price block Sonnet sees in `gather_context` now carries
+two more risk-shaped numbers alongside the existing return / vol
+summary: **max drawdown** (peak-to-trough decline over the window)
+and **beta vs BRVMC** (regression against the composite index over
+aligned sessions). Fourth item off the post-6c backlog.
+
+**Delivered**
+
+- **`_max_drawdown_pct(closes_newest_first)`** — pure helper that
+  walks the series chronologically (peak ratchet + running trough)
+  and returns the largest peak-to-trough decline as a positive
+  percent. A monotonically-rising series yields 0.0; <2 closes
+  returns None so the caller can suppress the field.
+- **`_log_returns(closes_newest_first)`** — factored out from the
+  existing vol computation and reused by the beta path.
+  `log(newer / older)` so a positive return means the price moved
+  up over the day.
+- **`_beta_vs_market(stock_bars, market_bars)`** — aligns by
+  `session_date` so a WAEMU public holiday on one side or a fresh
+  IPO whose window doesn't extend to BRVMC's earliest bar doesn't
+  stretch or mis-pair returns. Requires ≥20 aligned daily returns
+  before returning a value; smaller samples are noise and callers
+  prefer a missing field to a suspicious number.
+- **`_price_stats(bars, market_bars=None)`** now emits
+  `max_drawdown_pct` and (when `market_bars` is supplied)
+  `beta_vs_market` on the same payload it already carried.
+- **`gather_context`** fetches BRVMC's 90-day history from
+  `history.get_history("BRVMC")` alongside the ticker's own bars
+  and passes both into `_price_stats`. Cold BRVMC (fresh DB, no
+  index snapshot yet) simply suppresses the beta field — nothing
+  else in the payload depends on this fetch.
+- **Sonnet prompt nudge** — the `# Snapshot` section instruction
+  now names `price_stats.max_drawdown_pct` and
+  `price_stats.beta_vs_market` explicitly so the model surfaces the
+  more notable of the two when they're populated, and stays silent
+  when they aren't.
+
+**Three invariants the tests pin**
+
+1. **Chronological peak-to-trough beats naive high-minus-low.**
+   Series `[80, 110, 90, 100]` (newest-first) → chronological
+   `100→90→110→80` → 27.27% drawdown, not 20%. The peak-ratchet
+   walk cannot look backwards.
+2. **Perfect linear scaling → beta = 1** regardless of the price
+   multiplier. Log returns are scale-invariant, so a stock priced
+   at half the market's level but moving with identical percentage
+   returns lands at beta = 1.0 exactly.
+3. **A market-only session doesn't leak into the return pair.**
+   Adding a `session_date` on the market series that's not present
+   on the stock's must be dropped, not paired with the stock's
+   next-adjacent bar — otherwise a public-holiday one-sided gap
+   would introduce a spurious return in one series only.
+
+**Definition of Done — met**
+
+- `just test` → **553 tests green** (+11 new: 4 for
+  `_max_drawdown_pct` covering short-series None + monotonic-zero
+  + peak-to-trough + peak-only-ratchet, 5 for `_beta_vs_market`
+  covering None-cases + 20-return floor + exact linear scaling +
+  correlated-with-slope + alignment ignoring market-only sessions,
+  2 for the `_price_stats` payload wiring). Ruff clean.
+- Existing analyst-notes tests pass unchanged — the new fields
+  are additive on `price_stats`.
+
+**Notes / follow-ups**
+
+- **Beta anchor is BRVMC by default.** A ticker in a specific
+  sector index (BRVM-FIN, BRVM-SP) might be better anchored on its
+  sector index; extending `_beta_vs_market` to accept an override
+  is a small change if a reader asks for it.
+- **Drawdown is in-window only.** A bond-market crisis six months
+  ago won't show up in the 90-day drawdown; a wider window (180 or
+  365 sessions) needs the history fetcher to grow the lookback,
+  which is on the backlog anyway (Phase 8 followup for period
+  returns beyond 1Y).
+- **20-return floor is a magic number.** Chosen because it's the
+  smallest sample where a beta doesn't swing dramatically under
+  one outlier day; not tuned against the BRVM's typical
+  low-volatility regime. If the LLM flags the field as "flaky",
+  bumping to 30 is one line.
+

@@ -29,6 +29,7 @@ Design notes
 from __future__ import annotations
 
 import json
+import math
 import statistics
 import time
 from dataclasses import dataclass, field
@@ -204,9 +205,103 @@ def _ratios_lite(rv) -> dict[str, Any] | None:
     return payload
 
 
-def _price_stats(bars: list) -> dict[str, Any] | None:
+def _max_drawdown_pct(closes_newest_first: list[float]) -> float | None:
+    """Peak-to-trough decline magnitude over the window (positive %).
+
+    Walks chronologically so the "peak" ratchet only sees prior prices.
+    A monotonically-rising series returns 0.0; a series with insufficient
+    data returns None so the caller can suppress the field rather than
+    reporting a meaningless zero.
+    """
+    if len(closes_newest_first) < 2:
+        return None
+    peak = closes_newest_first[-1]  # earliest = walk start
+    worst = 0.0
+    for px in reversed(closes_newest_first):
+        if px > peak:
+            peak = px
+        if peak > 0:
+            dd = (peak - px) / peak
+            if dd > worst:
+                worst = dd
+    return worst * 100.0
+
+
+def _log_returns(closes_newest_first: list[float]) -> list[float]:
+    """Daily log returns from a newest-first close series. `log(newer /
+    older)` so a positive return means the price went up over the day."""
+    rets: list[float] = []
+    for i in range(len(closes_newest_first) - 1):
+        older = closes_newest_first[i + 1]
+        newer = closes_newest_first[i]
+        if older and newer:
+            rets.append(math.log(newer / older))
+    return rets
+
+
+def _beta_vs_market(
+    stock_bars: list,
+    market_bars: list | None,
+) -> float | None:
+    """Regression beta of the stock vs the market over aligned sessions.
+
+    Aligns by `session_date` so a public-holiday gap on one side (or a
+    fresh IPO whose window doesn't extend to the market's earliest bar)
+    doesn't stretch or mis-pair returns. Both series come in newest-
+    first from `history.get_history`; the same convention flows through
+    the log-return computation, so the sign of `beta` matches Bloomberg /
+    textbook: positive when the two move together.
+
+    Returns None when there aren't at least 20 aligned daily returns —
+    beta on a two-week sample is noise, and callers prefer a missing
+    field to a suspicious number.
+    """
+    if not market_bars or not stock_bars:
+        return None
+    market_by_date = {b.session_date: b.close for b in market_bars if b.close is not None}
+    if not market_by_date:
+        return None
+    aligned_stock: list[float] = []
+    aligned_market: list[float] = []
+    for b in stock_bars:
+        if b.close is None:
+            continue
+        m_close = market_by_date.get(b.session_date)
+        if m_close is None:
+            continue
+        aligned_stock.append(b.close)
+        aligned_market.append(m_close)
+
+    stock_rets = _log_returns(aligned_stock)
+    market_rets = _log_returns(aligned_market)
+    n = min(len(stock_rets), len(market_rets))
+    if n < 20:
+        return None
+    stock_rets = stock_rets[:n]
+    market_rets = market_rets[:n]
+
+    market_var = statistics.pvariance(market_rets)
+    if market_var <= 0:
+        return None
+    mean_s = statistics.fmean(stock_rets)
+    mean_m = statistics.fmean(market_rets)
+    cov = sum(
+        (s - mean_s) * (m - mean_m) for s, m in zip(stock_rets, market_rets, strict=True)
+    ) / n
+    return cov / market_var
+
+
+def _price_stats(
+    bars: list, market_bars: list | None = None
+) -> dict[str, Any] | None:
     """Compressed price action summary from up to 90 daily bars —
-    a full series would be wasted tokens for the model."""
+    a full series would be wasted tokens for the model.
+
+    `market_bars` (typically BRVMC's 90-day series) unlocks the
+    `beta_vs_market` field via `_beta_vs_market`. Missing / short
+    market series simply suppresses that field; the rest of the payload
+    is computed from the stock's own closes.
+    """
     if not bars:
         return None
     # `bars` from history.get_history is newest-first.
@@ -225,16 +320,17 @@ def _price_stats(bars: list) -> dict[str, Any] | None:
         "period_low": low,
         "period_change_pct": change_pct,
     }
+    max_dd = _max_drawdown_pct(closes)
+    if max_dd is not None:
+        payload["max_drawdown_pct"] = max_dd
     if len(closes) >= 5:
         # Simple realised vol proxy: stdev of daily log returns x sqrt(252).
-        import math
-        rets = [
-            math.log(closes[i] / closes[i + 1])
-            for i in range(len(closes) - 1)
-            if closes[i + 1]
-        ]
+        rets = _log_returns(closes)
         if len(rets) >= 2:
             payload["annualised_vol_pct"] = statistics.pstdev(rets) * math.sqrt(252) * 100
+    beta = _beta_vs_market(bars, market_bars)
+    if beta is not None:
+        payload["beta_vs_market"] = beta
     return payload
 
 
@@ -361,6 +457,11 @@ def gather_context(
     bars = history.get_history(ticker, sec_view.country)
     # Trim to ~90 sessions for the price-stats summary.
     trimmed = bars[:90] if bars else []
+    # BRVMC anchors `beta_vs_market`. A cold BRVMC series (fresh DB,
+    # no scheduled index snapshot yet) just suppresses the beta field —
+    # nothing else in the payload depends on this fetch.
+    market_bars = history.get_history("BRVMC")
+    market_trimmed = market_bars[:90] if market_bars else []
     ownership = fundamentals.get_ownership(ticker)
     segments = fundamentals.get_segments(ticker)
     peers = _peers_lite(ticker)
@@ -371,7 +472,7 @@ def gather_context(
         "week_start": week_start.isoformat(),
         "security": _security_meta(sec_view),
         "quote": _quote_lite(sec_view),
-        "price_stats": _price_stats(trimmed),
+        "price_stats": _price_stats(trimmed, market_trimmed),
         "financials": _financials_lite(fs),
         "interim": _interim_lite(interim),
         "ratios": _ratios_lite(latest_ratios),
@@ -462,7 +563,11 @@ Structure (in this order, using the exact markdown headings):
 
 # Snapshot
 2-3 sentences on the company and its recent trading action. Include \
-the sector, headline valuation multiple, and the 90-day return.
+the sector, headline valuation multiple, and the 90-day return. When \
+`price_stats.max_drawdown_pct` or `price_stats.beta_vs_market` are \
+populated, weave the more notable one into the description of the \
+trading action (e.g. a wide drawdown vs the BRVMC, a beta materially \
+above or below 1). Skip both if they're absent — never fabricate.
 
 # Recent developments
 Bullet list of the most material items from the news snapshot. Group \
