@@ -46,6 +46,24 @@ class TestBuildSchedule:
         )
         assert s is None
 
+    def test_returns_none_when_forward_window_is_empty(self):
+        """F-31: BIDC.O5 (maturity 2026) with a last-coupon anniversary
+        already stamped in 2026 has no coupons left to walk forward —
+        the schedule builder used to return an empty-but-truthy
+        `BondSchedule`, which took the "have schedule" template branch
+        and rendered a header-only table without the terminal principal
+        row. Returning None sends the tab to the "schedule unavailable"
+        branch instead."""
+        s = bonds_svc.build_schedule(
+            coupon_rate=6.10, maturity_year=2026,
+            last_coupon_date=date(2026, 3, 15),  # already past this year's coupon
+            issue_date=date(2016, 3, 15),
+            today=date(2026, 8, 27),
+        )
+        # Anchor + 1 year → 2027, which is past maturity year 2026;
+        # no rows produced, so the whole schedule bails.
+        assert s is None
+
     def test_prefers_last_coupon_over_issue_date(self):
         # Anchor should be last_coupon_date (2025-12-09), not the
         # issue-date anniversary (2023-02-15), because the exchange
@@ -202,6 +220,55 @@ class TestCurrentYield:
         assert bonds_svc.current_yield(6.20, None) is None
         assert bonds_svc.current_yield(6.20, 0.0) is None
 
+    def test_amortizing_bond_at_par_reads_coupon_rate(self):
+        """F-09 regression: the fixture row BIDC.O4 (6.10% 2017-2027) is
+        an amortizing bond quoted at its residual balance of 1 250 XOF
+        (12.5 % of the 10 000 XOF issuance nominal after seven years of
+        12.5 %/yr amortization). Threading the residual through as
+        `residual_nominal` makes current yield read 6.10 % — the coupon
+        rate — rather than the pre-fix 48.80 % that flagged a solvent
+        supranational as distressed."""
+        y = bonds_svc.current_yield(6.10, 1_250.0, residual_nominal=1_250.0)
+        assert y == 6.10
+
+    def test_default_nominal_is_backwards_compatible(self):
+        """Callers that don't pass `residual_nominal` still get the
+        DEFAULT_NOMINAL_XOF-based calculation — the old behaviour."""
+        y = bonds_svc.current_yield(6.10, 1_250.0)
+        # Same computation as before: 0.0610 * 10 000 / 1 250 * 100 ≈ 48.80.
+        assert y is not None and 48.7 < y < 48.9
+
+
+class TestDeriveResidualNominal:
+    def test_recovers_residual_from_last_coupon_amount(self):
+        """F-09: `last_coupon_amount = residual * coupon / 100`. Given the
+        exchange publishes both fields, we can invert it to recover the
+        residual outstanding face value for amortizing issues."""
+        snap = BondSnapshot(
+            ticker="BIDCO4",
+            session_date=TODAY,
+            last_coupon_amount=76.25,  # 6.10 % of 1 250 residual
+            source="brvm_org",
+        )
+        residual = bonds_svc.derive_residual_nominal(snap, 6.10)
+        assert residual is not None
+        assert abs(residual - 1_250.0) < 0.01
+
+    def test_returns_none_when_snapshot_or_coupon_missing(self):
+        assert bonds_svc.derive_residual_nominal(None, 6.10) is None
+        # No last_coupon_amount on the snapshot.
+        snap = BondSnapshot(
+            ticker="X", session_date=TODAY, source="brvm_org",
+        )
+        assert bonds_svc.derive_residual_nominal(snap, 6.10) is None
+        # A placeholder row with coupon_rate = 0 shouldn't divide-by-zero.
+        snap2 = BondSnapshot(
+            ticker="X", session_date=TODAY, last_coupon_amount=100.0,
+            source="brvm_org",
+        )
+        assert bonds_svc.derive_residual_nominal(snap2, 0) is None
+        assert bonds_svc.derive_residual_nominal(snap2, None) is None
+
 
 # --------- get_bond_view composition + related bonds ----------------------
 
@@ -321,6 +388,88 @@ class TestGetBondView:
         view = bonds_svc.get_bond_view("ECOC.O1", today=TODAY)
         assert view is not None
         assert view.issuer_equity_ticker == "ETIT"
+
+    def test_boa_bond_cross_links_to_bank_of_africa_equity(self, monkeypatch, tmp_path):
+        """F-32: brand token `BOA` on the bond side never appeared in
+        the equities' full names (`BANK OF AFRICA BENIN`, etc.), so a
+        naive `%BOA%` LIKE against `securities.name` returned zero
+        rows. The synonym expansion maps `BOA` → `BANK OF AFRICA` so
+        the sibling equity resolves."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        with connect(db_path) as conn:
+            sec_repo.upsert(conn, [
+                Security(
+                    ticker="BOAB.O1", name="BOA BENIN 6,50% 2024-2029",
+                    kind="bond", sector="Obligations privées", country="BJ",
+                    coupon_rate=6.50, maturity_year=2029,
+                    issue_date=date(2024, 6, 12),
+                    issuer_name="BOA BENIN",
+                ),
+                Security(
+                    ticker="BOAB", name="BANK OF AFRICA BENIN",
+                    kind="equity", country="BJ",
+                ),
+            ])
+            quotes_repo.upsert_daily_bars(conn, [
+                DailyBar(
+                    ticker="BOAB.O1", session_date=TODAY,
+                    close=10_000.0, source="brvm_org",
+                ),
+            ])
+        view = bonds_svc.get_bond_view("BOAB.O1", today=TODAY)
+        assert view is not None
+        assert view.issuer_equity_ticker == "BOAB"
+
+    def test_amortizing_bond_current_yield_uses_residual(
+        self, monkeypatch, tmp_path
+    ):
+        """F-09 end-to-end: a BIDC.O4-shape amortizing bond (6.10 %,
+        2017-2027, quoted 1 250 XOF) must not render 48.80 % current
+        yield. The last-coupon amount recovers the residual, which
+        threads into both the schedule and the current-yield formula."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        with connect(db_path) as conn:
+            sec_repo.upsert(conn, [
+                Security(
+                    ticker="BIDCO4",
+                    name="BIDC.O4 SUPRA 6.10% 2017-2027",
+                    kind="bond", country="CI", sector="Obligations supranationales",
+                    coupon_rate=6.10, maturity_year=2027,
+                    issue_date=date(2017, 3, 15),
+                    issuer_name="BIDC-EBID",
+                ),
+            ])
+            quotes_repo.upsert_daily_bars(conn, [
+                DailyBar(
+                    ticker="BIDCO4", session_date=TODAY,
+                    close=1_250.0, source="brvm_org",
+                ),
+            ])
+            bonds_repo.upsert_snapshots(conn, [
+                BondSnapshot(
+                    ticker="BIDCO4", session_date=TODAY,
+                    accrued_coupon=30.0,
+                    last_coupon_date=date(2026, 3, 15),
+                    last_coupon_amount=76.25,   # 6.10 % of 1 250 residual
+                    source="brvm_org",
+                ),
+            ])
+        view = bonds_svc.get_bond_view("BIDCO4", today=TODAY)
+        assert view is not None and view.yield_ is not None
+        # At par against the residual, current yield ≈ the coupon rate.
+        assert abs(view.yield_.current_yield_pct - 6.10) < 0.05
+        # Schedule also picked up the residual as its nominal — the
+        # terminal principal row now reflects the balance actually due.
+        assert view.schedule is not None
+        assert abs(view.schedule.nominal - 1_250.0) < 0.01
 
     def test_state_bond_has_no_equity_cross_link(self, monkeypatch, tmp_path):
         db_path = tmp_path / "brvm.sqlite"
