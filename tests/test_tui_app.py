@@ -386,6 +386,126 @@ async def test_watchlist_remove_uses_x_not_r(tui_db):
         assert wl_svc.get_with_quotes("core").items == []
 
 
+async def test_escape_blurs_watchlist_input(tui_db):
+    """Typing in the watchlist name/ticker inputs used to trap focus —
+    the user had to click somewhere else to escape and use `h`/`d`/`w`
+    again. Escape now blurs back to the watchlist list."""
+    from textual.widgets import Input
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        wv = app.query_one(WatchlistsView)
+        name_input = wv.query_one("#wl-new-name", Input)
+        name_input.focus()
+        await pilot.pause()
+        assert app.focused is name_input
+
+        await pilot.press("escape")
+        await pilot.pause()
+        # Focus is off the input — the app-level shortcuts fire again.
+        assert app.focused is not name_input
+
+
+async def test_escape_blurs_alerts_input(tui_db):
+    """Same escape-to-blur affordance in the Alerts view — a focused
+    new-rule input used to swallow every app shortcut until the user
+    clicked elsewhere."""
+    from textual.widgets import Input
+
+    from brvm.apps.tui.views.alerts import AlertsView as _AV
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(_AV)
+        ticker_input = av.query_one("#new-ticker", Input)
+        ticker_input.focus()
+        await pilot.pause()
+        assert app.focused is ticker_input
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.focused is not ticker_input
+
+
+async def test_pressing_t_with_no_ticker_opens_the_palette(tui_db):
+    """Pressing `t` on a fresh session used to switch to the Ticker
+    view and strand the user on a "Select a ticker…" placeholder. It
+    now opens the search palette on top so the user picks one instead
+    of having to remember ctrl+k."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # No ticker loaded yet.
+        tv = app.query_one(TickerView)
+        assert tv.has_ticker is False
+
+        await pilot.press("t")
+        await pilot.pause()
+        # The Ticker view is switched in AND the palette is on top.
+        cs = app.query_one("#right-pane", ContentSwitcher)
+        assert cs.current == "ticker"
+        assert isinstance(app.screen, SearchPalette)
+
+
+async def test_pressing_t_with_loaded_ticker_skips_the_palette(tui_db):
+    """If a ticker is already loaded, `t` should just re-show the view
+    without pushing the palette — otherwise a habitual "back to my
+    ticker" press becomes a modal interruption."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        # Switch to a different view first, so `t` has something to do.
+        await pilot.press("d")
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        cs = app.query_one("#right-pane", ContentSwitcher)
+        assert cs.current == "ticker"
+        assert not isinstance(app.screen, SearchPalette)
+
+
+async def test_clicking_empty_ticker_header_opens_palette(tui_db):
+    """A pointer-only user landing on the empty Ticker view can click
+    the "Select a ticker…" prompt to open the picker — no need to
+    remember ctrl+k."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Show the Ticker view (empty).
+        await pilot.press("t")
+        await pilot.pause()
+        # The `t` binding already pushes the palette; dismiss it first
+        # so we're testing the click path in isolation.
+        if isinstance(app.screen, SearchPalette):
+            await pilot.press("escape")
+            await pilot.pause()
+
+        tv = app.query_one(TickerView)
+        assert tv.has_ticker is False
+        # A click anywhere on the empty view (the placeholder header
+        # dominates the screen) posts HeaderClicked; the app pushes
+        # the palette in response.
+        await pilot.click(TickerView)
+        await pilot.pause()
+        assert isinstance(app.screen, SearchPalette)
+
+
 async def test_sidebar_capital_w_cycles_watchlists(tui_db):
     """F-06: the sidebar's `shift+w` binding never fired from a real
     terminal (terminals send the character `"W"`; Textual doesn't map

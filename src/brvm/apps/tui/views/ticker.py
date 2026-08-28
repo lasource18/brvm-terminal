@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from textual import events as textual_events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
+from textual.message import Message
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
 from textual.worker import Worker  # noqa: F401 — re-export type for future callers
 from textual_plotext import PlotextPlot
@@ -46,6 +48,11 @@ class TickerView(Vertical):
         Binding("o", "open_news_url", "open story", show=True),
     ]
 
+    class HeaderClicked(Message):
+        """Fired when the quote-header is clicked. The app handles this
+        by pushing the search palette so a click on 'Select a ticker…'
+        opens the picker without the user having to remember ctrl+k."""
+
     def __init__(self) -> None:
         super().__init__()
         self._ticker: str | None = None
@@ -65,8 +72,21 @@ class TickerView(Vertical):
         # re-fetching when nothing has changed underneath.
         self._chart_last_ticker: str | None = None
 
+    @property
+    def has_ticker(self) -> bool:
+        """`True` once a ticker has been loaded. Callers (the app-level
+        `t` binding) use this to decide whether pressing the shortcut
+        should open the search palette or just re-show the last view."""
+        return self._ticker is not None
+
     def compose(self) -> ComposeResult:
-        yield Static("Select a ticker…", id="quote-header")
+        # Header is a clickable prompt when empty — the app listens to
+        # HeaderClicked to push the SearchPalette without needing the
+        # user to guess `ctrl+k`.
+        yield Static(
+            "[dim]Select a ticker…  (click here or press ctrl+k to search)[/]",
+            id="quote-header",
+        )
         with TabbedContent(id="ticker-tabs"):
             # VerticalScroll gives mouse-wheel + PgUp/PgDn scrolling for
             # tab bodies that grow past the tab area's height. DataTable
@@ -102,6 +122,19 @@ class TickerView(Vertical):
             # so the tab bar stays stable across kinds.
             with TabPane("Bond details", id="tab-bond"), VerticalScroll():
                 yield Static(id="bond-body")
+
+    def on_click(self, event: textual_events.Click) -> None:
+        """Open the search palette when the user clicks the empty view.
+
+        Once a ticker is loaded the view is full of interactive widgets
+        (tabs, DataTables) and clicks should fall through to them, so
+        we only intercept when the view is still on the "Select a
+        ticker…" placeholder. This is what pointer-only users reach for
+        when they land here without knowing ctrl+k.
+        """
+        del event  # unused; presence of any click is enough
+        if not self.has_ticker:
+            self.post_message(self.HeaderClicked())
 
     def set_ticker(self, ticker: str) -> None:
         self._ticker = ticker.upper()

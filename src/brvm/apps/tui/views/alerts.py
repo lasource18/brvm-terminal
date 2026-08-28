@@ -39,6 +39,10 @@ class AlertsView(Vertical):
         Binding("t", "toggle_rule", "toggle rule", show=True),
         Binding("delete", "delete_rule", "delete rule", show=True),
         Binding("n", "focus_new", "new rule", show=True),
+        # Same escape-to-blur affordance as the Watchlists view — Input
+        # consumes most keys, so a `priority=True` binding is needed for
+        # the escape to fire while a child input has focus.
+        Binding("escape", "blur_input", "unfocus", show=False, priority=True),
     ]
 
     def __init__(self) -> None:
@@ -133,6 +137,14 @@ class AlertsView(Vertical):
 
     def action_focus_new(self) -> None:
         self.query_one("#new-ticker", Input).focus()
+
+    def action_blur_input(self) -> None:
+        """Escape → focus the events table so the app's shortcuts (h,
+        d, w, t, r, …) fire again."""
+        try:
+            self.query_one("#alerts-events", DataTable).focus()
+        except Exception:  # pragma: no cover - defensive
+            self.focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         # Only the "new rule" row triggers rule creation; any submit in it
