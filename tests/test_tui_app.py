@@ -478,6 +478,137 @@ async def test_pressing_t_with_loaded_ticker_skips_the_palette(tui_db):
         assert not isinstance(app.screen, SearchPalette)
 
 
+async def test_ticker_tabs_hide_equity_concerns_for_bonds(tui_db):
+    """A bond ticker must not advertise Peers / Financials / Corp actions
+    / Analyst — they are all N/A. Bond details (the DES + CSHF + YAS +
+    REL composite) is where a bond user actually lands."""
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("BIDCO4")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        # Equity-only tabs are hidden from the strip for bonds. Query
+        # the Tab widget (the button in the strip) — TabPane.display is
+        # driven by TabbedContent's inner ContentSwitcher and only
+        # reflects which pane is currently active, not tab visibility.
+        for hidden in ("tab-financials", "tab-peers", "tab-actions", "tab-analyst"):
+            assert tabs.get_tab(hidden).display is False, (
+                f"expected {hidden} to be hidden for kind='bond'"
+            )
+        # The bond-only Bond details tab and cross-kind tabs are visible.
+        for shown in ("tab-bond", "tab-chart", "tab-news"):
+            assert tabs.get_tab(shown).display is True, (
+                f"expected {shown} to be visible for kind='bond'"
+            )
+
+
+async def test_ticker_tabs_hide_bond_details_for_equities(tui_db):
+    """The Bond details tab is a bond-only composite; it must not
+    dangle on equity pages advertising 'This tab is only meaningful
+    for bonds.'"""
+    from textual.widgets import TabbedContent
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        assert tabs.get_tab("tab-bond").display is False
+        # The equity-standard tabs stay in the strip.
+        for shown in (
+            "tab-overview", "tab-chart", "tab-news",
+            "tab-financials", "tab-peers", "tab-actions", "tab-analyst",
+        ):
+            assert tabs.get_tab(shown).display is True, (
+                f"expected {shown} to be visible for kind='equity'"
+            )
+
+
+async def test_ticker_tabs_index_shows_only_chart_and_news(tui_db):
+    """Indexes have no fundamentals, no peers, no dividends — the only
+    tabs with real data are Chart and News. Everything else was
+    rendering N/A copy that just added noise to the tab strip."""
+    from textual.widgets import TabbedContent
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("BRVMC")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        for hidden in (
+            "tab-overview", "tab-financials", "tab-peers",
+            "tab-actions", "tab-analyst", "tab-bond",
+        ):
+            assert tabs.get_tab(hidden).display is False, (
+                f"expected {hidden} to be hidden for kind='index'"
+            )
+        assert tabs.get_tab("tab-chart").display is True
+        assert tabs.get_tab("tab-news").display is True
+
+
+async def test_ticker_tabs_switch_kind_reflows_visibility(tui_db):
+    """Opening a bond after an equity must retire the equity-only tabs
+    (Peers/Financials/…) and light up Bond details. If the currently-
+    active tab is invalidated by the kind change it jumps to the new
+    kind's default (bonds land on Bond details)."""
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # First open an equity + park on the Peers tab.
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        tabs = tv.query_one(TabbedContent)
+        tabs.active = "tab-peers"
+        await pilot.pause()
+
+        # Now open a bond — Peers must disappear, and the active tab
+        # can't stay on the now-hidden pane.
+        tv.set_ticker("BIDCO4")
+        await pilot.pause()
+        assert tabs.get_tab("tab-peers").display is False
+        assert tabs.active == "tab-bond"
+
+
 async def test_clicking_empty_ticker_header_opens_palette(tui_db):
     """A pointer-only user landing on the empty Ticker view can click
     the "Select a ticker…" prompt to open the picker — no need to

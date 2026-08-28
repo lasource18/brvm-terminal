@@ -1,10 +1,17 @@
 """Per-ticker view: quote header + tabbed content.
 
-Tabs mirror the web `/s/{ticker}` page: Overview, Chart, News,
-Financials, Peers, Corporate actions, Analyst view. Index-kind
-tickers hide the equity-only tabs (Financials, Peers, Analyst view).
-The Daily brief lives on Home now — it's a global summary, not a
-per-ticker artefact — so no Brief tab here.
+Tabs mirror the web `/s/{ticker}` page. Per-kind visibility follows
+`apps/web/tabs.py`:
+
+* **equity**: Overview, Chart, News, Financials, Peers, Corp actions,
+  Analyst view
+* **index**: Chart, News (indexes have no fundamentals, no peers, no
+  dividends — every other tab used to render zero-signal N/A copy)
+* **bond**: Overview (DES reference), Chart, News, Bond details
+  (CSHF + YAS + REL composite)
+
+The Daily brief lives on Home — it's a global summary, not a per-
+ticker artefact — so no Brief tab here.
 
 Every non-table tab wraps its body in `VerticalScroll` so long content
 (long descriptions, wide financials tables, multi-paragraph markdown
@@ -39,6 +46,30 @@ from brvm.services import (
 from brvm.services import (
     news as news_svc,
 )
+
+# Per-kind visible tab set. Bonds don't get equity concerns (Peers,
+# Financials, Corp actions, Analyst); equities don't get the Bond details
+# composite; indexes drop everything but Chart and News (the rest either
+# render "not applicable" or expose zero-signal DB rows). Mirrors the web
+# tab registry in `apps/web/tabs.py` — see the `hidden_for_kinds` field
+# there. Any tab id added to compose() must also appear here.
+_ALL_TAB_IDS: frozenset[str] = frozenset({
+    "tab-overview", "tab-chart", "tab-news", "tab-financials",
+    "tab-peers", "tab-actions", "tab-analyst", "tab-bond",
+})
+_VISIBLE_TABS_BY_KIND: dict[str, frozenset[str]] = {
+    "equity": frozenset({
+        "tab-overview", "tab-chart", "tab-news", "tab-financials",
+        "tab-peers", "tab-actions", "tab-analyst",
+    }),
+    "index": frozenset({"tab-chart", "tab-news"}),
+    "bond": frozenset({"tab-overview", "tab-chart", "tab-news", "tab-bond"}),
+}
+_DEFAULT_TAB_BY_KIND: dict[str, str] = {
+    "bond": "tab-bond",
+    "index": "tab-chart",
+    "equity": "tab-overview",
+}
 
 
 class TickerView(Vertical):
@@ -141,7 +172,43 @@ class TickerView(Vertical):
         self._sec = market.get_security(self._ticker)
         # Fresh ticker → the lazy Chart cache is stale.
         self._chart_last_ticker = None
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        self._apply_tab_visibility(kind)
         self.refresh_data()
+
+    def _apply_tab_visibility(self, kind: str) -> None:
+        """Show/hide tabs so a bond page doesn't advertise Peers /
+        Financials / Analyst (all N/A), an equity page doesn't dangle a
+        Bond details tab, and an index page only exposes the two tabs
+        (Chart + News) that carry index-shaped data. Mirrors the web
+        tabs.py registry.
+        """
+        visible = _VISIBLE_TABS_BY_KIND.get(kind, _ALL_TAB_IDS)
+        try:
+            tabs = self.query_one(TabbedContent)
+        except Exception:  # pragma: no cover - defensive during compose
+            return
+        for tab_id in _ALL_TAB_IDS:
+            try:
+                if tab_id in visible:
+                    tabs.show_tab(tab_id)
+                else:
+                    tabs.hide_tab(tab_id)
+            except Exception:  # pragma: no cover - Textual may raise on unmounted
+                continue
+        # If the currently-active tab was just hidden, jump to the kind's
+        # default (bonds land on Bond details, indexes on Chart, equities
+        # on Overview). Otherwise leave the selection alone so a user
+        # opening a same-kind ticker stays on the tab they had.
+        if self._active_tab not in visible:
+            default = _DEFAULT_TAB_BY_KIND.get(
+                kind, next(iter(visible), "tab-overview")
+            )
+            try:
+                tabs.active = default
+                self._active_tab = default
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -536,9 +603,14 @@ class TickerView(Vertical):
         md.update(note.markdown or "")
 
     def _render_bond(self) -> None:
-        """Populate the Bond details tab. Renders "N/A" for non-bonds so
-        the tab bar stays stable across kinds — Textual TabbedContent
-        doesn't expose a clean hide-tab API mid-lifecycle."""
+        """Populate the Bond details tab.
+
+        The tab is now hidden entirely from equity / index tab strips
+        via `_apply_tab_visibility`, so a defensive "not applicable"
+        branch is no longer needed — but the kind guard stays as a
+        cheap belt-and-braces in case a caller invokes this render
+        directly (e.g. after a security's kind flipped mid-session).
+        """
         body = self.query_one("#bond-body", Static)
         assert self._ticker
         kind = getattr(self._sec, "kind", "") if self._sec else ""
