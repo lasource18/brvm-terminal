@@ -51,7 +51,7 @@ class BRVMTerminalApp(App):
         Binding("f5", "show('news')", "news"),
         Binding("w", "show('watchlists')", "watchlists"),
         Binding("a", "show('alerts')", "alerts"),
-        Binding("t", "show('ticker')", "ticker"),
+        Binding("t", "open_ticker_view", "ticker"),
         Binding("ctrl+k", "search", "search"),
         Binding("r", "refresh_now", "refresh"),
         Binding("q", "quit", "quit"),
@@ -173,6 +173,19 @@ class BRVMTerminalApp(App):
     def action_search(self) -> None:
         self.push_screen(SearchPalette())
 
+    def action_open_ticker_view(self) -> None:
+        """`t` from anywhere. If a ticker was previously loaded the view
+        already has content — just switch back to it. Otherwise open the
+        search palette so the user picks one instead of landing on an
+        empty screen."""
+        self.action_show("ticker")
+        try:
+            tv = self.query_one(TickerView)
+        except Exception:
+            return
+        if not tv.has_ticker:
+            self.push_screen(SearchPalette())
+
     def action_refresh_now(self) -> None:
         self._do_refresh()
         self._paint_chrome()
@@ -190,6 +203,12 @@ class BRVMTerminalApp(App):
 
     def on_search_palette_picked_ticker(self, event: SearchPalette.PickedTicker) -> None:
         self._open_ticker(event.ticker)
+
+    def on_ticker_view_header_clicked(self, event: TickerView.HeaderClicked) -> None:
+        """Clicking the quote header opens the search palette so a
+        pointer-only user can pick a ticker without knowing ctrl+k."""
+        del event
+        self.push_screen(SearchPalette())
 
     def on_watchlists_view_watchlist_changed(
         self, event: WatchlistsView.WatchlistChanged

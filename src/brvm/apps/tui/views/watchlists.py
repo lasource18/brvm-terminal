@@ -27,6 +27,11 @@ class WatchlistsView(Vertical):
         # global `r` = refresh binding, so a habitual refresh press
         # silently deleted rows. Rebound to `x` to leave `r` alone.
         Binding("x", "remove_ticker", "remove ticker", show=True),
+        # Escape blurs a focused input so the app-level shortcuts (h, d,
+        # w, a, t, r, …) work again without needing to click somewhere
+        # else. `priority=True` runs the binding even when a child Input
+        # has focus (Input consumes most keys otherwise).
+        Binding("escape", "blur_input", "unfocus", show=False, priority=True),
     ]
 
     class WatchlistChanged(Message):
@@ -107,6 +112,16 @@ class WatchlistsView(Vertical):
 
     def action_focus_add(self) -> None:
         self.query_one("#wl-add-ticker", Input).focus()
+
+    def action_blur_input(self) -> None:
+        """Escape hatch out of a focused Input. Puts focus on the
+        watchlist list so the app-level bindings resume."""
+        # `wl-list` is always present in this view; falling back to
+        # focusing the view itself is fine if the query somehow misses.
+        try:
+            self.query_one("#wl-list", DataTable).focus()
+        except Exception:  # pragma: no cover - defensive
+            self.focus()
 
     def action_delete_selected(self) -> None:
         slug = self._selected_slug

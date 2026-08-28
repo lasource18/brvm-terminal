@@ -386,6 +386,257 @@ async def test_watchlist_remove_uses_x_not_r(tui_db):
         assert wl_svc.get_with_quotes("core").items == []
 
 
+async def test_escape_blurs_watchlist_input(tui_db):
+    """Typing in the watchlist name/ticker inputs used to trap focus —
+    the user had to click somewhere else to escape and use `h`/`d`/`w`
+    again. Escape now blurs back to the watchlist list."""
+    from textual.widgets import Input
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        wv = app.query_one(WatchlistsView)
+        name_input = wv.query_one("#wl-new-name", Input)
+        name_input.focus()
+        await pilot.pause()
+        assert app.focused is name_input
+
+        await pilot.press("escape")
+        await pilot.pause()
+        # Focus is off the input — the app-level shortcuts fire again.
+        assert app.focused is not name_input
+
+
+async def test_escape_blurs_alerts_input(tui_db):
+    """Same escape-to-blur affordance in the Alerts view — a focused
+    new-rule input used to swallow every app shortcut until the user
+    clicked elsewhere."""
+    from textual.widgets import Input
+
+    from brvm.apps.tui.views.alerts import AlertsView as _AV
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(_AV)
+        ticker_input = av.query_one("#new-ticker", Input)
+        ticker_input.focus()
+        await pilot.pause()
+        assert app.focused is ticker_input
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.focused is not ticker_input
+
+
+async def test_pressing_t_with_no_ticker_opens_the_palette(tui_db):
+    """Pressing `t` on a fresh session used to switch to the Ticker
+    view and strand the user on a "Select a ticker…" placeholder. It
+    now opens the search palette on top so the user picks one instead
+    of having to remember ctrl+k."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # No ticker loaded yet.
+        tv = app.query_one(TickerView)
+        assert tv.has_ticker is False
+
+        await pilot.press("t")
+        await pilot.pause()
+        # The Ticker view is switched in AND the palette is on top.
+        cs = app.query_one("#right-pane", ContentSwitcher)
+        assert cs.current == "ticker"
+        assert isinstance(app.screen, SearchPalette)
+
+
+async def test_pressing_t_with_loaded_ticker_skips_the_palette(tui_db):
+    """If a ticker is already loaded, `t` should just re-show the view
+    without pushing the palette — otherwise a habitual "back to my
+    ticker" press becomes a modal interruption."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        # Switch to a different view first, so `t` has something to do.
+        await pilot.press("d")
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        cs = app.query_one("#right-pane", ContentSwitcher)
+        assert cs.current == "ticker"
+        assert not isinstance(app.screen, SearchPalette)
+
+
+async def test_ticker_tabs_hide_equity_concerns_for_bonds(tui_db):
+    """A bond ticker must not advertise Peers / Financials / Corp actions
+    / Analyst — they are all N/A. Bond details (the DES + CSHF + YAS +
+    REL composite) is where a bond user actually lands."""
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("BIDCO4")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        # Equity-only tabs are hidden from the strip for bonds. Query
+        # the Tab widget (the button in the strip) — TabPane.display is
+        # driven by TabbedContent's inner ContentSwitcher and only
+        # reflects which pane is currently active, not tab visibility.
+        for hidden in ("tab-financials", "tab-peers", "tab-actions", "tab-analyst"):
+            assert tabs.get_tab(hidden).display is False, (
+                f"expected {hidden} to be hidden for kind='bond'"
+            )
+        # The bond-only Bond details tab and cross-kind tabs are visible.
+        for shown in ("tab-bond", "tab-chart", "tab-news"):
+            assert tabs.get_tab(shown).display is True, (
+                f"expected {shown} to be visible for kind='bond'"
+            )
+
+
+async def test_ticker_tabs_hide_bond_details_for_equities(tui_db):
+    """The Bond details tab is a bond-only composite; it must not
+    dangle on equity pages advertising 'This tab is only meaningful
+    for bonds.'"""
+    from textual.widgets import TabbedContent
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        assert tabs.get_tab("tab-bond").display is False
+        # The equity-standard tabs stay in the strip.
+        for shown in (
+            "tab-overview", "tab-chart", "tab-news",
+            "tab-financials", "tab-peers", "tab-actions", "tab-analyst",
+        ):
+            assert tabs.get_tab(shown).display is True, (
+                f"expected {shown} to be visible for kind='equity'"
+            )
+
+
+async def test_ticker_tabs_index_shows_only_chart_and_news(tui_db):
+    """Indexes have no fundamentals, no peers, no dividends — the only
+    tabs with real data are Chart and News. Everything else was
+    rendering N/A copy that just added noise to the tab strip."""
+    from textual.widgets import TabbedContent
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("BRVMC")
+        await pilot.pause()
+
+        tabs = tv.query_one(TabbedContent)
+        for hidden in (
+            "tab-overview", "tab-financials", "tab-peers",
+            "tab-actions", "tab-analyst", "tab-bond",
+        ):
+            assert tabs.get_tab(hidden).display is False, (
+                f"expected {hidden} to be hidden for kind='index'"
+            )
+        assert tabs.get_tab("tab-chart").display is True
+        assert tabs.get_tab("tab-news").display is True
+
+
+async def test_ticker_tabs_switch_kind_reflows_visibility(tui_db):
+    """Opening a bond after an equity must retire the equity-only tabs
+    (Peers/Financials/…) and light up Bond details. If the currently-
+    active tab is invalidated by the kind change it jumps to the new
+    kind's default (bonds land on Bond details)."""
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # First open an equity + park on the Peers tab.
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        tabs = tv.query_one(TabbedContent)
+        tabs.active = "tab-peers"
+        await pilot.pause()
+
+        # Now open a bond — Peers must disappear, and the active tab
+        # can't stay on the now-hidden pane.
+        tv.set_ticker("BIDCO4")
+        await pilot.pause()
+        assert tabs.get_tab("tab-peers").display is False
+        assert tabs.active == "tab-bond"
+
+
+async def test_clicking_empty_ticker_header_opens_palette(tui_db):
+    """A pointer-only user landing on the empty Ticker view can click
+    the "Select a ticker…" prompt to open the picker — no need to
+    remember ctrl+k."""
+    from brvm.apps.tui.palette import SearchPalette
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Show the Ticker view (empty).
+        await pilot.press("t")
+        await pilot.pause()
+        # The `t` binding already pushes the palette; dismiss it first
+        # so we're testing the click path in isolation.
+        if isinstance(app.screen, SearchPalette):
+            await pilot.press("escape")
+            await pilot.pause()
+
+        tv = app.query_one(TickerView)
+        assert tv.has_ticker is False
+        # A click anywhere on the empty view (the placeholder header
+        # dominates the screen) posts HeaderClicked; the app pushes
+        # the palette in response.
+        await pilot.click(TickerView)
+        await pilot.pause()
+        assert isinstance(app.screen, SearchPalette)
+
+
 async def test_sidebar_capital_w_cycles_watchlists(tui_db):
     """F-06: the sidebar's `shift+w` binding never fired from a real
     terminal (terminals send the character `"W"`; Textual doesn't map
