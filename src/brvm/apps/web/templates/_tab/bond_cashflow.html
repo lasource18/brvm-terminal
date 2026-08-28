@@ -1,4 +1,9 @@
-{% if bond and bond.schedule %}
+{# F-31: guard on schedule.rows so an empty-but-truthy `BondSchedule`
+   doesn't render a header-only table without the terminal principal
+   row. `build_schedule` now returns None in that case, but keeping the
+   template belt-and-braces stays honest if a caller ever assembles a
+   BondSchedule by hand (tests, admin scripts). #}
+{% if bond and bond.schedule and bond.schedule.rows %}
   <table class="quotes">
     <thead>
       <tr>

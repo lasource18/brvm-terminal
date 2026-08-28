@@ -152,11 +152,18 @@ def build_schedule(
             break
         dt = _add_years(dt, 1)
 
+    # F-31: a bond whose last coupon anniversary is now past the maturity
+    # year produces an empty forward schedule. Return None so the tab
+    # renders "schedule unavailable" instead of a header-only cash-flow
+    # table that silently drops the terminal principal row.
+    if not rows:
+        return None
+
     return BondSchedule(
         rows=rows,
         nominal=nominal,
         annual_coupon=annual_coupon,
-        next_coupon_date=next_dt if rows else None,
+        next_coupon_date=next_dt,
         coupons_remaining=len(rows),
     )
 
@@ -220,10 +227,48 @@ def convexity(rows: list[CashFlowRow], y: float, dirty_price: float) -> float | 
     ) / dirty_price
 
 
-def current_yield(coupon_rate: float | None, price: float | None) -> float | None:
+def current_yield(
+    coupon_rate: float | None,
+    price: float | None,
+    residual_nominal: float | None = None,
+) -> float | None:
+    """Annual coupon in XOF divided by market price, in percent.
+
+    `residual_nominal` (F-09) is what the coupon actually accrues on
+    today. BRVM issues are frequently amortizing and quoted at the
+    residual balance (BIDC.O4: 6.10%, 2017-2027, quoted 1 250 XOF
+    against a 1 250 residual after seven years of 12.5%/yr amortization).
+    Passing the residual gives `coupon / price` at par ≈ the coupon
+    rate — the correct current yield. Without it we default to the
+    10 000 XOF issuance nominal and the same fixture row renders
+    "48.80% current yield" alongside a "—" YTM, which flags a solvent
+    supranational as distressed.
+    """
     if coupon_rate is None or price is None or price <= 0:
         return None
-    return (coupon_rate / 100.0) * DEFAULT_NOMINAL_XOF / price * 100.0
+    nominal = residual_nominal if residual_nominal else DEFAULT_NOMINAL_XOF
+    return (coupon_rate / 100.0) * nominal / price * 100.0
+
+
+def derive_residual_nominal(
+    snap: BondSnapshot | None, coupon_rate: float | None
+) -> float | None:
+    """Recover a bond's residual face value from the exchange-published
+    last-coupon amount: `residual = last_coupon_amount / (coupon_rate / 100)`.
+
+    Returns None when either input is missing or the coupon rate is 0
+    (avoids a divide-by-zero on a placeholder row). The exchange doesn't
+    publish the residual directly per session, but it does publish the
+    last coupon amount alongside the price, and coupons on amortizing
+    issues track the current outstanding face, so the ratio holds. Falls
+    back to None (caller uses DEFAULT_NOMINAL_XOF) when we can't tell.
+    """
+    if snap is None or coupon_rate is None or coupon_rate == 0:
+        return None
+    amount = getattr(snap, "last_coupon_amount", None)
+    if amount is None:
+        return None
+    return amount * 100.0 / coupon_rate
 
 
 # ---------- read-side view models ------------------------------------------
@@ -297,6 +342,18 @@ _ISSUER_STOPWORDS: frozenset[str] = frozenset({
     "ETAT", "TRESOR", "PUBLIC", "REPUBLIQUE", "DU", "DE", "DES", "LA", "LE",
 })
 
+# F-32: brand-to-equity-name expansions for cases where the bond's
+# issuer_name uses a short abbreviation that never appears verbatim in
+# the equity's `name`. The equity side has `BANK OF AFRICA BENIN` /
+# `BANK OF AFRICA BURKINA FASO` etc.; the bond side has `BOA BENIN`.
+# Both point at the same company but a `%BOA%` substring match on the
+# equity's name returns zero rows. Each brand maps to the ordered list
+# of substrings we should probe against `equities.name` before falling
+# back to the raw brand itself.
+_BRAND_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "BOA": ("BANK OF AFRICA",),
+}
+
 
 def _issuer_brand_token(issuer_name: str) -> str | None:
     """Return the first non-stopword token of the issuer name — the
@@ -314,11 +371,26 @@ def _issuer_brand_token(issuer_name: str) -> str | None:
     return None
 
 
+def _brand_search_patterns(brand: str) -> tuple[str, ...]:
+    """Expand a brand token into the ordered LIKE substrings to try
+    against `equities.name`. F-32: for brands with a known equity-side
+    synonym (`BOA` → `BANK OF AFRICA`), we try the expansion first so
+    the cross-link resolves even when the equity's full name never
+    carries the short form.
+    """
+    synonyms = _BRAND_SYNONYMS.get(brand, ())
+    # Synonym substrings first (they're more specific), then the brand
+    # itself as a fallback for issuers whose full name genuinely
+    # contains the short token.
+    return (*synonyms, brand)
+
+
 def _find_issuer_equity(conn: sqlite3.Connection, issuer_name: str) -> str | None:
     """Return the equity ticker whose `name` contains the issuer's brand
-    token, if one exists. Returns None for sovereign issuers whose brand
-    is a stopword ("ETAT DU MALI" → no cross-link) so state bonds don't
-    accidentally point at random equities.
+    token (or a known synonym), if one exists. Returns None for
+    sovereign issuers whose brand is a stopword ("ETAT DU MALI" → no
+    cross-link) so state bonds don't accidentally point at random
+    equities.
     """
     if not issuer_name:
         return None
@@ -327,16 +399,20 @@ def _find_issuer_equity(conn: sqlite3.Connection, issuer_name: str) -> str | Non
         # Very short tokens ("CI", "BF") aren't specific enough to avoid
         # false positives — bail out rather than link to something wrong.
         return None
-    row = conn.execute(
-        """
-        SELECT ticker FROM securities
-        WHERE kind = 'equity' AND active = 1
-          AND UPPER(name) LIKE ?
-        ORDER BY ticker
-        LIMIT 1
-        """,
-        (f"%{brand}%",),
-    ).fetchone()
+    row = None
+    for pattern in _brand_search_patterns(brand):
+        row = conn.execute(
+            """
+            SELECT ticker FROM securities
+            WHERE kind = 'equity' AND active = 1
+              AND UPPER(name) LIKE ?
+            ORDER BY ticker
+            LIMIT 1
+            """,
+            (f"%{pattern}%",),
+        ).fetchone()
+        if row is not None:
+            break
     return row["ticker"] if row else None
 
 
@@ -451,12 +527,19 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
             date.fromisoformat(row["issue_date"]) if row["issue_date"] else None
         )
         last_coupon = snap.last_coupon_date if snap else None
+        # F-09: derive the current residual balance from the exchange's
+        # last-coupon amount and thread it into both the schedule (so
+        # the terminal principal row reflects the balance actually due)
+        # and the current-yield calculation (so an amortizing bond
+        # quoted at residual reads its coupon rate, not 48 %).
+        residual = derive_residual_nominal(snap, row["coupon_rate"])
         schedule = build_schedule(
             coupon_rate=row["coupon_rate"],
             maturity_year=row["maturity_year"],
             last_coupon_date=last_coupon,
             issue_date=issue_date_val,
             today=today,
+            nominal=residual if residual else DEFAULT_NOMINAL_XOF,
         )
 
         ysum = None
@@ -470,7 +553,9 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
             conv = convexity(schedule.rows, y, dirty) if y is not None else None
             ysum = YieldSummary(
                 ytm_pct=y * 100.0 if y is not None else None,
-                current_yield_pct=current_yield(row["coupon_rate"], price),
+                current_yield_pct=current_yield(
+                    row["coupon_rate"], price, residual_nominal=residual,
+                ),
                 modified_duration_years=mod,
                 macaulay_duration_years=mac,
                 convexity=conv,
@@ -481,7 +566,9 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
         elif price is not None:
             ysum = YieldSummary(
                 ytm_pct=None,
-                current_yield_pct=current_yield(row["coupon_rate"], price),
+                current_yield_pct=current_yield(
+                    row["coupon_rate"], price, residual_nominal=residual,
+                ),
                 modified_duration_years=None,
                 macaulay_duration_years=None,
                 convexity=None,

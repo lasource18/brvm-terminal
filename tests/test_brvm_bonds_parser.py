@@ -183,6 +183,28 @@ class TestParseNom:
         assert p is not None
         assert p.issuer_name == "BHS"
 
+    def test_tranche_suffix_is_accepted(self):
+        """F-30: `TPCI 5,95% 2017-2024 - A` (state bonds with a tranche
+        letter) used to fall through the regex and land with NULL
+        coupon/maturity — no schedule, no YTM, no Related-bonds
+        grouping. The trailing `- A` is now optional in the regex."""
+        p = parse_nom("TPCI 5,95% 2017-2024 - A")
+        assert p is not None
+        assert p.issuer_name == "TPCI"
+        assert p.coupon_rate == 5.95
+        assert p.issue_year == 2017
+        assert p.maturity_year == 2024
+
+    def test_spaced_year_range_is_accepted(self):
+        """F-30: `TPBF 6.50% 2011 - 2016` (spaces around the year-range
+        dash) also failed the pre-fix regex."""
+        p = parse_nom("TPBF 6.50% 2011 - 2016")
+        assert p is not None
+        assert p.issuer_name == "TPBF"
+        assert p.coupon_rate == 6.50
+        assert p.issue_year == 2011
+        assert p.maturity_year == 2016
+
     def test_returns_none_on_unmatched_shape(self):
         # Freshly-admitted bonds sometimes show "à préciser" or a raw
         # code as their Nom — we want to skip enrichment cleanly, not

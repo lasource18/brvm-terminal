@@ -111,15 +111,21 @@ def _country_from_name(name: str) -> str | None:
 #   GENDER BOND ECOBANK CI 6,50% 2024-2029
 #   DIASPORA BONDS BHS 6,25% 2019-2024
 #   KEUR SAMBA NSIA BQE CI 7% 2025-2030
+#   TPCI 5,95% 2017-2024 - A              (trailing tranche suffix, F-30)
+#   TPBF 6.50% 2011 - 2016                (spaced year range, F-30)
 #
 # We capture the prefix, coupon rate, issue year, and maturity year in one
 # regex. U+2013 (en-dash) is accepted alongside U+002D (hyphen-minus)
-# because brvm.org has used both on freshly-loaded rows.
+# because brvm.org has used both on freshly-loaded rows. F-30: optional
+# whitespace around the year-range dash and an optional trailing
+# `- <tranche>` suffix (single letter or one-digit series id) let the
+# TPCI/TPBF fixture rows enrich rather than land as NULL coupon/maturity.
 _NOM_RE = re.compile(
     r"""^
         (?P<issuer>.+?)\s+
         (?P<coupon>\d{1,3}(?:[.,]\d{1,3})?)\s*%\s+
-        (?P<iyear>\d{4})[-\u2013](?P<myear>\d{4})
+        (?P<iyear>\d{4})\s*[-\u2013]\s*(?P<myear>\d{4})
+        (?:\s*[-\u2013]\s*(?P<tranche>[A-Z0-9]{1,3}))?
         \s*$
     """,
     re.VERBOSE,
