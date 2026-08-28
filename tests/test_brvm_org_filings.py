@@ -549,6 +549,53 @@ def test_pull_all_downloads_and_persists(monkeypatch, tmp_path, fixtures_dir):
     assert counts2["filings_dupe"] == counts["filings_new"]
 
 
+def test_pull_all_honors_only_tickers_filter(monkeypatch, tmp_path):
+    """`ONLY_TICKERS=SNTS just filings-pull` — the walk still visits every
+    issuer on the index (so slug resolution stays warm), but only tickers
+    in the allow-list have their filings pages fetched. Useful for
+    backfilling one issuer after a fetcher fix without hammering the
+    other 46 pages."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN"),
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+        ])
+
+    monkeypatch.setattr(
+        bf, "fetch_issuers_index",
+        lambda client=None, max_pages=10: [
+            bf.IssuerIndexEntry(slug="sonatel", display_name="SONATEL"),
+            bf.IssuerIndexEntry(slug="orange-ci", display_name="ORANGE CI"),
+        ],
+    )
+    fetched: list[str] = []
+
+    def _spy_fetch(slug, client=None):
+        fetched.append(slug)
+        return []  # no filings to download in this test
+
+    monkeypatch.setattr(bf, "fetch_issuer_filings", _spy_fetch)
+
+    class _NoOpClient:
+        def close(self):
+            pass
+
+    counts = svc.pull_all(
+        client=_NoOpClient(),
+        only_tickers={"SNTS"},
+        delay_between_requests_s=0,
+    )
+    # Only SNTS's page was fetched; ORAC was filtered out after slug
+    # resolution and never hit the (mocked) network.
+    assert fetched == ["sonatel"]
+    # Both issuers still counted as seen — the filter operates after
+    # resolution so the summary reflects the walk faithfully.
+    assert counts["issuers_seen"] == 2
+    assert counts["issuers_resolved"] == 1
+
+
 def test_pull_all_skips_unresolved_issuers(monkeypatch, tmp_path):
     svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
     with connect(db_path) as conn:
