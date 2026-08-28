@@ -21,6 +21,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import httpx
+
 from brvm.config import reset_settings_cache
 from brvm.db import connect
 from brvm.models import (
@@ -307,14 +309,26 @@ def test_news_matches_via_tickers_llm_csv(monkeypatch, tmp_path):
 
 
 class _StubSender:
-    def __init__(self, *, ok: bool = True) -> None:
+    def __init__(
+        self, *, ok: bool = True, permanent: bool = False, note: str | None = None
+    ) -> None:
         self.ok = ok
+        self.permanent = permanent
+        self.note = note
         self.sent: list[AlertEvent] = []
         self.closed = False
 
-    def send(self, event: AlertEvent) -> tuple[bool, str]:
+    def send(self, event: AlertEvent):
+        from brvm.services.alerts import SendResult
+
         self.sent.append(event)
-        return (True, "ok") if self.ok else (False, "http_error: 500")
+        if self.ok:
+            return SendResult(ok=True, note="ok")
+        return SendResult(
+            ok=False,
+            note=self.note or ("http_400" if self.permanent else "http_500"),
+            permanent=self.permanent,
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -399,3 +413,177 @@ def test_delivery_stops_on_first_failure(monkeypatch, tmp_path):
     counts = svc.deliver_pending(sender=sender)
     assert counts.failed == 1
     assert len(sender.sent) == 1
+
+
+# --- F-01: hour-bucket / session dedupe -----------------------------------
+#
+# Prior behaviour: `_price_move_dedupe` keyed on the raw `captured_utc`, so
+# every hourly re-scrape of Friday's close over a full weekend counted as a
+# fresh snapshot and re-fired the alert ~40 times. The scheduler runs the
+# evaluator on every snapshot cycle — these tests drive the scheduled
+# entry point (`evaluate_all`) with multiple back-to-back snapshots, the
+# way production exercises the code.
+
+
+def _stamp_snap(db_path: Path, ticker: str, change_pct: float,
+                captured_utc: str, last: float = 10_000) -> None:
+    """Insert a snapshot with an explicit `captured_utc`. Bypasses
+    `insert_snapshots` which always stamps utc_iso()."""
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO quote_snapshots
+              (ticker, captured_utc, source, last, change_pct,
+               volume, turnover, is_stale)
+            VALUES (?, ?, 'sikafinance', ?, ?, 100, ?, 0)
+            """,
+            (ticker, captured_utc, last, change_pct, last * 100),
+        )
+        conn.commit()
+
+
+def test_price_move_dedupes_across_intraday_snapshots(monkeypatch, tmp_path):
+    """Two snapshots on the same trading session must only fire once,
+    even when the second row lands with a fresh `captured_utc`."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T09:15:00Z")
+    assert svc.evaluate_all().price_move_fired == 1
+
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T11:15:00Z")
+    counts = svc.evaluate_all()
+    assert counts.price_move_fired == 0
+    assert counts.total_deduped == 1
+
+
+def test_price_move_dedupes_weekend_rescrapes_of_friday_close(
+    monkeypatch, tmp_path
+):
+    """The bug this test pins: Friday close re-scraped hourly through
+    Sat/Sun shouldn't re-fire — all three snapshots collapse to the
+    Friday session bucket."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+
+    # Friday close.
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T14:59:00Z")
+    assert svc.evaluate_all().price_move_fired == 1
+
+    # Saturday and Sunday re-scrapes carry a fresh timestamp but the
+    # underlying data is unchanged.
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-29T09:00:00Z")
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-30T09:00:00Z")
+    counts = svc.evaluate_all()
+    assert counts.price_move_fired == 0
+    assert counts.total_deduped == 1  # `_latest_snapshots` picks the newest
+
+
+def test_price_move_fires_again_on_next_session(monkeypatch, tmp_path):
+    """A fresh trading session must be able to fire a new alert."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T14:59:00Z")
+    assert svc.evaluate_all().price_move_fired == 1
+
+    _stamp_snap(db_path, "SNTS", 4.5, "2026-08-31T09:15:00Z")  # Mon
+    assert svc.evaluate_all().price_move_fired == 1
+
+
+# --- F-20: `last=None` guard ----------------------------------------------
+
+
+def test_price_move_evaluator_survives_null_last(monkeypatch, tmp_path):
+    """A partially-parsed snapshot (change_pct known, last still NULL)
+    used to raise `TypeError` in the alert subject/body formatter and
+    the scheduler swallowed the whole cycle — filings and news
+    evaluations silently produced zero events. Now the row still fires
+    and downstream evaluators keep running."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO quote_snapshots
+              (ticker, captured_utc, source, last, change_pct, is_stale)
+            VALUES ('SNTS', '2026-08-28T14:59:00Z', 'sikafinance',
+                    NULL, 4.5, 0)
+            """
+        )
+        conn.commit()
+
+    counts = svc.evaluate_all()
+    assert counts.price_move_fired == 1
+    ev = svc.list_recent_events()[0]
+    assert "—" in ev.subject
+
+
+# --- F-05: no webhook leak + no queue wedge on permanent 4xx --------------
+
+
+def test_delivery_result_note_never_contains_webhook_url(
+    monkeypatch, tmp_path
+):
+    """`str(httpx.HTTPError)` used to embed the full webhook URL —
+    including the token — into the log line. The sender must never
+    return the URL in the note."""
+    from brvm.services.alerts import SendResult, _DiscordSender
+
+    _db_path, _svc = _setup(monkeypatch, tmp_path)
+    secret_url = "https://discord.com/api/webhooks/12345/SUPER-SECRET-TOKEN"
+    sender = _DiscordSender(webhook_url=secret_url)
+
+    def _raise(*_a, **_kw):
+        # Emulate httpx.RequestError shape: the URL leaks through str(e).
+        raise httpx.ConnectError(f"connect failed for {secret_url}")
+
+    monkeypatch.setattr(sender.client, "post", _raise)
+    result: SendResult = sender.send(
+        AlertEvent(rule_id=1, kind="price_move", ticker="SNTS",
+                   subject="s", body="b", dedupe_key="k")
+    )
+    assert result.ok is False
+    assert "SUPER-SECRET" not in result.note
+    assert "discord.com" not in result.note
+
+
+def test_delivery_permanent_4xx_leaves_the_queue(monkeypatch, tmp_path):
+    """A 400 / 401 / 403 will never succeed on retry: leaving the event
+    at head-of-queue would wedge everything behind it. The event must be
+    stamped delivered_utc so the next event in the batch gets a chance."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    _seed_snap(db_path, "SNTS", 5.0)
+    _seed_snap(db_path, "ORAC", 4.0)
+    svc.evaluate_all()
+
+    sender = _StubSender(ok=False, permanent=True)
+    counts = svc.deliver_pending(sender=sender)
+    # Both events attempted (no wedge) and both drained from the queue.
+    assert len(sender.sent) == 2
+    assert counts.failed == 2
+    with connect(db_path) as conn:
+        remaining = alerts_repo.count_undelivered(conn)
+    assert remaining == 0
+    events = svc.list_recent_events()
+    assert all(e.delivery_status == "permanent_failure" for e in events)
+
+
+def test_delivery_transient_5xx_keeps_queue_intact(monkeypatch, tmp_path):
+    """Transient failures still stop-and-retry: the queue must stay
+    intact for the next pass."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    _seed_snap(db_path, "SNTS", 5.0)
+    _seed_snap(db_path, "ORAC", 4.0)
+    svc.evaluate_all()
+
+    sender = _StubSender(ok=False, permanent=False)
+    counts = svc.deliver_pending(sender=sender)
+    assert len(sender.sent) == 1  # broke after first
+    assert counts.failed == 1
+    with connect(db_path) as conn:
+        remaining = alerts_repo.count_undelivered(conn)
+    assert remaining == 2  # both still queued (delivered_utc still NULL)

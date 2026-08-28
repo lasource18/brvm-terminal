@@ -185,6 +185,28 @@ def test_gather_context_shape(monkeypatch, tmp_path):
     assert any(n["title"] == "SONATEL H1 results" for n in ctx["news"])
 
 
+def test_gather_context_includes_mid_week_news_for_covered_week(
+    monkeypatch, tmp_path
+):
+    """F-02: the job runs Saturday evening for the just-ended week.
+    News published Tuesday through Saturday of the covered week must
+    reach the context (before the fix, the window ended at the covered
+    week's Monday and dropped everything from Tue-Sat)."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    week_start = date(2026, 8, 24)  # Monday
+    # A high-relevance story dropped on Thursday of the covered week.
+    with connect(db_path) as conn:
+        _seed_news(
+            conn, title="SONATEL mid-week guidance revision",
+            published_at="2026-08-27T09:00:00Z",  # Thursday
+            tickers="SNTS", relevance=9, category="earnings",
+        )
+    ctx = svc.gather_context("SNTS", week_start=week_start)
+    assert ctx is not None
+    titles = [n["title"] for n in ctx["news"]]
+    assert "SONATEL mid-week guidance revision" in titles
+
+
 def test_gather_context_none_for_indices(monkeypatch, tmp_path):
     _db_path, svc = _setup(monkeypatch, tmp_path)
     assert svc.gather_context("BRVMC") is None
