@@ -181,7 +181,7 @@ class Filing(BaseModel):
 # --- Alerts (Phase 6a) -----------------------------------------------------
 
 AlertKind = Literal["price_move", "new_filing", "news"]
-AlertDeliveryStatus = Literal["ok", "failed", "skipped"]
+AlertDeliveryStatus = Literal["ok", "failed", "skipped", "permanent_failure"]
 
 
 class AlertRule(BaseModel):

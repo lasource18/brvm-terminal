@@ -28,11 +28,12 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 
-from brvm.clock import utc_iso
+from brvm.clock import ABIDJAN, utc_iso
 from brvm.config import settings
 from brvm.db import connect
 from brvm.logging import get
@@ -95,11 +96,27 @@ def _rules_by_kind(
     return [r for r in rules if r.kind == kind and r.enabled]
 
 
+def _price_move_session_bucket(captured_utc: str) -> str:
+    """Trading session this snapshot belongs to (YYYY-MM-DD in Abidjan).
+    Weekend captures collapse to the preceding Friday so re-scrapes of
+    Friday's close over a full weekend dedupe onto one bucket instead of
+    firing on every hourly cycle."""
+    dt = datetime.fromisoformat(captured_utc.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    local = dt.astimezone(ABIDJAN).date()
+    if local.weekday() >= 5:  # Sat/Sun → walk back to Fri
+        local -= timedelta(days=local.weekday() - 4)
+    return local.isoformat()
+
+
 def _price_move_dedupe(rule_id: int, ticker: str, captured_utc: str) -> str:
-    # `quote_snapshots` has no synthetic id — its PK is (ticker,
-    # captured_utc, source). Ticker + captured_utc is enough because the
-    # scheduler only ingests one source per snapshot cycle.
-    return f"snap:{ticker}:{captured_utc}"
+    # Dedupe by (ticker, trading session) — one alert per rule per ticker
+    # per session, no matter how many snapshots the scheduler captures.
+    # The 0009_alerts.sql schema comment promised this bucket; the raw
+    # `captured_utc` alone let a Friday close re-fire ~40 times over the
+    # weekend since every scrape stamps a new timestamp.
+    return f"snap:{ticker}:{_price_move_session_bucket(captured_utc)}"
 
 
 def _new_filing_dedupe(rule_id: int, filing_id: int) -> str:
@@ -110,14 +127,18 @@ def _news_dedupe(rule_id: int, news_id: int) -> str:
     return f"news:{news_id}"
 
 
+def _fmt_price(v: float | None) -> str:
+    return f"{v:,.0f} XOF" if v is not None else "—"
+
+
 def _price_move_body(row: sqlite3.Row) -> tuple[str, str, dict[str, object]]:
     ticker = row["ticker"]
     pct = row["change_pct"]
     last = row["last"]
     direction = "up" if (pct or 0) >= 0 else "down"
-    subject = f"[{ticker}] {direction} {pct:+.2f}% at {last:,.0f} XOF"
+    subject = f"[{ticker}] {direction} {pct:+.2f}% at {_fmt_price(last)}"
     body = (
-        f"{ticker} moved {pct:+.2f}% (last {last:,.0f} XOF, "
+        f"{ticker} moved {pct:+.2f}% (last {_fmt_price(last)}, "
         f"vol {row['volume'] or 0:,}). Snapshot at {row['captured_utc']}."
     )
     payload: dict[str, object] = {
@@ -401,6 +422,13 @@ def _format_discord(event: AlertEvent) -> dict[str, object]:
 
 
 @dataclass
+class SendResult:
+    ok: bool
+    note: str
+    permanent: bool = False
+
+
+@dataclass
 class _DiscordSender:
     webhook_url: str
     client: httpx.Client | None = None
@@ -415,14 +443,27 @@ class _DiscordSender:
         if self._owned and self.client is not None:
             self.client.close()
 
-    def send(self, event: AlertEvent) -> tuple[bool, str]:
+    def send(self, event: AlertEvent) -> SendResult:
+        # Never surface the webhook URL in a return value: httpx wraps it
+        # into the exception's message and the caller logs the note.
         assert self.client is not None
         try:
             resp = self.client.post(self.webhook_url, json=_format_discord(event))
             resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            code = e.response.status_code
+            # 4xx (except 429 rate-limit) is permanent — a revoked webhook
+            # or an oversize payload will never succeed on retry, and
+            # leaving it at head-of-queue wedges everything behind it.
+            permanent = 400 <= code < 500 and code != 429
+            return SendResult(
+                ok=False, note=f"http_{code}", permanent=permanent,
+            )
         except httpx.HTTPError as e:
-            return False, f"http_error: {e}"
-        return True, "ok"
+            return SendResult(
+                ok=False, note=f"transport_error: {type(e).__name__}",
+            )
+        return SendResult(ok=True, note="ok")
 
 
 def deliver_pending(
@@ -460,34 +501,49 @@ def deliver_pending(
 
         try:
             delivered_ids: list[int] = []
-            failed_ids: list[int] = []
+            transient_failed_ids: list[int] = []
+            permanent_failed_ids: list[int] = []
+            reasons: list[str] = []
             for event in events:
-                ok, note = sender.send(event)
-                if ok:
+                result = sender.send(event)
+                if result.ok:
                     delivered_ids.append(event.id or 0)
-                else:
-                    failed_ids.append(event.id or 0)
-                    log.warning("alerts deliver: event %s failed: %s",
-                                event.id, note)
-                    # Stop on the first failure — a 5xx/timeout usually
-                    # means the webhook is down; better to retry the
-                    # whole batch next pass than spam failed rows.
-                    break
+                    continue
+                log.warning("alerts deliver: event %s failed: %s",
+                            event.id, result.note)
+                reasons.append(result.note)
+                if result.permanent:
+                    # Head-of-queue must not wedge on a 4xx that will
+                    # never succeed (revoked webhook, oversize payload).
+                    # Stamp `delivered_utc` so the row leaves the queue
+                    # and try the next event on this same pass.
+                    permanent_failed_ids.append(event.id or 0)
+                    continue
+                # Transient (5xx/timeout/429) — retry the whole batch
+                # next pass; break to avoid spamming a down webhook.
+                transient_failed_ids.append(event.id or 0)
+                break
 
             if delivered_ids:
                 alerts_repo.mark_delivered(conn, delivered_ids, status="ok")
                 counts.delivered = len(delivered_ids)
-            if failed_ids:
-                # Leave delivered_utc NULL so the next pass re-tries the
-                # same rows; only stamp status for diagnostics.
+            if permanent_failed_ids:
+                alerts_repo.mark_delivered(
+                    conn, permanent_failed_ids, status="permanent_failure",
+                )
+                counts.failed += len(permanent_failed_ids)
+            if transient_failed_ids:
+                # Leave `delivered_utc` NULL so the next pass re-tries;
+                # stamp status for diagnostics only.
                 conn.execute(
                     "UPDATE alert_events SET delivery_status = 'failed' "
-                    f"WHERE id IN ({','.join('?' * len(failed_ids))})",
-                    failed_ids,
+                    f"WHERE id IN ({','.join('?' * len(transient_failed_ids))})",
+                    transient_failed_ids,
                 )
                 conn.commit()
-                counts.failed = len(failed_ids)
-                counts.reason = "http_error"
+                counts.failed += len(transient_failed_ids)
+            if counts.failed:
+                counts.reason = reasons[0] if reasons else "http_error"
         finally:
             if owns_sender:
                 sender.close()

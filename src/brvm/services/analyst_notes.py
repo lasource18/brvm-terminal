@@ -488,7 +488,10 @@ def gather_context(
         return None
 
     since = (week_start - timedelta(days=lookback)).isoformat()
-    until = week_start.isoformat()
+    # The job runs Saturday evening for the just-ended trading week, so
+    # the news window must cover the whole covered week — not just up to
+    # its Monday. `date_to` in `list_feed` is inclusive end-of-day.
+    until = (week_start + timedelta(days=5)).isoformat()
     feed = news_svc.list_feed(
         ticker=ticker,
         date_from=since,
