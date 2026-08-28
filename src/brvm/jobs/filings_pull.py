@@ -52,10 +52,19 @@ def _print_summary(counts: dict[str, int], header: str = "filings pull") -> None
     print()
 
 
-def run_once(*, max_issuers: int | None = None, skip_promote: bool = False) -> None:
-    counts = pull_all(max_issuers=max_issuers)
+def run_once(
+    *,
+    max_issuers: int | None = None,
+    only_tickers: set[str] | None = None,
+    skip_promote: bool = False,
+) -> None:
+    counts = pull_all(max_issuers=max_issuers, only_tickers=only_tickers)
     _print_summary(counts)
-    if not skip_promote:
+    # The sikafinance promotion step ingests communiqué PDFs across
+    # every ticker — running it under an `only_tickers` filter would be
+    # confusing (the summary would still show unrelated tickers), so
+    # skip it whenever the caller asked for a per-ticker run.
+    if not skip_promote and only_tickers is None:
         promote_counts = promote_from_communiques()
         _print_summary(promote_counts, header="filings promote (sikafinance)")
 
@@ -70,11 +79,26 @@ def main() -> None:
         help="cap issuers walked in this pass (useful for smoke runs)",
     )
     parser.add_argument(
+        "--only-tickers", default=None,
+        help="comma-separated ticker allow-list (e.g. 'SNTS' or 'SNTS,ORAC'); "
+             "the walk still visits every issuer on the index but only "
+             "resolved tickers in this set are fetched. Implies --skip-promote.",
+    )
+    parser.add_argument(
         "--skip-promote", action="store_true",
         help="skip the sikafinance-communiqué promotion step",
     )
     args = parser.parse_args()
-    run_once(max_issuers=args.max_issuers, skip_promote=args.skip_promote)
+    only_tickers: set[str] | None = None
+    if args.only_tickers:
+        only_tickers = {
+            t.strip().upper() for t in args.only_tickers.split(",") if t.strip()
+        } or None
+    run_once(
+        max_issuers=args.max_issuers,
+        only_tickers=only_tickers,
+        skip_promote=args.skip_promote,
+    )
 
 
 if __name__ == "__main__":

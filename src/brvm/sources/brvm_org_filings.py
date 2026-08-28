@@ -39,6 +39,10 @@ _ISSUER_PATH_PREFIX = "/fr/rapports-societe-cotes/"
 # selectolax normalizes neither, so we match both forms.
 _SLUG_ATTR_RE = re.compile(r"/fr/rapports-societe-cotes/([a-z0-9-]+)$")
 
+# `page=N` on the `<li class="pager-last">` link tells us the highest page
+# index without walking blindly. brvm.org's Drupal pager is 0-indexed.
+_PAGER_LAST_HREF_RE = re.compile(r"[?&]page=(\d+)")
+
 # Filename shape on the download links. The leading YYYYMMDD is publication
 # date; the rest is a snake_case description. Delimiters between blocks are
 # `_-_` — brvm.org has been consistent since at least 2023.
@@ -104,6 +108,28 @@ def parse_issuers_index(html: str) -> list[IssuerIndexEntry]:
             continue
         seen[slug] = IssuerIndexEntry(slug=slug, display_name=name)
     return list(seen.values())
+
+
+def parse_last_page_index(html: str) -> int | None:
+    """Return the highest 0-indexed page number advertised by the pager.
+
+    brvm.org's Drupal pager renders `<li class="pager-last"><a href="...?page=N">`
+    on every paginated page — the trailing link goes straight to the last
+    page. Returning None means the page is unpaginated (a single-page
+    issuer with a short filing history).
+    """
+    tree = HTMLParser(html)
+    node = tree.css_first("li.pager-last a")
+    if node is None:
+        return None
+    href = node.attributes.get("href") or ""
+    m = _PAGER_LAST_HREF_RE.search(href)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except ValueError:
+        return None
 
 
 def parse_issuer_page(html: str) -> list[ParsedFiling]:
@@ -293,14 +319,45 @@ def fetch_issuers_index(
 
 
 def fetch_issuer_filings(
-    slug: str, client: httpx.Client | None = None
+    slug: str, client: httpx.Client | None = None, *, max_pages: int = 20
 ) -> list[ParsedFiling]:
+    """Walk every page of `/fr/rapports-societe-cotes/<slug>`.
+
+    brvm.org paginates issuer filings ~20 rows per page. The first fetch
+    reads page 0 and inspects the `pager-last` link for the highest page
+    index; subsequent pages are fetched in order and merged, deduped by
+    `source_url` (a defence against the very rare row that repeats
+    between pages during a redraw). `max_pages` caps the loop against a
+    runaway pager on a site redesign — Sonatel's current page count is 6.
+    """
     close = client is None
     client = client or make_client()
     try:
-        r = client.get(f"{BASE}{_ISSUER_PATH_PREFIX}{slug}")
+        seen: dict[str, ParsedFiling] = {}
+        base_url = f"{BASE}{_ISSUER_PATH_PREFIX}{slug}"
+        r = client.get(base_url)
         r.raise_for_status()
-        return parse_issuer_page(r.text)
+        first_html = r.text
+        for row in parse_issuer_page(first_html):
+            seen.setdefault(row.source_url, row)
+        last_page = parse_last_page_index(first_html)
+        if last_page is None:
+            return list(seen.values())
+        # Cap at max_pages-1 so we walk at most `max_pages` pages total
+        # (page 0 already fetched).
+        upper = min(last_page, max_pages - 1)
+        for page in range(1, upper + 1):
+            r = client.get(f"{base_url}?page={page}")
+            r.raise_for_status()
+            page_rows = parse_issuer_page(r.text)
+            new_before = len(seen)
+            for row in page_rows:
+                seen.setdefault(row.source_url, row)
+            # Zero new rows on a supposedly non-last page means the site
+            # changed shape under us — stop rather than fetch redundantly.
+            if len(seen) == new_before:
+                break
+        return list(seen.values())
     finally:
         if close:
             client.close()

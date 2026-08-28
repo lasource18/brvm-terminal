@@ -160,12 +160,16 @@ def _financials_lite(fs) -> dict[str, Any] | None:
     if not fs.has_data:
         return None
     # Send the whole 5-year (default limit) table transposed to per-period
-    # rows so the model can eyeball trends without doing index math.
+    # rows so the model can eyeball trends without doing index math. Each
+    # row carries its own currency (F-24) — the model would otherwise
+    # mistake an EUR comparative for XOF if `fs.currency` alone was
+    # attached to the payload.
     rows: list[dict[str, Any]] = []
     for i, year in enumerate(fs.periods):
         rows.append({
             "period_year": year,
             "period_kind": "annual",
+            "currency": fs.currencies[i] if i < len(fs.currencies) else fs.currency,
             **{k: fs.metrics[k][i] for k in fs.metrics},
         })
     return {"currency": fs.currency, "rows": rows}

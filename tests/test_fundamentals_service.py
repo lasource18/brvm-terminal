@@ -275,6 +275,93 @@ def test_get_financials_series_returns_periods_descending(monkeypatch, tmp_path)
     assert series.metrics["revenue"] == [2_024_000, 2_023_000, 2_022_000]
 
 
+def test_get_financials_series_carries_per_period_currency(monkeypatch, tmp_path):
+    """F-24: a period reported in a comparative currency must not be
+    silently labelled with the newest row's currency. Prior behaviour
+    pinned the whole table to `rows[0].currency` — an EUR row would
+    then render under an ``amounts in XOF`` caption, misleading by
+    ~655x."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    with connect(db_path) as conn:
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        fin_repo.replace_period(
+            conn, filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2022, currency="EUR", revenue=2_200_000,
+            ),
+        )
+        fin_repo.replace_period(
+            conn, filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2023, currency="XOF", revenue=1_500_000_000,
+            ),
+        )
+        fin_repo.replace_period(
+            conn, filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, currency="XOF", revenue=1_600_000_000,
+            ),
+        )
+
+    series = svc.get_financials_series("SNTS")
+    # Currencies align with periods (newest → oldest).
+    assert series.periods == [2024, 2023, 2022]
+    assert series.currencies == ["XOF", "XOF", "EUR"]
+    assert series.has_mixed_currencies is True
+
+
+def test_get_financials_series_uniform_currency_is_not_mixed(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    with connect(db_path) as conn:
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        for y in (2022, 2023, 2024):
+            fin_repo.replace_period(
+                conn, filing_id=filing_id,
+                financials=fin_repo.FinancialsRow(
+                    ticker="SNTS", period_year=y, currency="XOF", revenue=1000 * y,
+                ),
+            )
+    series = svc.get_financials_series("SNTS")
+    assert series.currencies == ["XOF", "XOF", "XOF"]
+    assert series.has_mixed_currencies is False
+    assert series.currency == "XOF"
+
+
+def test_get_segments_and_ownership_fall_back_to_latest_period_with_data(monkeypatch, tmp_path):
+    """F-07: when the newest annual period has no segment/ownership rows
+    (e.g. a statements-only ``etats_financiers`` was extracted for 2024
+    but the ``rapport_annuel`` hasn't landed yet), the Segments and
+    Ownership tabs must fall back to the previous year's still-persisted
+    data instead of rendering an empty view."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
+    with connect(db_path) as conn:
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        # 2023: fully-populated segments + ownership.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(ticker="SNTS", period_year=2023),
+            segments=[fin_repo.SegmentRow(name="Mobile", segment_kind="business", share_pct=70)],
+            ownership=[fin_repo.OwnershipRow(holder="SONATEL SA", share_pct=42.3)],
+        )
+        # 2024: bare P&L only — no segments, no ownership.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024, revenue=1_600_000_000,
+            ),
+        )
+
+    seg = svc.get_segments("SNTS")
+    assert seg.period_year == 2023
+    assert [s["name"] for s in seg.business] == ["Mobile"]
+
+    own = svc.get_ownership("SNTS")
+    assert own.period_year == 2023
+    assert [h["holder"] for h in own.holders] == ["SONATEL SA"]
+
+
 def test_get_segments_and_ownership_return_the_latest_period(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path, n_filings=1)
     with connect(db_path) as conn:
@@ -604,6 +691,45 @@ def test_reset_missing_cashflow_unstamps_annual_rows_without_cashflow(monkeypatc
     assert stamps[by_year[2023]] is None
     # 2024 filing (which has cash-flow data) stays stamped.
     assert stamps[by_year[2024]] is not None
+
+
+def test_reset_missing_cashflow_second_run_is_a_no_op(monkeypatch, tmp_path):
+    """F-25: a filing whose cash-flow statement is structurally missing
+    (past the 120k-char truncation or absent) will re-extract to NULL
+    forever. The tried-and-failed stamp keeps the recovery pass from
+    re-billing ~30-50k tokens per filing on every scheduled run."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [_mk_filing(year=2023)])
+        fid = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        filings_repo.mark_extracted(conn, fid)
+        fin_repo.replace_period(
+            conn, filing_id=fid,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2023, revenue=900_000,
+            ),
+        )
+
+    first = svc.reset_missing_cashflow()
+    assert first["filings_reset"] == 1
+
+    # Simulate the re-extraction pass: extracted_utc gets stamped again
+    # by the worker, but cash-flow columns remain NULL (structurally
+    # missing from the PDF). Without the F-25 stamp the recovery query
+    # would pick this filing up again and re-bill it every run.
+    with connect(db_path) as conn:
+        filings_repo.mark_extracted(conn, fid)
+
+    second = svc.reset_missing_cashflow()
+    assert second["filings_reset"] == 0
+    # And the stamp survived — the filing is out of the recovery queue
+    # for good until an operator clears the column manually.
+    with connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT cashflow_recovery_attempted_utc FROM filings WHERE id = ?",
+            (fid,),
+        ).fetchone()
+    assert row["cashflow_recovery_attempted_utc"] is not None
 
 
 def test_reset_missing_cashflow_dry_run_reports_without_touching(monkeypatch, tmp_path):

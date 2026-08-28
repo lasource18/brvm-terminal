@@ -95,6 +95,121 @@ def test_parse_filename_extracts_date():
     assert got["period_year"] == 2026
 
 
+def test_parse_last_page_index_reads_pager_last(fixtures_dir):
+    html = (fixtures_dir / "brvm_org" / "rapports_societe_cotes_sonatel.html").read_text(
+        encoding="utf-8"
+    )
+    # Sonatel's committed fixture advertises 6 pages (indices 0..5).
+    assert bf.parse_last_page_index(html) == 5
+
+
+def test_parse_last_page_index_none_when_unpaginated():
+    assert bf.parse_last_page_index("<html><body>no pager here</body></html>") is None
+    # Pager present but no page= param -> None (defensive).
+    assert (
+        bf.parse_last_page_index(
+            '<ul class="pagination"><li class="pager-last"><a href="#">last</a></li></ul>'
+        )
+        is None
+    )
+
+
+def test_fetch_issuer_filings_walks_every_page(fixtures_dir):
+    """The pager-last stop was the F-03 regression: without it, only page 0
+    (~20 filings) entered the corpus and ~100 older filings were never
+    ingested. This test walks a stub that serves distinct rows on pages
+    0 and 1 and confirms both land, deduped by source_url."""
+    page0_html = (fixtures_dir / "brvm_org" / "rapports_societe_cotes_sonatel.html").read_text(
+        encoding="utf-8"
+    )
+    # Synthesize a page 1 with different PDF URLs so we can prove the walker
+    # merged them in (the pager-last href on page 0 says the last page is 5,
+    # but the walker uses that as an upper bound — an empty page short-
+    # circuits, so a two-page stub is enough to exercise the loop).
+    page1_html = """
+    <table>
+      <tr>
+        <td><strong>SONATEL SN : Etats financiers - Exercice 2019</strong></td>
+        <td><a href="https://brvm.org/sites/default/files/rapports/20200315_-_etats_financiers_-_exercice_2019_-_sonatel_sn.pdf">Télécharger</a></td>
+      </tr>
+      <tr>
+        <td><strong>SONATEL SN : Rapport annuel - Exercice 2018</strong></td>
+        <td><a href="https://brvm.org/sites/default/files/rapports/20190515_-_rapport_dactivites_annuel_-_exercice_2018_-_sonatel_sn.pdf">Télécharger</a></td>
+      </tr>
+    </table>
+    """
+
+    calls: list[str] = []
+
+    class _Response:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class _StubClient:
+        def get(self, url: str) -> _Response:
+            calls.append(url)
+            if "page=" not in url:
+                return _Response(page0_html)
+            # Beyond page 1 the stub returns an empty rows page — the walker
+            # must short-circuit rather than fetch every advertised page.
+            if url.endswith("page=1"):
+                return _Response(page1_html)
+            return _Response("<html><body></body></html>")
+
+        def close(self) -> None:
+            pass
+
+    filings = bf.fetch_issuer_filings("sonatel", client=_StubClient())
+
+    urls = {f.source_url for f in filings}
+    # Page 0 contributions are still there (the anchor case from
+    # test_parse_issuer_page_extracts_metadata_from_filename).
+    assert any(u.endswith("_-_sonatel_sn.pdf") and "etats_financiers" in u for u in urls)
+    # Page 1's older filings landed too — this is what F-03 restored.
+    assert any("exercice_2019" in u for u in urls)
+    assert any("exercice_2018" in u for u in urls)
+    # And the walker stopped as soon as a page returned no new rows —
+    # calls should be page 0, page 1, page 2 (empty, stops) at most.
+    assert calls[0].endswith("/sonatel")
+    assert calls[1].endswith("page=1")
+    assert len(calls) <= 3
+
+
+def test_fetch_issuer_filings_single_page_no_pager():
+    """An unpaginated issuer page must not fire a second HTTP request."""
+    single_page_html = """
+    <table>
+      <tr>
+        <td><strong>SONATEL SN : Etats financiers - Exercice 2025</strong></td>
+        <td><a href="https://brvm.org/x/20260216_-_etats_financiers_-_exercice_2025_-_sonatel_sn.pdf">Télécharger</a></td>
+      </tr>
+    </table>
+    """
+    calls: list[str] = []
+
+    class _Response:
+        text = single_page_html
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class _StubClient:
+        def get(self, url: str) -> _Response:
+            calls.append(url)
+            return _Response()
+
+        def close(self) -> None:
+            pass
+
+    filings = bf.fetch_issuer_filings("sonatel", client=_StubClient())
+    assert len(filings) == 1
+    # Exactly one GET — the pager-less page must not spawn extra requests.
+    assert len(calls) == 1
+
+
 # --------------------------------------------------------------------------- #
 # Store: filings + slugs                                                      #
 # --------------------------------------------------------------------------- #
@@ -157,6 +272,46 @@ def test_list_needing_extraction_defaults_include_annual_and_interim(tmp_db_path
         assert {r["doc_type"] for r in rows} == {
             "etats_financiers", "rapport_annuel", "rapport_activites",
         }
+
+
+def test_list_needing_extraction_returns_oldest_first(tmp_db_path):
+    """F-07: the extraction queue must serve older filings first so a
+    later poorer filing can compose on top of an earlier richer one via
+    `replace_period`'s preserve-non-null upsert. Newest-first would flip
+    the order and let an older filing's numbers regress the newer read.
+    """
+    from datetime import date as _date
+
+    _init_db(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        filings_repo.upsert_filings(conn, [
+            _mk_filing(
+                "https://x/ra-2023.pdf",
+                doc_type="rapport_annuel",
+                published_date=_date(2024, 5, 15),
+                period_year=2023,
+            ),
+            _mk_filing(
+                "https://x/ef-2024.pdf",
+                doc_type="etats_financiers",
+                published_date=_date(2025, 2, 20),
+                period_year=2024,
+            ),
+            _mk_filing(
+                "https://x/ra-2024.pdf",
+                doc_type="rapport_annuel",
+                published_date=_date(2025, 6, 10),
+                period_year=2024,
+            ),
+        ])
+        rows = filings_repo.list_needing_extraction(conn)
+        # Oldest publication date first; the 2023 rapport is served
+        # before either 2024 filing.
+        assert [r["source_url"] for r in rows] == [
+            "https://x/ra-2023.pdf",
+            "https://x/ef-2024.pdf",
+            "https://x/ra-2024.pdf",
+        ]
 
 
 def test_slug_map_hit_miss_and_persisted_null(tmp_db_path):
@@ -392,6 +547,53 @@ def test_pull_all_downloads_and_persists(monkeypatch, tmp_path, fixtures_dir):
     counts2 = svc.pull_all(client=_StubClient(), delay_between_requests_s=0)
     assert counts2["filings_new"] == 0
     assert counts2["filings_dupe"] == counts["filings_new"]
+
+
+def test_pull_all_honors_only_tickers_filter(monkeypatch, tmp_path):
+    """`ONLY_TICKERS=SNTS just filings-pull` — the walk still visits every
+    issuer on the index (so slug resolution stays warm), but only tickers
+    in the allow-list have their filings pages fetched. Useful for
+    backfilling one issuer after a fetcher fix without hammering the
+    other 46 pages."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN"),
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+        ])
+
+    monkeypatch.setattr(
+        bf, "fetch_issuers_index",
+        lambda client=None, max_pages=10: [
+            bf.IssuerIndexEntry(slug="sonatel", display_name="SONATEL"),
+            bf.IssuerIndexEntry(slug="orange-ci", display_name="ORANGE CI"),
+        ],
+    )
+    fetched: list[str] = []
+
+    def _spy_fetch(slug, client=None):
+        fetched.append(slug)
+        return []  # no filings to download in this test
+
+    monkeypatch.setattr(bf, "fetch_issuer_filings", _spy_fetch)
+
+    class _NoOpClient:
+        def close(self):
+            pass
+
+    counts = svc.pull_all(
+        client=_NoOpClient(),
+        only_tickers={"SNTS"},
+        delay_between_requests_s=0,
+    )
+    # Only SNTS's page was fetched; ORAC was filtered out after slug
+    # resolution and never hit the (mocked) network.
+    assert fetched == ["sonatel"]
+    # Both issuers still counted as seen — the filter operates after
+    # resolution so the summary reflects the walk faithfully.
+    assert counts["issuers_seen"] == 2
+    assert counts["issuers_resolved"] == 1
 
 
 def test_pull_all_skips_unresolved_issuers(monkeypatch, tmp_path):

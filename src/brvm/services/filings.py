@@ -344,6 +344,7 @@ def pull_all(
     client: httpx.Client | None = None,
     *,
     max_issuers: int | None = None,
+    only_tickers: set[str] | None = None,
     delay_between_requests_s: float = 0.5,
 ) -> dict[str, int]:
     """Walk every brvm.org issuer, download new filings, persist rows.
@@ -352,7 +353,9 @@ def pull_all(
     we never re-insert, and the file-exists check under `data/filings/`
     means an already-downloaded PDF isn't re-fetched even if the row was
     deleted for some reason. `max_issuers` lets `just filings-pull` do a
-    quick smoke run.
+    quick smoke run; `only_tickers` restricts the walk to a specific
+    subset (useful for backfilling a single issuer after a fetcher fix
+    or manually testing pagination on a well-known slug).
     """
     close = client is None
     client = client or make_client()
@@ -393,6 +396,10 @@ def pull_all(
                 )
                 if ticker is None or ticker not in known_tickers:
                     counts["issuers_unresolved"] += 1
+                    continue
+                if only_tickers is not None and ticker not in only_tickers:
+                    # Resolved but filtered out — don't count against
+                    # "unresolved", just skip the fetch.
                     continue
                 counts["issuers_resolved"] += 1
 

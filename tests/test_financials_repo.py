@@ -155,6 +155,64 @@ def test_replace_period_preserves_prior_segments_when_new_extract_is_empty(tmp_d
         assert {o["holder"] for o in owns} == {"SONATEL SA", "Flottant"}
 
 
+def test_replace_period_preserves_non_null_scalars_across_extracts(tmp_db_path):
+    """F-07 regression: a poorer second filing for the same period must not
+    NULL out scalar fields that a richer earlier filing already populated.
+
+    Sonatel-shaped repro: the rapport_annuel carries the full P&L +
+    dividend + cash-flow columns; a follow-on ``resultats`` release for
+    the same year only fills revenue + operating income. Without
+    preserve-non-null, the second extract would blank EPS, dividend, and
+    cash-flow — the exact symptom the audit flagged."""
+    filing_id = _seed(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        # Rich first extract: everything set.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024,
+                revenue=1_500_000_000,
+                operating_income=400_000_000,
+                net_income=300_000_000,
+                total_assets=5_000_000_000,
+                total_equity=2_000_000_000,
+                eps=1200.0,
+                dividend_per_share=500.0,
+                cash_flow_ops=350_000_000,
+                capex=120_000_000,
+                free_cash_flow=230_000_000,
+            ),
+        )
+        # Poorer second extract: only revenue + operating income; every
+        # other scalar comes in as None. Must not clobber the prior values.
+        fin_repo.replace_period(
+            conn,
+            filing_id=filing_id,
+            financials=fin_repo.FinancialsRow(
+                ticker="SNTS", period_year=2024,
+                revenue=1_600_000_000,
+                operating_income=420_000_000,
+            ),
+        )
+
+        rows = fin_repo.list_financials(conn, "SNTS")
+        assert len(rows) == 1
+        # Non-null scalars in the second extract win — the newer read is
+        # authoritative for the fields it actually reports.
+        assert rows[0]["revenue"] == 1_600_000_000
+        assert rows[0]["operating_income"] == 420_000_000
+        # Null scalars in the second extract preserve the first's values.
+        assert rows[0]["net_income"] == 300_000_000
+        assert rows[0]["total_assets"] == 5_000_000_000
+        assert rows[0]["total_equity"] == 2_000_000_000
+        assert rows[0]["eps"] == 1200.0
+        assert rows[0]["dividend_per_share"] == 500.0
+        assert rows[0]["cash_flow_ops"] == 350_000_000
+        assert rows[0]["capex"] == 120_000_000
+        assert rows[0]["free_cash_flow"] == 230_000_000
+
+
 def test_replace_period_new_nonempty_segments_still_replace_prior(tmp_db_path):
     """The preserve rule only kicks in when the new extract is empty. A
     non-empty new list must still fully replace the old one — the

@@ -285,17 +285,30 @@ def _resolve_path(root: Path, file_path: str) -> Path:
 
 @dataclass
 class FinancialsSeries:
-    """One P&L / balance-sheet row per period, most recent on the left."""
+    """One P&L / balance-sheet row per period, most recent on the left.
+
+    `currencies` carries the per-period reporting currency (F-24): most
+    issuers report in XOF but some publish EUR or USD comparatives. When
+    the list contains more than one distinct code the caller must render
+    per-column rather than pretend the whole table shares one unit.
+    `currency` stays for backwards-compat callers — it holds the
+    majority currency when uniform, otherwise the newest row's code.
+    """
 
     ticker: str
     currency: str = "XOF"
     periods: list[int] = field(default_factory=list)                     # descending years
+    currencies: list[str] = field(default_factory=list)                  # per-period, same order
     metrics: dict[str, list[float | None]] = field(default_factory=dict)  # metric -> per-period
     source_filings: dict[int, int] = field(default_factory=dict)         # year -> filing_id
 
     @property
     def has_data(self) -> bool:
         return bool(self.periods)
+
+    @property
+    def has_mixed_currencies(self) -> bool:
+        return len({c for c in self.currencies if c}) > 1
 
 
 @dataclass
@@ -337,7 +350,11 @@ def get_financials_series(ticker: str, *, limit: int = 6) -> FinancialsSeries:
     series = FinancialsSeries(ticker=ticker)
     if not rows:
         return series
-    series.currency = rows[0]["currency"] or "XOF"
+    series.currencies = [r["currency"] or "XOF" for r in rows]
+    # `currency` is the newest row's code — kept for callers that only
+    # render one caption. Templates that render per-column should read
+    # `currencies` and consult `has_mixed_currencies`.
+    series.currency = series.currencies[0]
     series.periods = [int(r["period_year"]) for r in rows]
     series.source_filings = {int(r["period_year"]): int(r["filing_id"]) for r in rows}
     for key in _METRIC_KEYS:
@@ -403,18 +420,39 @@ class SegmentsView:
 
 
 def get_segments(ticker: str) -> SegmentsView:
-    """Latest-period business + geographic split for the Segments tab."""
+    """Latest annual period business + geographic split for the Segments tab.
+
+    F-07: prefer the most recent annual period that actually has segment
+    rows. Otherwise a fresh statements-only filing (no segments in the
+    extract) would hide the prior year's still-persisted segments.
+    """
     with connect(settings.db_path) as conn:
-        latest = financials_repo.latest_period(conn, ticker)
-        if latest is None:
+        row = conn.execute(
+            """
+            SELECT f.period_year, f.period_kind, f.currency
+            FROM financials f
+            WHERE f.ticker = ?
+              AND f.period_kind = 'annual'
+              AND EXISTS (
+                  SELECT 1 FROM financial_segments s
+                  WHERE s.ticker      = f.ticker
+                    AND s.period_year = f.period_year
+                    AND s.period_kind = f.period_kind
+              )
+            ORDER BY f.period_year DESC
+            LIMIT 1
+            """,
+            (ticker,),
+        ).fetchone()
+        if row is None:
             return SegmentsView(ticker=ticker)
-        rows = financials_repo.list_segments(conn, ticker, int(latest["period_year"]))
+        rows = financials_repo.list_segments(conn, ticker, int(row["period_year"]))
 
     view = SegmentsView(
         ticker=ticker,
-        period_year=int(latest["period_year"]),
-        period_kind=latest["period_kind"],
-        currency=latest["currency"] or "XOF",
+        period_year=int(row["period_year"]),
+        period_kind=row["period_kind"],
+        currency=row["currency"] or "XOF",
     )
     for r in rows:
         bucket = view.business if r["segment_kind"] == "business" else view.geo
@@ -589,8 +627,13 @@ def reset_missing_cashflow(*, dry_run: bool = False) -> dict[str, int]:
     a second pass composing with the first. Runs against annual rows
     only (interims rarely publish a cash-flow statement).
 
-    Idempotent: once cash-flow columns are populated, the row drops out
-    of the query.
+    F-25 gate: each filing is stamped with
+    `cashflow_recovery_attempted_utc` when it is queued, and filings
+    with that stamp are skipped on subsequent runs. Without this a
+    filing whose cash-flow statement sits past the 120k-char truncation
+    (or doesn't exist) would re-extract to NULL and be re-billed
+    ~30-50k tokens on every recovery pass. Operators who upgrade the
+    prompt can clear the column manually to force a fresh batch.
     """
     counts = {"filings_reset": 0, "dry_run": int(dry_run)}
     with connect(settings.db_path) as conn:
@@ -605,15 +648,23 @@ def reset_missing_cashflow(*, dry_run: bool = False) -> dict[str, int]:
               AND f.free_cash_flow IS NULL
               AND ff.extracted_utc IS NOT NULL
               AND (ff.is_scanned IS NULL OR ff.is_scanned = 0)
+              AND ff.cashflow_recovery_attempted_utc IS NULL
             """
         ).fetchall()
         counts["filings_reset"] = len(rows)
         if not dry_run and rows:
+            from brvm.clock import utc_iso
+
             ids = [int(r["filing_id"]) for r in rows]
             placeholders = ",".join("?" * len(ids))
             conn.execute(
-                f"UPDATE filings SET extracted_utc = NULL WHERE id IN ({placeholders})",
-                ids,
+                f"""
+                UPDATE filings
+                SET extracted_utc = NULL,
+                    cashflow_recovery_attempted_utc = ?
+                WHERE id IN ({placeholders})
+                """,
+                (utc_iso(), *ids),
             )
             conn.commit()
     log.info("fundamentals recover (cash-flow): %s", counts)
@@ -621,16 +672,39 @@ def reset_missing_cashflow(*, dry_run: bool = False) -> dict[str, int]:
 
 
 def get_ownership(ticker: str) -> OwnershipView:
+    """Latest annual period shareholder register for the Ownership tab.
+
+    F-07: prefer the most recent annual period that actually has
+    ownership rows. Otherwise a fresh statements-only filing (no
+    shareholder register in the extract) would hide the prior year's
+    still-persisted holders.
+    """
     with connect(settings.db_path) as conn:
-        latest = financials_repo.latest_period(conn, ticker)
-        if latest is None:
+        row = conn.execute(
+            """
+            SELECT f.period_year, f.period_kind
+            FROM financials f
+            WHERE f.ticker = ?
+              AND f.period_kind = 'annual'
+              AND EXISTS (
+                  SELECT 1 FROM ownership o
+                  WHERE o.ticker      = f.ticker
+                    AND o.period_year = f.period_year
+                    AND o.period_kind = f.period_kind
+              )
+            ORDER BY f.period_year DESC
+            LIMIT 1
+            """,
+            (ticker,),
+        ).fetchone()
+        if row is None:
             return OwnershipView(ticker=ticker)
-        rows = financials_repo.list_ownership(conn, ticker, int(latest["period_year"]))
+        rows = financials_repo.list_ownership(conn, ticker, int(row["period_year"]))
 
     return OwnershipView(
         ticker=ticker,
-        period_year=int(latest["period_year"]),
-        period_kind=latest["period_kind"],
+        period_year=int(row["period_year"]),
+        period_kind=row["period_kind"],
         holders=[
             {"holder": r["holder"], "share_pct": r["share_pct"], "shares": r["shares"]}
             for r in rows

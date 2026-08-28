@@ -71,9 +71,12 @@ news-tag-dry:
     uv run python -m brvm.jobs.news_tag --once --dry-run
 
 # Phase 4a demo: walk brvm.org issuers + download new filing PDFs to data/filings/
-# Optional MAX_ISSUERS=<n> just filings-pull   → limit issuers walked (smoke run)
+# Optional MAX_ISSUERS=<n> just filings-pull    → limit issuers walked (smoke run)
+# Optional ONLY_TICKERS=SNTS,ORAC just filings-pull → fetch a specific subset
+#   only (walk still visits every issuer on the index but only these tickers
+#   are downloaded — useful for backfilling one issuer after a fetcher fix).
 filings-pull:
-    uv run python -m brvm.jobs.filings_pull --once {{ if env_var_or_default("MAX_ISSUERS", "") == "" { "" } else { "--max-issuers " + env_var("MAX_ISSUERS") } }}
+    uv run python -m brvm.jobs.filings_pull --once {{ if env_var_or_default("MAX_ISSUERS", "") == "" { "" } else { "--max-issuers " + env_var("MAX_ISSUERS") } }} {{ if env_var_or_default("ONLY_TICKERS", "") == "" { "" } else { "--only-tickers " + env_var("ONLY_TICKERS") } }}
 
 # Phase 4b: extract structured fundamentals from unprocessed annual filings.
 # Respects the $2/day cap (LLM_EXTRACT_DAILY_CAP_CENTS).

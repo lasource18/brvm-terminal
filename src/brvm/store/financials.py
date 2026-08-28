@@ -64,63 +64,102 @@ def replace_period(
 ) -> None:
     """Persist one `(ticker, period_year, period_kind)` extract.
 
-    The financials row is always replaced — a re-extract may correct P&L
-    numbers (a schema tweak, a corrected PDF, a smarter prompt) and we
-    want the newest attempt to win.
+    Scalar financial fields use a **preserve-non-null** upsert: a new
+    non-null value overwrites the existing one, but a new NULL leaves
+    the prior value in place. This matters because a single period is
+    often covered by two filings on brvm.org — an ``etats_financiers``
+    (bare financial statements, no cash-flow, no shareholders) and a
+    ``rapport_annuel`` (full annual with cash-flow + shareholders +
+    segments). Whichever the extractor processes second would previously
+    wipe every field the second extract couldn't reproduce; now the two
+    compose. `filing_id` and `extracted_utc` always stamp the most
+    recent attempt so the audit trail follows the latest read.
 
-    Segments and ownership use a **preserve-on-empty** rule instead:
-    the incoming lists overwrite existing rows only when they are
-    non-empty. This matters because a single period is often covered by
-    two filings on brvm.org — an ``etats_financiers`` (14-page financial
-    statements, no shareholder register) and a ``rapport_annuel``
-    (60+ pages, with shareholders and business segments). Whichever one
-    the extractor happens to process last was previously wiping the
-    other's segment/ownership rows. Now the two extractions compose:
-
-      * rapport_annuel extracted first → ownership + segments populated
-      * etats_financiers extracted second → P&L refreshed; ownership +
-        segments preserved because its extract returned empty lists.
-
-    Segments and ownership are deduped inside a single extract on their
-    PK components — the model occasionally repeats a row (e.g. "Autres"
-    twice) and the composite PK would otherwise raise mid-batch.
+    Segments and ownership use a **preserve-on-empty** rule: the
+    incoming lists overwrite existing rows only when they are non-empty
+    (an empty list from the second extract preserves the first's rows).
+    They are also deduped inside a single extract on their PK components
+    — the model occasionally repeats a row (e.g. "Autres" twice) and the
+    composite PK would otherwise raise mid-batch.
     """
     now = utc_iso()
     key = (financials.ticker, financials.period_year, financials.period_kind)
 
-    conn.execute(
-        "DELETE FROM financials WHERE ticker = ? AND period_year = ? AND period_kind = ?",
+    existing = conn.execute(
+        "SELECT 1 FROM financials WHERE ticker = ? AND period_year = ? AND period_kind = ?",
         key,
-    )
-    conn.execute(
-        """
-        INSERT INTO financials
-            (ticker, period_year, period_kind, currency,
-             revenue, operating_income, net_income, total_assets,
-             total_equity, eps, dividend_per_share,
-             cash_flow_ops, capex, free_cash_flow,
-             filing_id, extracted_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            financials.ticker,
-            financials.period_year,
-            financials.period_kind,
-            financials.currency,
-            financials.revenue,
-            financials.operating_income,
-            financials.net_income,
-            financials.total_assets,
-            financials.total_equity,
-            financials.eps,
-            financials.dividend_per_share,
-            financials.cash_flow_ops,
-            financials.capex,
-            financials.free_cash_flow,
-            filing_id,
-            now,
-        ),
-    )
+    ).fetchone()
+
+    if existing is None:
+        conn.execute(
+            """
+            INSERT INTO financials
+                (ticker, period_year, period_kind, currency,
+                 revenue, operating_income, net_income, total_assets,
+                 total_equity, eps, dividend_per_share,
+                 cash_flow_ops, capex, free_cash_flow,
+                 filing_id, extracted_utc)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                financials.ticker,
+                financials.period_year,
+                financials.period_kind,
+                financials.currency,
+                financials.revenue,
+                financials.operating_income,
+                financials.net_income,
+                financials.total_assets,
+                financials.total_equity,
+                financials.eps,
+                financials.dividend_per_share,
+                financials.cash_flow_ops,
+                financials.capex,
+                financials.free_cash_flow,
+                filing_id,
+                now,
+            ),
+        )
+    else:
+        # COALESCE keeps the existing value when the incoming scalar is
+        # NULL — the preserve-non-null contract described above.
+        # `currency` is NOT NULL (schema default 'XOF') so we let the new
+        # value overwrite unconditionally.
+        conn.execute(
+            """
+            UPDATE financials
+            SET currency           = ?,
+                revenue            = COALESCE(?, revenue),
+                operating_income   = COALESCE(?, operating_income),
+                net_income         = COALESCE(?, net_income),
+                total_assets       = COALESCE(?, total_assets),
+                total_equity       = COALESCE(?, total_equity),
+                eps                = COALESCE(?, eps),
+                dividend_per_share = COALESCE(?, dividend_per_share),
+                cash_flow_ops      = COALESCE(?, cash_flow_ops),
+                capex              = COALESCE(?, capex),
+                free_cash_flow     = COALESCE(?, free_cash_flow),
+                filing_id          = ?,
+                extracted_utc      = ?
+            WHERE ticker = ? AND period_year = ? AND period_kind = ?
+            """,
+            (
+                financials.currency,
+                financials.revenue,
+                financials.operating_income,
+                financials.net_income,
+                financials.total_assets,
+                financials.total_equity,
+                financials.eps,
+                financials.dividend_per_share,
+                financials.cash_flow_ops,
+                financials.capex,
+                financials.free_cash_flow,
+                filing_id,
+                now,
+                *key,
+            ),
+        )
 
     # Materialise the incoming iterables once so we can both test them
     # for non-emptiness and iterate over them for the insert loop.
