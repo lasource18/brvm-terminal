@@ -23,7 +23,10 @@ class WatchlistsView(Vertical):
         Binding("delete", "delete_selected", "delete watchlist", show=True),
         Binding("n", "focus_new", "new watchlist", show=True),
         Binding("a", "focus_add", "add ticker", show=True),
-        Binding("r", "remove_ticker", "remove ticker", show=True),
+        # F-06: `r` used to remove the highlighted ticker — shadowing the
+        # global `r` = refresh binding, so a habitual refresh press
+        # silently deleted rows. Rebound to `x` to leave `r` alone.
+        Binding("x", "remove_ticker", "remove ticker", show=True),
     ]
 
     class WatchlistChanged(Message):
@@ -42,7 +45,7 @@ class WatchlistsView(Vertical):
         with Horizontal():
             yield Input(placeholder="new watchlist name…", id="wl-new-name")
 
-        yield Label("Members  (a: add, r: remove)", classes="home-section-title")
+        yield Label("Members  (a: add, x: remove)", classes="home-section-title")
         it = DataTable(id="wl-items", cursor_type="row", zebra_stripes=True)
         it.add_columns("Ticker", "Name", "Last", "Chg%")
         yield it
@@ -138,7 +141,17 @@ class WatchlistsView(Vertical):
             name = event.input.value.strip()
             if not name:
                 return
-            created = watchlist.create(name)
+            try:
+                created = watchlist.create(name)
+            except watchlist.WatchlistExists as e:
+                # F-06: a duplicate slug used to raise IntegrityError up
+                # through the input handler and crash the whole app. Surface
+                # it as a validation warning instead.
+                self.notify(
+                    f"a watchlist called {e.slug!r} already exists",
+                    severity="warning",
+                )
+                return
             self._selected_slug = created.slug
             event.input.value = ""
             self.refresh_data()

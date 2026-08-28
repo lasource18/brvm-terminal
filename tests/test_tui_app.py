@@ -125,6 +125,45 @@ async def test_switch_to_directory_view(tui_db):
         assert table.row_count == 5
 
 
+async def test_alerts_events_cursor_survives_refresh(tui_db, monkeypatch):
+    """F-35: the cursor used to snap to row 0 on every 30-second
+    refresh because the clamp ran against a stray `limit=1` query
+    (`min(cursor, 0)` is always 0). Position the cursor on row 3, hit
+    the refresh path, and confirm the cursor stayed put."""
+    from brvm.services import alerts as alerts_svc
+
+    class _E:
+        def __init__(self, eid: int) -> None:
+            self.id = eid
+            self.fired_utc = f"2026-08-28T15:1{eid}:00"
+            self.kind = "price_move"
+            self.ticker = "SNTS"
+            self.delivery_status = "sent"
+            self.subject = f"synthetic event {eid}"
+
+    events = [_E(eid) for eid in range(5)]
+    monkeypatch.setattr(
+        alerts_svc, "list_recent_events", lambda *, limit=25: events[:limit]
+    )
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        av = app.query_one(AlertsView)
+        et = av.query_one("#alerts-events", DataTable)
+        assert et.row_count == 5
+        et.move_cursor(row=3, animate=False)
+        assert et.cursor_row == 3
+
+        av.refresh_data()
+        await pilot.pause()
+        # Old code always collapsed to 0 because the stray `limit=1`
+        # query returned one row, so `min(3, 0) == 0`.
+        assert et.cursor_row == 3
+
+
 async def test_switch_to_alerts_view(tui_db):
     """Pressing `a` swaps to the alerts view; empty seed => 0 events, 0 rules."""
     app = BRVMTerminalApp()
@@ -276,6 +315,99 @@ async def test_watchlist_create_and_add_ticker(tui_db):
         assert sb_table.row_count == 1
         first_key = sb_table.coordinate_to_cell_key((0, 0)).row_key.value
         assert first_key == "SNTS"
+
+
+async def test_duplicate_watchlist_name_is_a_validation_error_not_a_crash(tui_db):
+    """F-06: a second `Core` used to raise `sqlite3.IntegrityError` up
+    through the input handler and take the whole app down. It must
+    surface as a validation notify while the app stays running."""
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        wv = app.query_one(WatchlistsView)
+        name_input = wv.query_one("#wl-new-name")
+
+        for _ in range(2):
+            name_input.focus()
+            await pilot.press(*list("Core"))
+            await pilot.press("enter")
+            await pilot.pause()
+
+        wl = wv.query_one("#wl-list", DataTable)
+        # Default (seeded) + Core (added once) = 2 lists — the second Core
+        # was rejected, not silently duplicated or crashed on.
+        assert wl.row_count == 2
+        # And the app is still alive to answer queries.
+        assert app.query_one(WatchlistsView) is wv
+
+
+async def test_watchlist_remove_uses_x_not_r(tui_db):
+    """F-06: `r` was bound to remove-member, shadowing the app-level
+    `r` = refresh. A habitual refresh press deleted rows silently. Now
+    `x` removes and `r` refreshes."""
+    from brvm.services import watchlist as wl_svc
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        wv = app.query_one(WatchlistsView)
+        name_input = wv.query_one("#wl-new-name")
+        name_input.focus()
+        await pilot.press(*list("Core"))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        add_input = wv.query_one("#wl-add-ticker")
+        add_input.focus()
+        await pilot.press(*list("SNTS"))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        items = wv.query_one("#wl-items", DataTable)
+        assert items.row_count == 1
+
+        # `r` on the items table used to remove the row. It must NOT any
+        # more — the row survives, and the app-level refresh runs
+        # instead (verified by asking the service directly).
+        items.focus()
+        await pilot.press("r")
+        await pilot.pause()
+        assert items.row_count == 1
+        assert wl_svc.get_with_quotes("core").items[0].ticker == "SNTS"
+
+        # `x` is the new remove binding.
+        await pilot.press("x")
+        await pilot.pause()
+        assert items.row_count == 0
+        assert wl_svc.get_with_quotes("core").items == []
+
+
+async def test_sidebar_capital_w_cycles_watchlists(tui_db):
+    """F-06: the sidebar's `shift+w` binding never fired from a real
+    terminal (terminals send the character `"W"`; Textual doesn't map
+    that onto a `shift+w` binding). Binding the raw uppercase key makes
+    the advertised behaviour actually work."""
+    from brvm.services import watchlist as wl_svc
+
+    # Seed a second watchlist so the cycle has somewhere to go.
+    wl_svc.create("Core")
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        sb = app.query_one(Sidebar)
+        sb.reload_and_refresh()
+        await pilot.pause()
+
+        start = sb.active_source.slug
+        sb.focus()
+        await pilot.press("W")
+        await pilot.pause()
+        assert sb.active_source.slug != start
 
 
 async def test_market_closed_pauses_tick_refresh(tui_db, monkeypatch):
@@ -713,6 +845,173 @@ async def test_news_ticker_shows_headlines_when_pool_populated(tui_db, monkeypat
         text = _plain(nt.render())
         # The first-round headline is on screen.
         assert "Sonatel" in text or "Orange" in text
+
+
+async def test_news_ticker_paint_chrome_does_not_advance_headline(tui_db, monkeypatch):
+    """F-36: `_paint_chrome` runs every second and calls
+    `set_paused(not market_open)`. With both the market open and the
+    ticker already un-paused, that call must be a no-op — the old code
+    ran `_render_current()` every second and, because `_tick` advanced
+    `_idx` after rendering, showed the NEXT headline one second after
+    the cadence-controlled tick had drawn the current one (each headline
+    survived ≤1 s instead of the intended 5 s)."""
+    from brvm.apps.tui.news_ticker import NewsTicker
+    from brvm.services._view import NewsFeed, NewsRow
+
+    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: True)
+
+    def _fake_feed(**_kwargs):
+        return NewsFeed(
+            items=[
+                NewsRow(
+                    id=1, source="sikafinance", kind="news",
+                    url="https://x/a", title="Sonatel posts strong H1",
+                    tickers=["SNTS"], relevance=9,
+                    published_at="2026-08-27T09:15:00Z",
+                    fetched_utc="2026-08-27T09:20:00Z",
+                ),
+                NewsRow(
+                    id=2, source="sikafinance", kind="news",
+                    url="https://x/b", title="Orange CI expands network",
+                    tickers=["ORAC"], relevance=7,
+                    published_at="2026-08-27T10:15:00Z",
+                    fetched_utc="2026-08-27T10:20:00Z",
+                ),
+            ],
+            total=2, limit=10, offset=0,
+            filters={
+                "ticker": "", "category": "", "date_from": "",
+                "date_to": "", "min_relevance": "6",
+            },
+        )
+
+    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        nt = app.query_one(NewsTicker)
+        # Force a fresh pool + first render so we know pool[0] is on
+        # screen and `_idx == 0`.
+        nt.refresh_pool()
+        nt._render_current()
+        first = _plain(nt.render())
+        assert "Sonatel" in first
+
+        # Advance one tick — `_tick` moves `_idx` to 1 and renders pool[1].
+        nt._tick()
+        after_tick = _plain(nt.render())
+        assert "Orange" in after_tick
+
+        # Now the app's 1-second chrome repaint fires with the market
+        # still open. It must NOT redraw the "next" headline (that's the
+        # F-36 regression); the screen stays on pool[1].
+        for _ in range(3):
+            nt.set_paused(False)
+        assert _plain(nt.render()) == after_tick
+
+
+async def test_news_ticker_query_filters_by_lookback_hours(tui_db, monkeypatch):
+    """F-36: `LOOKBACK_HOURS = 24` used to only appear in the empty-state
+    copy. The query itself had no time clause, so weeks-old headlines
+    could rotate as if current. `refresh_pool` now passes `date_from`
+    to `list_feed`."""
+    from brvm.apps.tui.news_ticker import NewsTicker
+
+    calls: list[dict] = []
+
+    def _spy_feed(**kwargs):
+        calls.append(kwargs)
+        from brvm.services._view import NewsFeed
+        return NewsFeed(
+            items=[], total=0, limit=kwargs.get("limit", 10), offset=0,
+            filters={},
+        )
+
+    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _spy_feed)
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        nt = app.query_one(NewsTicker)
+        calls.clear()
+        nt.refresh_pool()
+
+    assert calls, "refresh_pool should have called list_feed"
+    kwargs = calls[-1]
+    assert kwargs.get("date_from") is not None
+    # The date_from should be roughly 24h in the past — sanity check it's
+    # a parseable ISO string, not the literal placeholder from before.
+    from datetime import UTC, datetime
+
+    parsed = datetime.fromisoformat(kwargs["date_from"])
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    delta_hours = (datetime.now(UTC) - parsed).total_seconds() / 3600
+    assert 23 <= delta_hours <= 25
+
+
+async def test_slow_overview_fetch_does_not_freeze_event_loop(tui_db, monkeypatch):
+    """F-34: description/peers/history used to run synchronously in
+    handlers. A 2-second stub against a slow source blocked the whole
+    TUI (clock, input, rendering) for ~2.7 s. Workers must let the
+    event loop keep running — the placeholder text lands immediately,
+    then the real render replaces it after the fetch returns."""
+    import threading
+    import time
+
+    from brvm.apps.tui.views.ticker import TickerView
+    from brvm.services import company as company_svc
+
+    # Block the fetch until the test releases it. This way the placeholder
+    # is definitely on screen while we assert on it.
+    release = threading.Event()
+
+    class _Profile:
+        description = "Stub description that arrives after the fetch releases."
+        sector = "Tech"
+        industry = None
+        address = None
+        phone = None
+        website = None
+        leadership = None
+        shares_outstanding = None
+        market_cap = None
+        shareholders = ()
+
+    def _slow_get_description(ticker: str):
+        release.wait(timeout=5.0)
+        return _Profile()
+
+    monkeypatch.setattr(company_svc, "get_description", _slow_get_description)
+    # Peers can bail — this test only cares about the overview path.
+    monkeypatch.setattr(
+        company_svc, "get_peers_with_ratios",
+        lambda t: (_ for _ in ()).throw(RuntimeError("peers not under test")),
+    )
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        # Kick off a ticker open — the overview fetch would previously
+        # block here for 2+ seconds before returning.
+        t0 = time.monotonic()
+        tv.set_ticker("SNTS")
+        elapsed = time.monotonic() - t0
+        # The synchronous portion must return quickly (well under our
+        # 5-second worker wait). Old code blocked for the full fetch.
+        assert elapsed < 1.0, f"set_ticker blocked for {elapsed:.2f}s"
+
+        # Placeholder is on screen while the worker is still running.
+        await pilot.pause()
+        body = tv.query_one("#overview-body", Static)
+        assert "loading" in _plain(body.render()).lower()
+
+        # Release the worker; wait for the paint to land.
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        rendered = _plain(body.render())
+        assert "Stub description" in rendered
 
 
 async def test_chart_render_is_lazy_until_tab_activated(tui_db, monkeypatch):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from brvm.config import settings
@@ -16,6 +17,17 @@ class WatchlistNotFound(LookupError):
 
 class TickerUnknown(LookupError):
     pass
+
+
+class WatchlistExists(ValueError):
+    """Raised by `create()` when the new name slugifies onto an existing
+    watchlist. Callers surface this as a validation error rather than
+    letting the `UNIQUE (slug)` IntegrityError blow through to the TUI
+    input handler (F-06)."""
+
+    def __init__(self, slug: str) -> None:
+        self.slug = slug
+        super().__init__(slug)
 
 
 def _db_path() -> Path:
@@ -37,8 +49,18 @@ def list_all() -> list[WatchlistView]:
 
 
 def create(name: str) -> WatchlistView:
+    slug = repo.slugify(name)
     with connect(_db_path()) as conn:
-        wl_id = repo.create(conn, name)
+        # Pre-check the slug: cheap, race-free enough for a single-user
+        # tool, and lets us raise a typed error instead of catching an
+        # IntegrityError string. A truly concurrent creation still hits
+        # the IntegrityError branch below.
+        if repo.get_by_slug(conn, slug) is not None:
+            raise WatchlistExists(slug)
+        try:
+            wl_id = repo.create(conn, name, slug=slug)
+        except sqlite3.IntegrityError as e:
+            raise WatchlistExists(slug) from e
         row = conn.execute("SELECT * FROM watchlists WHERE id = ?", (wl_id,)).fetchone()
     return WatchlistView(
         id=row["id"], slug=row["slug"], name=row["name"], created_utc=row["created_utc"]

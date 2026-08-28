@@ -37,7 +37,11 @@ class Sidebar(Vertical):
     """Persistent watchlist column."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("shift+w", "cycle_watchlist", "next watchlist", show=False),
+        # F-06: `shift+w` never fired — terminals deliver the literal
+        # character `"W"` and Textual doesn't rewrite it into a shift+w
+        # binding. Binding the raw uppercase key does what a reader
+        # actually expects when they press Shift+W.
+        Binding("W", "cycle_watchlist", "next watchlist", show=False),
     ]
 
     class TickerSelected(Message):
