@@ -110,6 +110,13 @@ def list_needing_extraction(
     (`annual`) or interim (`H1`/`Q1`/`Q3`); the extractor's prompt handles
     both. `rapport_activites` is where interim BOA-style reports live —
     excluding it left ~60 filings unreachable through the pipeline.
+
+    Ordered oldest-first (F-07): when a period is covered by two filings
+    for the same ticker (an ``etats_financiers`` alongside a fuller
+    ``rapport_annuel``), we want the older/richer one extracted before
+    the newer/poorer one so ``replace_period``'s preserve-non-null upsert
+    can compose them without an older filing's read regressing a newer
+    one's numbers.
     """
     placeholders = ",".join("?" * len(doc_types))
     return list(
@@ -119,7 +126,7 @@ def list_needing_extraction(
             WHERE extracted_utc IS NULL
               AND doc_type IN ({placeholders})
               AND (is_scanned IS NULL OR is_scanned = 0)
-            ORDER BY COALESCE(published_date, fetched_utc) DESC, id DESC
+            ORDER BY COALESCE(published_date, fetched_utc) ASC, id ASC
             LIMIT ?
             """,
             (*doc_types, limit),

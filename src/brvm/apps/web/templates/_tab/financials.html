@@ -18,14 +18,29 @@
 <div class="panel">
   <h2>Financials · {{ sec.ticker }}</h2>
   {% if fin.has_data %}
+    {# F-24: annotate per-column currency when the extract found more
+       than one code across periods (an issuer publishing an EUR
+       comparative alongside XOF, for instance). Uniform currency keeps
+       the pre-fix single caption. #}
     <div class="dim" style="margin-bottom: 8px;">
-      Annual · amounts in {{ fin.currency }} · extracted from filings
+      {% if fin.has_mixed_currencies %}
+        Annual · amounts as reported · currency varies by period (see column headers) · extracted from filings
+      {% else %}
+        Annual · amounts in {{ fin.currency }} · extracted from filings
+      {% endif %}
     </div>
     <table class="quotes">
       <thead>
         <tr>
           <th>METRIC</th>
-          {% for y in fin.periods %}<th>{{ y }}</th>{% endfor %}
+          {% for y in fin.periods %}
+            <th>
+              {{ y }}
+              {% if fin.has_mixed_currencies %}
+                <span class="dim">({{ fin.currencies[loop.index0] }})</span>
+              {% endif %}
+            </th>
+          {% endfor %}
         </tr>
       </thead>
       <tbody>
