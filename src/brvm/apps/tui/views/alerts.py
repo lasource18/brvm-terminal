@@ -76,7 +76,11 @@ class AlertsView(Vertical):
         et = self.query_one("#alerts-events", DataTable)
         e_cursor = et.cursor_row
         et.clear()
-        for ev in alerts_svc.list_recent_events(limit=100):
+        # F-35: clamp against the actual events list we just rendered,
+        # not a stray second `limit=1` query — the old shape always
+        # collapsed the cursor to row 0 on every 30-second refresh.
+        events = alerts_svc.list_recent_events(limit=100)
+        for ev in events:
             fired = (ev.fired_utc or "")[:19].replace("T", " ")
             et.add_row(
                 fired,
@@ -86,7 +90,6 @@ class AlertsView(Vertical):
                 (ev.subject or "")[:80],
                 key=str(ev.id),
             )
-        events = alerts_svc.list_recent_events(limit=1)
         if events:
             et.move_cursor(row=min(e_cursor, len(events) - 1), animate=False)
 

@@ -14,12 +14,13 @@ clipped at the tab area's height.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
+from textual.worker import Worker  # noqa: F401 — re-export type for future callers
 from textual_plotext import PlotextPlot
 
 from brvm.apps.tui.format import ACCENT, DIM, coloured_pct, link_cell, num
@@ -187,10 +188,38 @@ class TickerView(Vertical):
             # lives on the dedicated Bond details tab.
             self._render_bond_overview(body)
             return
+        ticker = self._ticker
+        if not ticker:
+            return
+        # F-34: `company.get_description` does HTTP against sikafinance /
+        # afx_kwayisi on a cache miss — up to two 15-second requests. Run
+        # it on a worker thread so a slow source doesn't freeze the whole
+        # TUI (clock, input, and rendering). Placeholder text lands
+        # immediately so the user sees the fetch in progress.
+        body.update(f"[{DIM}]loading description…[/]")
+        self.run_worker(
+            lambda t=ticker: self._fetch_overview(t),
+            thread=True, exclusive=True, group="ticker-overview",
+        )
+
+    def _fetch_overview(self, ticker: str) -> None:
+        """Worker-thread body. Never touches widgets directly — hands the
+        payload to `_paint_overview` on the main thread."""
         try:
-            profile = company.get_description(self._ticker or "")
+            profile = company.get_description(ticker)
         except Exception as e:
-            body.update(f"[{DIM}]description unavailable ({e})[/]")
+            self.app.call_from_thread(self._paint_overview, ticker, str(e), None)
+            return
+        self.app.call_from_thread(self._paint_overview, ticker, None, profile)
+
+    def _paint_overview(self, ticker: str, error: str | None, profile: Any) -> None:
+        """Runs on the main thread. Guards against a stale worker
+        finishing after the user has already opened a different ticker."""
+        if ticker != self._ticker:
+            return
+        body = self.query_one("#overview-body", Static)
+        if error is not None:
+            body.update(f"[{DIM}]description unavailable ({error})[/]")
             return
         if profile is None:
             body.update(f"[{DIM}]no description on file[/]")
@@ -224,16 +253,36 @@ class TickerView(Vertical):
         body.update("\n\n".join(pieces) if pieces else f"[{DIM}]no details on file[/]")
 
     def _render_chart(self) -> None:
-        plot = self.query_one("#chart-plot", PlotextPlot)
         assert self._ticker
+        ticker = self._ticker
         country = getattr(self._sec, "country", None) if self._sec else None
+        # F-34: `history.get_history` refetches from sikafinance on a
+        # cold/stale cache — up to 15 s of blocked event loop. Do the
+        # fetch on a worker thread; the paint step still runs on the
+        # main thread so plotext writes to the widget from the right
+        # context.
+        self.run_worker(
+            lambda t=ticker, c=country: self._fetch_chart(t, c),
+            thread=True, exclusive=True, group="ticker-chart",
+        )
+
+    def _fetch_chart(self, ticker: str, country: str | None) -> None:
         try:
-            bars = history.get_history(self._ticker, country)
+            bars = history.get_history(ticker, country)
         except Exception as e:
+            self.app.call_from_thread(self._paint_chart, ticker, str(e), None)
+            return
+        self.app.call_from_thread(self._paint_chart, ticker, None, bars)
+
+    def _paint_chart(self, ticker: str, error: str | None, bars: Any) -> None:
+        if ticker != self._ticker:
+            return
+        plot = self.query_one("#chart-plot", PlotextPlot)
+        if error is not None:
             # Fall back to a title-only chart with the error inline so the
             # tab still renders instead of raising through the refresh loop.
             plot.plt.clear_figure()
-            plot.plt.title(f"{self._ticker} — chart unavailable: {e}")
+            plot.plt.title(f"{ticker} — chart unavailable: {error}")
             plot.refresh()
             return
         # `get_history` returns newest-first; plotext wants oldest→newest.
@@ -243,20 +292,20 @@ class TickerView(Vertical):
         plt = plot.plt
         plt.clear_figure()
         if not closes:
-            plt.title(f"{self._ticker} — no history")
+            plt.title(f"{ticker} — no history")
             plot.refresh()
             return
         plt.date_form("Y-m-d")
         plt.theme("dark")
         plt.plot(dates, closes, marker="braille")
-        plt.title(f"{self._ticker} — last {len(closes)} sessions")
+        plt.title(f"{ticker} — last {len(closes)} sessions")
         # PlotextPlot sizes itself to the widget's rect on the next paint;
         # explicit plot_size would fight the layout.
         plot.refresh()
         # Mark the cache slot so a subsequent scheduled refresh on a
         # non-Chart tab doesn't re-fetch. Cleared by `set_ticker` when
         # the user opens a new company.
-        self._chart_last_ticker = self._ticker
+        self._chart_last_ticker = ticker
 
     def _render_news(self) -> None:
         table = self.query_one("#ticker-news", DataTable)
@@ -335,11 +384,31 @@ class TickerView(Vertical):
         if kind in {"index", "bond"}:
             table.clear()
             return
+        ticker = self._ticker
+        # F-34: `company.get_peers_with_ratios` walks every sector peer,
+        # each pulling ratios + a latest snapshot — a cold cache can
+        # trigger multiple back-to-back sikafinance fetches. Off the
+        # event loop, same pattern as `_render_overview`.
+        self.run_worker(
+            lambda t=ticker: self._fetch_peers(t),
+            thread=True, exclusive=True, group="ticker-peers",
+        )
+
+    def _fetch_peers(self, ticker: str) -> None:
         try:
-            view = company.get_peers_with_ratios(self._ticker)
+            view = company.get_peers_with_ratios(ticker)
         except Exception as e:
-            self.notify(f"peers fetch failed: {e}", severity="warning")
+            self.app.call_from_thread(self._paint_peers, ticker, str(e), None)
             return
+        self.app.call_from_thread(self._paint_peers, ticker, None, view)
+
+    def _paint_peers(self, ticker: str, error: str | None, view: Any) -> None:
+        if ticker != self._ticker:
+            return
+        if error is not None:
+            self.notify(f"peers fetch failed: {error}", severity="warning")
+            return
+        table = self.query_one("#peers-table", DataTable)
         cursor = table.cursor_row
         table.clear()
         for p in view.peers:

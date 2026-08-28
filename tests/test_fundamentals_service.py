@@ -145,6 +145,11 @@ def test_scanned_pdf_is_flagged_and_skipped(monkeypatch, tmp_path):
 
 
 def test_daily_cap_stops_the_pass(monkeypatch, tmp_path):
+    # Pin the cap to $2 for this test regardless of the operator's `.env`
+    # (which may bump the production default). Setting the env before
+    # `_setup` runs is picked up by `reset_settings_cache()` inside the
+    # fixture, so `svc.extract_pending` sees the pinned value.
+    monkeypatch.setenv("LLM_EXTRACT_DAILY_CAP_CENTS", "200")
     db_path, svc = _setup(monkeypatch, tmp_path, n_filings=3)
     with connect(db_path) as conn:
         # Burn the full $2 cap (200 cents = 2_000_000 micros).
