@@ -9,7 +9,7 @@
       <div class="tile">
         <div class="name">{{ t.name }}</div>
         <div class="level">
-          {% if t.level is not none %}{{ "%.2f"|format(t.level) }}{% else %}<span class="dim">no data</span>{% endif %}
+          {% if t.level is not none %}{{ "%.2f"|format(t.level) }}{% else %}<span class="dim">{{ "no data"|t }}</span>{% endif %}
         </div>
         <div class="chg {% if t.change_pct and t.change_pct > 0 %}pos{% elif t.change_pct and t.change_pct < 0 %}neg{% else %}zero{% endif %}">
           {% if t.change_pct is not none %}{{ "%+.2f"|format(t.change_pct) }}%{% else %}—{% endif %}
@@ -22,11 +22,11 @@
   <div class="panels panels-4">
     {% for title, rows in [("Turnover leaders", overview.turnover_leaders), ("Gainers", overview.gainers), ("Losers", overview.losers)] %}
       <div class="panel">
-        <h2>{{ title }}</h2>
+        <h2>{{ title|t }}</h2>
         {% if rows %}
         <table class="quotes">
           <thead>
-            <tr><th>TICKER</th><th>LAST</th><th>CHG%</th><th>TURNOVER</th></tr>
+            <tr><th>{{ "TICKER"|t }}</th><th>{{ "LAST"|t }}</th><th>{{ "CHG%"|t }}</th><th>{{ "TURNOVER"|t }}</th></tr>
           </thead>
           <tbody>
             {% for q in rows %}
@@ -43,21 +43,21 @@
           </tbody>
         </table>
         {% else %}
-          <div class="dim" style="padding: 12px;">No data. Run <code>just snapshot</code>.</div>
+          <div class="dim" style="padding: 12px;">{{ "No data. Run"|t }} <code>just snapshot</code>.</div>
         {% endif %}
       </div>
     {% endfor %}
     <div class="panel">
-      <h2>Calendar · next 30d</h2>
+      <h2>{{ "Calendar · next 30d"|t }}</h2>
       {% if overview.upcoming_actions %}
         <table class="quotes calendar">
           <thead>
-            <tr><th>DATE</th><th>TICKER</th><th>KIND</th><th>AMOUNT</th></tr>
+            <tr><th>{{ "DATE"|t }}</th><th>{{ "TICKER"|t }}</th><th>{{ "KIND"|t }}</th><th>{{ "AMOUNT"|t }}</th></tr>
           </thead>
           <tbody>
             {% for a in overview.upcoming_actions[:10] %}
               <tr>
-                <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">TBD</span>{% endif %}</td>
+                <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">{{ "TBD"|t }}</span>{% endif %}</td>
                 <td><a href="/s/{{ a.ticker }}/corporate-actions">{{ a.ticker }}</a></td>
                 <td class="dim">{{ a.kind }}</td>
                 <td>{% if a.amount is not none %}{{ "{:,.0f}".format(a.amount) }}{% else %}—{% endif %}</td>
@@ -67,23 +67,23 @@
         </table>
         {% if overview.upcoming_actions|length > 10 %}
           <div class="dim" style="padding: 6px 12px;">
-            +{{ overview.upcoming_actions|length - 10 }} more
+            +{{ overview.upcoming_actions|length - 10 }} {{ "more"|t }}
           </div>
         {% endif %}
       {% else %}
-        <div class="dim" style="padding: 12px;">No upcoming actions.</div>
+        <div class="dim" style="padding: 12px;">{{ "No upcoming actions."|t }}</div>
       {% endif %}
     </div>
   </div>
 
   <div class="dim" style="margin-top: 12px;">
-    <span class="tick">generated {{ overview.generated_utc }}</span>
+    <span class="tick">{{ "generated"|t }} {{ overview.generated_utc }}</span>
     {% if overview.last_snapshot_utc %}
-      · last snapshot {{ overview.last_snapshot_utc }}
+      · {{ "last snapshot"|t }} {{ overview.last_snapshot_utc }}
     {% endif %}
-    · auto-refresh every {{ interval }}s
+    · {{ "auto-refresh every"|t }} {{ interval }}s
     {% if overview.is_stale %}
-      <span class="badge stale">STALE</span>
+      <span class="badge stale">{{ "STALE"|t }}</span>
     {% endif %}
   </div>
 </div>

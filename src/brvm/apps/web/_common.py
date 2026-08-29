@@ -27,16 +27,27 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 @pass_context
 def _t(ctx: Context, source: str) -> str:
-    """Jinja `t` filter — translates `source` using the per-render `locale`
-    from the template context (populated by `base_ctx`).
+    """Jinja `t` filter — translates `source` using the per-render locale.
 
-    `pass_context` is Jinja's way of giving a filter access to the render
-    context, which keeps the locale request-scoped instead of a module
-    global (fragment renders that don't go through `base_ctx` fall back
-    to the default locale, and concurrent requests can't clobber each
-    other's language)."""
-    locale = ctx.get("locale", DEFAULT_LOCALE)
-    return translate(source, locale)
+    Locale is resolved in priority order:
+    1. `locale` already in the template context (`base_ctx` sets it on
+       every full-page render)
+    2. `request` in the context (Starlette's `TemplateResponse` puts it
+       there automatically) — we call `resolve_locale` on the fly so
+       HTMX fragment endpoints that don't go through `base_ctx` still
+       honour the user's cookie without every fragment route needing to
+       thread `locale` explicitly
+    3. Default locale as a last resort
+
+    `pass_context` keeps this request-scoped — no module globals, no
+    cross-request race.
+    """
+    locale = ctx.get("locale")
+    if locale is None:
+        request = ctx.get("request")
+        if request is not None:
+            locale = resolve_locale(request)
+    return translate(source, locale or DEFAULT_LOCALE)
 
 
 templates.env.filters["t"] = _t

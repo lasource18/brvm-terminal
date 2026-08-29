@@ -1,42 +1,42 @@
 {% if bond and bond.yield_ %}
   <div class="panels desc-panels">
     <div class="panel">
-      <h2>Price</h2>
+      <h2>{{ "Price"|t }}</h2>
       <table class="kv">
-        <tr><th>Clean price</th>
+        <tr><th>{{ "Clean price"|t }}</th>
           <td>{% if bond.yield_.clean_price is not none %}{{ "{:,.2f}".format(bond.yield_.clean_price) }} XOF{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Accrued coupon</th>
+        <tr><th>{{ "Accrued coupon"|t }}</th>
           <td>{% if bond.yield_.accrued_coupon is not none %}{{ "{:,.2f}".format(bond.yield_.accrued_coupon) }} XOF{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Dirty price</th>
+        <tr><th>{{ "Dirty price"|t }}</th>
           <td>{% if bond.yield_.dirty_price is not none %}{{ "{:,.2f}".format(bond.yield_.dirty_price) }} XOF{% else %}—{% endif %}</td>
         </tr>
       </table>
     </div>
 
     <div class="panel">
-      <h2>Yield</h2>
+      <h2>{{ "Yield"|t }}</h2>
       <table class="kv">
-        <tr><th>Current yield</th>
+        <tr><th>{{ "Current yield"|t }}</th>
           <td>{% if bond.yield_.current_yield_pct is not none %}{{ "%.2f"|format(bond.yield_.current_yield_pct) }}%{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Yield to maturity</th>
+        <tr><th>{{ "Yield to maturity"|t }}</th>
           <td>{% if bond.yield_.ytm_pct is not none %}{{ "%.2f"|format(bond.yield_.ytm_pct) }}%{% else %}—{% endif %}</td>
         </tr>
       </table>
     </div>
 
     <div class="panel">
-      <h2>Duration &amp; convexity</h2>
+      <h2>{{ "Duration & convexity"|t }}</h2>
       <table class="kv">
-        <tr><th>Macaulay duration</th>
-          <td>{% if bond.yield_.macaulay_duration_years is not none %}{{ "%.2f"|format(bond.yield_.macaulay_duration_years) }} yrs{% else %}—{% endif %}</td>
+        <tr><th>{{ "Macaulay duration"|t }}</th>
+          <td>{% if bond.yield_.macaulay_duration_years is not none %}{{ "%.2f"|format(bond.yield_.macaulay_duration_years) }} {{ "yrs"|t }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Modified duration</th>
-          <td>{% if bond.yield_.modified_duration_years is not none %}{{ "%.2f"|format(bond.yield_.modified_duration_years) }} yrs{% else %}—{% endif %}</td>
+        <tr><th>{{ "Modified duration"|t }}</th>
+          <td>{% if bond.yield_.modified_duration_years is not none %}{{ "%.2f"|format(bond.yield_.modified_duration_years) }} {{ "yrs"|t }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Convexity</th>
+        <tr><th>{{ "Convexity"|t }}</th>
           <td>{% if bond.yield_.convexity is not none %}{{ "%.2f"|format(bond.yield_.convexity) }}{% else %}—{% endif %}</td>
         </tr>
       </table>
@@ -45,10 +45,9 @@
   {% set cadence = {1: 'annual', 2: 'semi-annual', 4: 'quarterly'}.get(
       bond.schedule.payments_per_year if bond.schedule else 1, 'annual') %}
   <p class="dim" style="margin-top: 12px;">
-    YTM solved via bisection on the bullet + {{ cadence }} cash-flow schedule
+    {{ "YTM solved via bisection on the bullet +"|t }} {{ cadence|t }} {{ "cash-flow schedule"|t }}
     ({{ bond.schedule.coupons_remaining if bond.schedule else 0 }}
-    coupons remaining). Duration is <em>modified</em>, in years —
-    scales price sensitivity to a small parallel shift in the yield.
+    {{ "coupons remaining"|t }}). {{ "Duration is"|t }} <em>{{ "modified"|t }}</em>, {{ "in years — scales price sensitivity to a small parallel shift in the yield."|t }}
   </p>
 
   <details class="panel" style="margin-top: 12px;">
@@ -121,8 +120,8 @@
   </details>
 {% elif bond %}
   <div class="dim" style="padding: 16px;">
-    Yield analytics unavailable — missing price or coupon information.
+    {{ "Yield analytics unavailable — missing price or coupon information."|t }}
   </div>
 {% else %}
-  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+  <div class="dim" style="padding: 16px;">{{ "No bond data available for this ticker."|t }}</div>
 {% endif %}

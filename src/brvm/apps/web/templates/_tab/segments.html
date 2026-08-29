@@ -4,9 +4,9 @@
   <table class="quotes">
     <thead>
       <tr>
-        <th>NAME</th>
-        <th>REVENUE</th>
-        <th>SHARE</th>
+        <th>{{ "NAME"|t }}</th>
+        <th>{{ "REVENUE"|t }}</th>
+        <th>{{ "SHARE"|t }}</th>
       </tr>
     </thead>
     <tbody>
@@ -37,23 +37,22 @@
   <div class="panels desc-panels">
     {% if seg.business %}
       <div class="panel">
-        <h2>By business · {{ seg.period_year }}</h2>
+        <h2>{{ "By business"|t }} · {{ seg.period_year }}</h2>
         {{ segment_table(seg.business, seg.currency) }}
       </div>
     {% endif %}
     {% if seg.geo %}
       <div class="panel">
-        <h2>By geography · {{ seg.period_year }}</h2>
+        <h2>{{ "By geography"|t }} · {{ seg.period_year }}</h2>
         {{ segment_table(seg.geo, seg.currency) }}
       </div>
     {% endif %}
   </div>
 {% else %}
   <div class="panel">
-    <h2>Segments · {{ sec.ticker }}</h2>
+    <h2>{{ "Segments"|t }} · {{ sec.ticker }}</h2>
     <div class="dim" style="padding: 12px;">
-      No segment breakdown extracted yet for {{ sec.ticker }}. Not every issuer
-      publishes a business or geographic split.
+      {{ "No segment breakdown extracted yet for"|t }} {{ sec.ticker }}. {{ "Not every issuer publishes a business or geographic split."|t }}
     </div>
   </div>
 {% endif %}

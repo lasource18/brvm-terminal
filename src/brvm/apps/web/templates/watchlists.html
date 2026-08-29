@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Watchlists · brvm-terminal{% endblock %}
 {% block content %}
-  <h2 style="color: var(--accent); font-size: 14px; margin: 0 0 12px; text-transform: uppercase;">Watchlists</h2>
+  <h2 style="color: var(--accent); font-size: 14px; margin: 0 0 12px; text-transform: uppercase;">{{ "Watchlists"|t }}</h2>
 
   <div id="wl-index-wrap">
     {% include "_frag/watchlists_index.html" %}
@@ -11,7 +11,7 @@
         hx-post="/_frag/watchlists"
         hx-target="#wl-index-wrap"
         hx-swap="innerHTML">
-    <input name="name" placeholder="New list name" required>
-    <button type="submit">Create list</button>
+    <input name="name" placeholder="{{ 'New list name'|t }}" required>
+    <button type="submit">{{ "Create list"|t }}</button>
   </form>
 {% endblock %}

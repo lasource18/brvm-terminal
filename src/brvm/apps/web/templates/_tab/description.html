@@ -1,36 +1,36 @@
 {% if profile %}
   <div class="panels desc-panels">
     <div class="panel">
-      <h2>Profile</h2>
+      <h2>{{ "Profile"|t }}</h2>
       <div class="panel-body">
         {% if profile.description %}
           <p class="alj">{{ profile.description }}</p>
         {% else %}
-          <p class="dim">No description available from this source.</p>
+          <p class="dim">{{ "No description available from this source."|t }}</p>
         {% endif %}
       </div>
     </div>
     <div class="panel">
-      <h2>Snapshot</h2>
+      <h2>{{ "Snapshot"|t }}</h2>
       <table class="kv">
-        {% if profile.sector %}<tr><th>Sector</th><td>{{ profile.sector }}</td></tr>{% endif %}
-        {% if profile.industry %}<tr><th>Industry</th><td>{{ profile.industry }}</td></tr>{% endif %}
-        {% if profile.address %}<tr><th>Address</th><td>{{ profile.address }}</td></tr>{% endif %}
-        {% if profile.phone %}<tr><th>Phone</th><td>{{ profile.phone }}</td></tr>{% endif %}
-        {% if profile.fax %}<tr><th>Fax</th><td>{{ profile.fax }}</td></tr>{% endif %}
-        {% if profile.email %}<tr><th>Email</th><td>{{ profile.email }}</td></tr>{% endif %}
-        {% if profile.website %}<tr><th>Website</th><td>{{ profile.website }}</td></tr>{% endif %}
-        {% if profile.shares_outstanding %}<tr><th>Shares outstanding</th><td>{{ profile.shares_outstanding }}</td></tr>{% endif %}
-        {% if profile.float_pct %}<tr><th>Float</th><td>{{ profile.float_pct }}</td></tr>{% endif %}
-        {% if profile.market_cap %}<tr><th>Market cap</th><td>{{ profile.market_cap }}</td></tr>{% endif %}
-        {% if profile.leadership %}<tr><th>Leadership</th><td>{{ profile.leadership }}</td></tr>{% endif %}
+        {% if profile.sector %}<tr><th>{{ "Sector"|t }}</th><td>{{ profile.sector }}</td></tr>{% endif %}
+        {% if profile.industry %}<tr><th>{{ "Industry"|t }}</th><td>{{ profile.industry }}</td></tr>{% endif %}
+        {% if profile.address %}<tr><th>{{ "Address"|t }}</th><td>{{ profile.address }}</td></tr>{% endif %}
+        {% if profile.phone %}<tr><th>{{ "Phone"|t }}</th><td>{{ profile.phone }}</td></tr>{% endif %}
+        {% if profile.fax %}<tr><th>{{ "Fax"|t }}</th><td>{{ profile.fax }}</td></tr>{% endif %}
+        {% if profile.email %}<tr><th>{{ "Email"|t }}</th><td>{{ profile.email }}</td></tr>{% endif %}
+        {% if profile.website %}<tr><th>{{ "Website"|t }}</th><td>{{ profile.website }}</td></tr>{% endif %}
+        {% if profile.shares_outstanding %}<tr><th>{{ "Shares outstanding"|t }}</th><td>{{ profile.shares_outstanding }}</td></tr>{% endif %}
+        {% if profile.float_pct %}<tr><th>{{ "Float"|t }}</th><td>{{ profile.float_pct }}</td></tr>{% endif %}
+        {% if profile.market_cap %}<tr><th>{{ "Market cap"|t }}</th><td>{{ profile.market_cap }}</td></tr>{% endif %}
+        {% if profile.leadership %}<tr><th>{{ "Leadership"|t }}</th><td>{{ profile.leadership }}</td></tr>{% endif %}
       </table>
     </div>
     {% if profile.shareholders %}
     <div class="panel">
-      <h2>Main shareholders</h2>
+      <h2>{{ "Main shareholders"|t }}</h2>
       <table class="quotes">
-        <thead><tr><th>NAME</th><th>%</th></tr></thead>
+        <thead><tr><th>{{ "NAME"|t }}</th><th>%</th></tr></thead>
         <tbody>
           {% for s in profile.shareholders %}
             <tr>
@@ -43,9 +43,9 @@
     </div>
     {% endif %}
   </div>
-  <div class="dim" style="margin-top: 8px;">source: {{ profile.source }}</div>
+  <div class="dim" style="margin-top: 8px;">{{ "source"|t }}: {{ profile.source }}</div>
 {% else %}
   <div class="dim" style="padding: 16px;">
-    No profile data available for this security yet.
+    {{ "No profile data available for this security yet."|t }}
   </div>
 {% endif %}
