@@ -691,6 +691,8 @@ class TickerView(Vertical):
             lines.append(
                 f"[b]Issuer equity:[/] {view.issuer_equity_ticker}"
             )
+        if view.prospectus_url:
+            lines.append(f"[b]Prospectus:[/] {view.prospectus_url}")
         if view.prospectus_news:
             lines.append(f"[b {ACCENT}]Prospectus / admission news[/]")
             for n in view.prospectus_news:
