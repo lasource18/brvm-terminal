@@ -1,42 +1,42 @@
 {% if bond and bond.yield_ %}
   <div class="panels desc-panels">
     <div class="panel">
-      <h2>Price</h2>
+      <h2>{{ "Price"|t }}</h2>
       <table class="kv">
-        <tr><th>Clean price</th>
+        <tr><th>{{ "Clean price"|t }}</th>
           <td>{% if bond.yield_.clean_price is not none %}{{ "{:,.2f}".format(bond.yield_.clean_price) }} XOF{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Accrued coupon</th>
+        <tr><th>{{ "Accrued coupon"|t }}</th>
           <td>{% if bond.yield_.accrued_coupon is not none %}{{ "{:,.2f}".format(bond.yield_.accrued_coupon) }} XOF{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Dirty price</th>
+        <tr><th>{{ "Dirty price"|t }}</th>
           <td>{% if bond.yield_.dirty_price is not none %}{{ "{:,.2f}".format(bond.yield_.dirty_price) }} XOF{% else %}—{% endif %}</td>
         </tr>
       </table>
     </div>
 
     <div class="panel">
-      <h2>Yield</h2>
+      <h2>{{ "Yield"|t }}</h2>
       <table class="kv">
-        <tr><th>Current yield</th>
+        <tr><th>{{ "Current yield"|t }}</th>
           <td>{% if bond.yield_.current_yield_pct is not none %}{{ "%.2f"|format(bond.yield_.current_yield_pct) }}%{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Yield to maturity</th>
+        <tr><th>{{ "Yield to maturity"|t }}</th>
           <td>{% if bond.yield_.ytm_pct is not none %}{{ "%.2f"|format(bond.yield_.ytm_pct) }}%{% else %}—{% endif %}</td>
         </tr>
       </table>
     </div>
 
     <div class="panel">
-      <h2>Duration &amp; convexity</h2>
+      <h2>{{ "Duration & convexity"|t }}</h2>
       <table class="kv">
-        <tr><th>Macaulay duration</th>
-          <td>{% if bond.yield_.macaulay_duration_years is not none %}{{ "%.2f"|format(bond.yield_.macaulay_duration_years) }} yrs{% else %}—{% endif %}</td>
+        <tr><th>{{ "Macaulay duration"|t }}</th>
+          <td>{% if bond.yield_.macaulay_duration_years is not none %}{{ "%.2f"|format(bond.yield_.macaulay_duration_years) }} {{ "yrs"|t }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Modified duration</th>
-          <td>{% if bond.yield_.modified_duration_years is not none %}{{ "%.2f"|format(bond.yield_.modified_duration_years) }} yrs{% else %}—{% endif %}</td>
+        <tr><th>{{ "Modified duration"|t }}</th>
+          <td>{% if bond.yield_.modified_duration_years is not none %}{{ "%.2f"|format(bond.yield_.modified_duration_years) }} {{ "yrs"|t }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Convexity</th>
+        <tr><th>{{ "Convexity"|t }}</th>
           <td>{% if bond.yield_.convexity is not none %}{{ "%.2f"|format(bond.yield_.convexity) }}{% else %}—{% endif %}</td>
         </tr>
       </table>
@@ -45,44 +45,43 @@
   {% set cadence = {1: 'annual', 2: 'semi-annual', 4: 'quarterly'}.get(
       bond.schedule.payments_per_year if bond.schedule else 1, 'annual') %}
   <p class="dim" style="margin-top: 12px;">
-    YTM solved via bisection on the bullet + {{ cadence }} cash-flow schedule
+    {{ "YTM solved via bisection on the bullet +"|t }} {{ cadence|t }} {{ "cash-flow schedule"|t }}
     ({{ bond.schedule.coupons_remaining if bond.schedule else 0 }}
-    coupons remaining). Duration is <em>modified</em>, in years —
-    scales price sensitivity to a small parallel shift in the yield.
+    {{ "coupons remaining"|t }}). {{ "Duration is"|t }} <em>{{ "modified"|t }}</em>, {{ "in years — scales price sensitivity to a small parallel shift in the yield."|t }}
   </p>
 
   <details class="panel" style="margin-top: 12px;">
-    <summary><strong>Yield &amp; risk glossary</strong> <span class="dim">— formulas + reading guide</span></summary>
+    <summary><strong>{{ "Yield & risk glossary"|t }}</strong> <span class="dim">— {{ "formulas + reading guide"|t }}</span></summary>
     <table class="kv" style="margin-top: 8px;">
       <tr>
-        <th>Clean price</th>
+        <th>{{ "Clean price"|t }}</th>
         <td>
           Quoted market price, <strong>excluding</strong> accrued interest since the last coupon.
           What you see on brvm.org's cotation page.
         </td>
       </tr>
       <tr>
-        <th>Accrued coupon</th>
+        <th>{{ "Accrued coupon"|t }}</th>
         <td>
           Interest that has built up since the last coupon date. Belongs to the seller in a settled trade.
         </td>
       </tr>
       <tr>
-        <th>Dirty price</th>
+        <th>{{ "Dirty price"|t }}</th>
         <td>
           <strong>Clean + accrued</strong> — the actual cash paid on settlement. YTM discounts future cash
           flows to the dirty price, not the clean.
         </td>
       </tr>
       <tr>
-        <th>Current yield</th>
+        <th>{{ "Current yield"|t }}</th>
         <td>
           <strong>Annual coupon / clean price.</strong> Quick income yield if you hold for a year;
           ignores capital gain/loss to maturity, so trades above par read too high and trades below par too low.
         </td>
       </tr>
       <tr>
-        <th>Yield to maturity</th>
+        <th>{{ "Yield to maturity"|t }}</th>
         <td>
           <strong>The single yield that discounts all remaining coupons + principal to the dirty price.</strong>
           Total-return yield if you hold to maturity and reinvest coupons at the same rate. Solved by bisection
@@ -90,7 +89,7 @@
         </td>
       </tr>
       <tr>
-        <th>Macaulay duration</th>
+        <th>{{ "Macaulay duration"|t }}</th>
         <td>
           <strong>Weighted-average time to receive the bond's cash flows</strong>, in years, weighted by
           each cash flow's present value. Always &lt; maturity for coupon-paying bonds (interim coupons pull
@@ -98,7 +97,7 @@
         </td>
       </tr>
       <tr>
-        <th>Modified duration</th>
+        <th>{{ "Modified duration"|t }}</th>
         <td>
           <strong>Macaulay / (1 + y).</strong> Approximate <em>percent</em> price change per <em>1 percentage
           point</em> parallel shift in yield: ΔP/P ≈ −ModD × Δy. A 5-year modified duration means a +1% yield
@@ -106,7 +105,7 @@
         </td>
       </tr>
       <tr>
-        <th>Convexity</th>
+        <th>{{ "Convexity"|t }}</th>
         <td>
           Second-order correction: <strong>ΔP/P ≈ −ModD × Δy + ½ × Convexity × Δy²</strong>.
           Always positive for vanilla bonds — captures the fact that duration under-predicts price gains
@@ -116,14 +115,13 @@
       </tr>
     </table>
     <div class="dim" style="margin-top: 8px;">
-      All figures assume bullet redemption and the inferred coupon cadence — see the Cash flow tab
-      for the exact schedule and the anchor date.
+      {{ "All figures assume bullet redemption and the inferred coupon cadence — see the Cash flow tab for the exact schedule and the anchor date."|t }}
     </div>
   </details>
 {% elif bond %}
   <div class="dim" style="padding: 16px;">
-    Yield analytics unavailable — missing price or coupon information.
+    {{ "Yield analytics unavailable — missing price or coupon information."|t }}
   </div>
 {% else %}
-  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+  <div class="dim" style="padding: 16px;">{{ "No bond data available for this ticker."|t }}</div>
 {% endif %}

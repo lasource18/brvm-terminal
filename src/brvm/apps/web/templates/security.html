@@ -26,10 +26,10 @@
     {% endif %}
   </div>
   <div class="sec-meta">
-    {{ sec.kind|capitalize }}
-    {% if sec.quote and sec.quote.volume %} · Vol {{ "{:,}".format(sec.quote.volume) }}{% endif %}
-    {% if sec.quote and sec.quote.turnover %} · Turnover {{ "{:,.0f}".format(sec.quote.turnover) }} XOF{% endif %}
-    {% if sec.source_url %} · <a href="{{ sec.source_url }}" target="_blank" rel="noopener">source</a>{% endif %}
+    {{ sec.kind|capitalize|t }}
+    {% if sec.quote and sec.quote.volume %} · {{ "Vol"|t }} {{ "{:,}".format(sec.quote.volume) }}{% endif %}
+    {% if sec.quote and sec.quote.turnover %} · {{ "Turnover"|t }} {{ "{:,.0f}".format(sec.quote.turnover) }} XOF{% endif %}
+    {% if sec.source_url %} · <a href="{{ sec.source_url }}" target="_blank" rel="noopener">{{ "source"|t }}</a>{% endif %}
   </div>
 
   <nav class="tabbar" role="tablist">
@@ -37,7 +37,7 @@
       <a role="tab"
          aria-selected="{{ 'true' if t.key == active_tab else 'false' }}"
          class="tab {% if t.key == active_tab %}active{% endif %}"
-         href="/s/{{ sec.ticker }}/{{ t.key }}">{{ t.label }}</a>
+         href="/s/{{ sec.ticker }}/{{ t.key }}">{{ t.label|t }}</a>
     {% endfor %}
   </nav>
 

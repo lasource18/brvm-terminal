@@ -2,11 +2,11 @@
   <table class="quotes">
     <thead>
       <tr>
-        <th>TICKER</th>
-        <th>NAME</th>
-        <th class="rt">COUPON</th>
-        <th class="rt">MATURITY</th>
-        <th>COUNTRY</th>
+        <th>{{ "TICKER"|t }}</th>
+        <th>{{ "NAME"|t }}</th>
+        <th class="rt">{{ "COUPON"|t }}</th>
+        <th class="rt">{{ "MATURITY"|t }}</th>
+        <th>{{ "COUNTRY"|t }}</th>
       </tr>
     </thead>
     <tbody>
@@ -17,7 +17,7 @@
           <td class="rt">{% if r.coupon_rate is not none %}{{ "%.2f"|format(r.coupon_rate) }}%{% else %}—{% endif %}</td>
           <td class="rt">
             {% if r.maturity_year %}{{ r.maturity_year }}{% else %}—{% endif %}
-            {% if r.is_matured %}<span class="dim">· matured</span>{% endif %}
+            {% if r.is_matured %}<span class="dim">· {{ "matured"|t }}</span>{% endif %}
           </td>
           <td>{{ r.country or "—" }}</td>
         </tr>
@@ -25,16 +25,16 @@
     </tbody>
   </table>
   <p class="dim" style="margin-top: 12px;">
-    All bonds from
-    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}this issuer{% endif %},
-    sorted by maturity. Matured issues appear dimmed for context.
+    {{ "All bonds from"|t }}
+    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}{{ "this issuer"|t }}{% endif %},
+    {{ "sorted by maturity. Matured issues appear dimmed for context."|t }}
   </p>
 {% elif bond %}
   <div class="dim" style="padding: 16px;">
-    No other bonds from
-    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}this issuer{% endif %}
-    are currently listed.
+    {{ "No other bonds from"|t }}
+    {% if bond.issuer_name %}<strong>{{ bond.issuer_name }}</strong>{% else %}{{ "this issuer"|t }}{% endif %}
+    {{ "are currently listed."|t }}
   </div>
 {% else %}
-  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+  <div class="dim" style="padding: 16px;">{{ "No bond data available for this ticker."|t }}</div>
 {% endif %}

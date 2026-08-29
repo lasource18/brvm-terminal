@@ -42,6 +42,13 @@ body {
 .topbar nav a:hover { border-color: var(--border); background: var(--bg-hover); }
 .topbar .spacer { flex: 1; }
 .topbar .clock { color: var(--muted); }
+/* FR|EN toggle — inactive locale is dim, active is bright + underlined so
+   the current choice is obvious at a glance. Kept compact so it doesn't
+   compete with the search input for horizontal space. */
+.topbar .lang-toggle { color: var(--muted); font-size: 0.9em; letter-spacing: 0.5px; }
+.topbar .lang-toggle a { color: var(--muted); text-decoration: none; padding: 2px 4px; }
+.topbar .lang-toggle a:hover { color: var(--fg); }
+.topbar .lang-toggle a.lang-active { color: var(--accent); font-weight: bold; text-decoration: underline; }
 
 /* --- search box in topbar --- */
 .search-wrap { position: relative; }

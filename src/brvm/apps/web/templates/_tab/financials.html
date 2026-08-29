@@ -16,7 +16,7 @@
      ('free_cash_flow',     'Free cash flow'),
    ] %}
 <div class="panel">
-  <h2>Financials · {{ sec.ticker }}</h2>
+  <h2>{{ "Financials"|t }} · {{ sec.ticker }}</h2>
   {% if fin.has_data %}
     {# F-24: annotate per-column currency when the extract found more
        than one code across periods (an issuer publishing an EUR
@@ -24,15 +24,15 @@
        the pre-fix single caption. #}
     <div class="dim" style="margin-bottom: 8px;">
       {% if fin.has_mixed_currencies %}
-        Annual · amounts as reported · currency varies by period (see column headers) · extracted from filings
+        {{ "Annual · amounts as reported · currency varies by period (see column headers) · extracted from filings"|t }}
       {% else %}
-        Annual · amounts in {{ fin.currency }} · extracted from filings
+        {{ "Annual · amounts in"|t }} {{ fin.currency }} · {{ "extracted from filings"|t }}
       {% endif %}
     </div>
     <table class="quotes">
       <thead>
         <tr>
-          <th>METRIC</th>
+          <th>{{ "METRIC"|t }}</th>
           {% for y in fin.periods %}
             <th>
               {{ y }}
@@ -50,7 +50,7 @@
              the table dense for issuers where a metric is never reported. #}
           {% if values|select("ne", none)|list %}
             <tr>
-              <td>{{ label }}</td>
+              <td>{{ label|t }}</td>
               {% for v in values %}
                 <td>
                   {% if v is none %}
@@ -69,21 +69,20 @@
     </table>
   {% else %}
     <div class="dim" style="padding: 12px;">
-      No extracted financials yet for {{ sec.ticker }}. Runs after the daily
-      <code>fundamentals-extract</code> job processes an annual filing.
+      {{ "No extracted financials yet for"|t }} {{ sec.ticker }}. {{ "Runs after the daily fundamentals-extract job processes an annual filing."|t }}
     </div>
   {% endif %}
 
   {% if interim and interim.has_data %}
     <div style="margin-top: 16px;">
       <div class="dim" style="margin-bottom: 8px;">
-        Latest interim · {{ interim.period_kind }} {{ interim.period_year }} ·
-        amounts in {{ interim.currency }} · period-to-date, not annualised
+        {{ "Latest interim ·"|t }} {{ interim.period_kind }} {{ interim.period_year }} ·
+        {{ "amounts in"|t }} {{ interim.currency }} · {{ "period-to-date, not annualised"|t }}
       </div>
       <table class="quotes">
         <thead>
           <tr>
-            <th>METRIC</th>
+            <th>{{ "METRIC"|t }}</th>
             <th>{{ interim.period_kind }} {{ interim.period_year }}</th>
           </tr>
         </thead>
@@ -92,7 +91,7 @@
             {% set v = interim.metrics.get(key) %}
             {% if v is not none %}
               <tr>
-                <td>{{ label }}</td>
+                <td>{{ label|t }}</td>
                 <td>
                   {% if key in ('eps', 'dividend_per_share') %}
                     {{ "{:,.2f}".format(v) }}
@@ -107,10 +106,10 @@
       </table>
 
       {% if interim_ratios and interim_ratios.has_any %}
-        <div class="dim" style="margin: 10px 0 6px;">Interim ratios (period-to-date)</div>
+        <div class="dim" style="margin: 10px 0 6px;">{{ "Interim ratios (period-to-date)"|t }}</div>
         <table class="quotes">
           <thead>
-            <tr><th>METRIC</th><th>{{ interim_ratios.period_kind }} {{ interim_ratios.period_year }}</th></tr>
+            <tr><th>{{ "METRIC"|t }}</th><th>{{ interim_ratios.period_kind }} {{ interim_ratios.period_year }}</th></tr>
           </thead>
           <tbody>
             {# Interim card shows only ratios that make sense on a period-
@@ -124,7 +123,7 @@
               ] %}
               {% if r %}
                 <tr title="{{ r.provenance }}">
-                  <td>{{ label }}</td>
+                  <td>{{ label|t }}</td>
                   <td>
                     {% if r.unit == 'pct' %}{{ "{:,.2f}%".format(r.value) }}
                     {% else %}{{ "{:,.2f}x".format(r.value) }}{% endif %}
@@ -161,18 +160,18 @@
       ] %}
     <div style="margin-top: 16px;">
       <div class="dim" style="margin-bottom: 8px;">
-        Ratios · annual · price from latest snapshot
+        {{ "Ratios · annual · price from latest snapshot"|t }}
         {% if ratios_series[0].price is not none %}
-          (last {{ "{:,.0f}".format(ratios_series[0].price) }})
+          ({{ "last"|t }} {{ "{:,.0f}".format(ratios_series[0].price) }})
         {% endif %}
         {% if ratios_series[0].currency_mismatch %}
-          · <span class="warn">currency mismatch — price-based ratios suppressed</span>
+          · <span class="warn">{{ "currency mismatch — price-based ratios suppressed"|t }}</span>
         {% endif %}
       </div>
       <table class="quotes">
         <thead>
           <tr>
-            <th>METRIC</th>
+            <th>{{ "METRIC"|t }}</th>
             {% for view in ratios_series %}<th>{{ view.period_year }}</th>{% endfor %}
           </tr>
         </thead>
@@ -183,7 +182,7 @@
             {% set values = ratios_series | map(attribute=key) | list %}
             {% if values | select | list %}
               <tr>
-                <td>{{ label }}</td>
+                <td>{{ label|t }}</td>
                 {% for r in values %}
                   <td {% if r %}title="{{ r.provenance }}"{% endif %}>
                     {% if r is none or r.value is none %}
@@ -201,10 +200,7 @@
         </tbody>
       </table>
       <div class="dim" style="margin-top: 6px; font-size: 0.85em;">
-        * EV/EBITDA uses market cap as an EV proxy and operating income
-        (RBE) as an EBITDA proxy — we don't yet ingest net debt or D&A,
-        so the multiple is directionally informative but not comparable
-        to a full EV/EBITDA screen.
+        {{ "* EV/EBITDA uses market cap as an EV proxy and operating income (RBE) as an EBITDA proxy — we don't yet ingest net debt or D&A, so the multiple is directionally informative but not comparable to a full EV/EBITDA screen."|t }}
       </div>
     </div>
   {% endif %}
@@ -212,17 +208,16 @@
   {% if filing_refs %}
     <div style="margin-top: 16px;">
       <div class="dim" style="margin-bottom: 8px;">
-        References · filings used to populate the rows above · click to
-        open the source PDF
+        {{ "References · filings used to populate the rows above · click to open the source PDF"|t }}
       </div>
       <table class="quotes">
         <thead>
           <tr>
-            <th>PERIOD</th>
-            <th>DOC TYPE</th>
-            <th>PUBLISHED</th>
-            <th>SOURCE</th>
-            <th>LINK</th>
+            <th>{{ "PERIOD"|t }}</th>
+            <th>{{ "DOC TYPE"|t }}</th>
+            <th>{{ "PUBLISHED"|t }}</th>
+            <th>{{ "SOURCE"|t }}</th>
+            <th>{{ "LINK"|t }}</th>
           </tr>
         </thead>
         <tbody>
@@ -233,7 +228,7 @@
               <td>{{ f.published_date or '—' }}</td>
               <td>{{ f.source }}</td>
               <td>
-                <a href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">open</a>
+                <a href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ "open"|t }}</a>
               </td>
             </tr>
           {% endfor %}

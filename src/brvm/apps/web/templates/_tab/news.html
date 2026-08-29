@@ -1,5 +1,5 @@
 <div class="panel">
-  <h2>News · {{ sec.ticker }}</h2>
+  <h2>{{ "News"|t }} · {{ sec.ticker }}</h2>
   <div class="panel-body">
     {# Hitting the security-tab endpoint keeps the URL bar stable across
        pagination clicks (deep-linkable), whereas a per-tab fragment
@@ -7,7 +7,7 @@
     {% set feed_url = '/_frag/news' %}
     {% include '_frag/news_feed.html' %}
     <div class="dim" style="margin-top: 8px;">
-      <a href="/news?ticker={{ sec.ticker }}">Open in full news view →</a>
+      <a href="/news?ticker={{ sec.ticker }}">{{ "Open in full news view →"|t }}</a>
     </div>
   </div>
 </div>

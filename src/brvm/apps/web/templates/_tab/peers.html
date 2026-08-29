@@ -86,49 +86,55 @@
   {% endif %}
 </div>
 <details class="panel" style="margin-top: 12px;">
-  <summary><strong>Ratio glossary</strong> <span class="dim">— formulas + reading guide</span></summary>
+  <summary><strong>{{ "Ratio glossary"|t }}</strong> <span class="dim">— {{ "formulas + reading guide"|t }}</span></summary>
   <table class="kv" style="margin-top: 8px;">
     <tr>
       <th>P/E</th>
       <td>
-        <strong>Price / earnings per share.</strong> How many years of current EPS the market is paying for a share.
-        Lower = cheaper on earnings; negative EPS → suppressed (a negative multiple is a trap for a skim-reader).
+        <strong>{{ "Price / earnings per share."|t }}</strong>
+        {{ "How many years of current EPS the market is paying for a share."|t }}
+        {{ "Lower = cheaper on earnings; negative EPS → suppressed (a negative multiple is a trap for a skim-reader)."|t }}
       </td>
     </tr>
     <tr>
       <th>ROE</th>
       <td>
-        <strong>Net income / total equity.</strong> Return the company generates on shareholder capital.
-        Sector-relative — banks/insurers structurally sit higher than industrials.
+        <strong>{{ "Net income / total equity."|t }}</strong>
+        {{ "Return the company generates on shareholder capital."|t }}
+        {{ "Sector-relative — banks/insurers structurally sit higher than industrials."|t }}
       </td>
     </tr>
     <tr>
       <th>NET MARG</th>
       <td>
-        <strong>Net income / revenue.</strong> How many CFA of profit per CFA of revenue.
-        Reflects operating efficiency + tax + non-op items combined.
+        <strong>{{ "Net income / revenue."|t }}</strong>
+        {{ "How many CFA of profit per CFA of revenue."|t }}
+        {{ "Reflects operating efficiency + tax + non-op items combined."|t }}
       </td>
     </tr>
     <tr>
       <th>P/FCF</th>
       <td>
-        <strong>Market cap / free cash flow.</strong> Cash-flow analog of P/E.
-        Suppressed when FCF is negative (a negative multiple is meaningless).
-        Complements P/E because accounting earnings and cash generation can diverge.
+        <strong>{{ "Market cap / free cash flow."|t }}</strong>
+        {{ "Cash-flow analog of P/E."|t }}
+        {{ "Suppressed when FCF is negative (a negative multiple is meaningless)."|t }}
+        {{ "Complements P/E because accounting earnings and cash generation can diverge."|t }}
       </td>
     </tr>
     <tr>
       <th>FCF YLD</th>
       <td>
-        <strong>Free cash flow / market cap</strong>, in %. Cash-flow yield to the equity holder.
-        Negative values are shown (informative: the company is burning cash).
-        Compare against local risk-free rates + coupon yields on the Bonds tab.
+        <strong>{{ "Free cash flow / market cap"|t }}</strong>, %.
+        {{ "Cash-flow yield to the equity holder."|t }}
+        {{ "Negative values are shown (informative: the company is burning cash)."|t }}
+        {{ "Compare against local risk-free rates + coupon yields on the Bonds tab."|t }}
       </td>
     </tr>
     <tr>
       <th>EV/EBITDA<span class="dim">*</span></th>
       <td>
-        <strong>Enterprise value / EBITDA.</strong> Capital-structure-neutral valuation multiple.
+        <strong>{{ "Enterprise value / EBITDA."|t }}</strong>
+        {{ "Capital-structure-neutral valuation multiple."|t }}
         <span class="dim">
           * BRVM issuers don't reliably publish net debt or D&amp;A yet, so this uses
           <code>EV ≈ market cap</code> and <code>EBITDA ≈ operating income</code>. Treat as a proxy —
@@ -139,8 +145,7 @@
     <tr>
       <th>MEDIAN / MEAN</th>
       <td>
-        Central tendency across non-self peers. Both stay blank when fewer than 2 peers
-        report a field (a single sample isn't a sector reference).
+        {{ "Central tendency across non-self peers. Both stay blank when fewer than 2 peers report a field (a single sample isn't a sector reference)."|t }}
       </td>
     </tr>
   </table>

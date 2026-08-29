@@ -1,35 +1,35 @@
 {% if bond %}
   <div class="panels desc-panels">
     <div class="panel">
-      <h2>Bond</h2>
+      <h2>{{ "Bond"|t }}</h2>
       <table class="kv">
-        <tr><th>Issuer</th><td>{{ bond.issuer_name or "—" }}</td></tr>
-        <tr><th>Category</th><td>{{ bond.sector or "—" }}</td></tr>
-        {% if bond.country %}<tr><th>Country</th><td>{{ bond.country }}</td></tr>{% endif %}
+        <tr><th>{{ "Issuer"|t }}</th><td>{{ bond.issuer_name or "—" }}</td></tr>
+        <tr><th>{{ "Category"|t }}</th><td>{{ bond.sector or "—" }}</td></tr>
+        {% if bond.country %}<tr><th>{{ "Country"|t }}</th><td>{{ bond.country }}</td></tr>{% endif %}
         {% set ppy = bond.schedule.payments_per_year if bond.schedule else 1 %}
         {% set cadence = {1: 'annual', 2: 'semi-annual', 4: 'quarterly'}.get(ppy, 'annual') %}
-        <tr><th>Coupon</th>
+        <tr><th>{{ "Coupon"|t }}</th>
           <td>
             {% if bond.coupon_rate is not none %}{{ "%.2f"|format(bond.coupon_rate) }}%{% else %}—{% endif %}
-            <span class="dim">· {{ cadence }}{% if bond.schedule is none %} (assumed){% endif %}</span>
+            <span class="dim">· {{ cadence|t }}{% if bond.schedule is none %} ({{ "assumed"|t }}){% endif %}</span>
           </td>
         </tr>
-        <tr><th>Issue date</th>
+        <tr><th>{{ "Issue date"|t }}</th>
           <td>{% if bond.issue_date %}{{ bond.issue_date.isoformat() }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Maturity</th>
+        <tr><th>{{ "Maturity"|t }}</th>
           <td>{% if bond.maturity_year %}{{ bond.maturity_year }}{% else %}—{% endif %}</td>
         </tr>
-        <tr><th>Nominal</th>
+        <tr><th>{{ "Nominal"|t }}</th>
           <td>
             {% if bond.schedule %}
               {{ "{:,.0f}".format(bond.schedule.nominal) }} XOF
               <span class="dim">
-                · residual (inferred from last coupon
-                {%- if bond.schedule.nominal != 10000 %} vs. 10 000 XOF issuance{% endif -%})
+                · {{ "residual (inferred from last coupon"|t }}
+                {%- if bond.schedule.nominal != 10000 %} {{ "vs. 10 000 XOF issuance"|t }}{% endif -%})
               </span>
             {% else %}
-              {{ "{:,.0f}".format(10000) }} XOF <span class="dim">· assumed</span>
+              {{ "{:,.0f}".format(10000) }} XOF <span class="dim">· {{ "assumed"|t }}</span>
             {% endif %}
           </td>
         </tr>
@@ -37,16 +37,16 @@
     </div>
 
     <div class="panel">
-      <h2>Latest price</h2>
+      <h2>{{ "Latest price"|t }}</h2>
       <table class="kv">
-        <tr><th>Clean price</th>
+        <tr><th>{{ "Clean price"|t }}</th>
           <td>{% if bond.clean_price is not none %}{{ "{:,.2f}".format(bond.clean_price) }} XOF{% else %}—{% endif %}</td>
         </tr>
         {% if bond.last_snapshot %}
-          <tr><th>Accrued coupon</th>
+          <tr><th>{{ "Accrued coupon"|t }}</th>
             <td>{% if bond.last_snapshot.accrued_coupon is not none %}{{ "{:,.2f}".format(bond.last_snapshot.accrued_coupon) }} XOF{% else %}—{% endif %}</td>
           </tr>
-          <tr><th>Last payment</th>
+          <tr><th>{{ "Last payment"|t }}</th>
             <td>
               {% if bond.last_snapshot.last_coupon_date %}
                 {{ bond.last_snapshot.last_coupon_date.isoformat() }}
@@ -58,27 +58,27 @@
           </tr>
         {% endif %}
         {% if bond.yield_ %}
-          <tr><th>Current yield</th>
+          <tr><th>{{ "Current yield"|t }}</th>
             <td>
               {% if bond.yield_.current_yield_pct is not none %}
                 {{ "%.2f"|format(bond.yield_.current_yield_pct) }}%
               {% else %}—{% endif %}
             </td>
           </tr>
-          <tr><th>Yield to maturity</th>
+          <tr><th>{{ "Yield to maturity"|t }}</th>
             <td>
               {% if bond.yield_.ytm_pct is not none %}
                 {{ "%.2f"|format(bond.yield_.ytm_pct) }}%
-                <span class="dim">· bullet, annual</span>
+                <span class="dim">· {{ "bullet, annual"|t }}</span>
               {% else %}—{% endif %}
             </td>
           </tr>
         {% endif %}
         {% if bond.schedule and bond.schedule.next_coupon_date %}
-          <tr><th>Next coupon</th>
+          <tr><th>{{ "Next coupon"|t }}</th>
             <td>
               {{ bond.schedule.next_coupon_date.isoformat() }}
-              <span class="dim">· {{ bond.schedule.coupons_remaining }} left</span>
+              <span class="dim">· {{ bond.schedule.coupons_remaining }} {{ "left"|t }}</span>
             </td>
           </tr>
         {% endif %}
@@ -87,16 +87,16 @@
 
     {% if bond.issuer_equity_ticker or bond.prospectus_news %}
       <div class="panel">
-        <h2>Related</h2>
+        <h2>{{ "Related"|t }}</h2>
         <table class="kv">
           {% if bond.issuer_equity_ticker %}
-            <tr><th>Issuer equity</th>
+            <tr><th>{{ "Issuer equity"|t }}</th>
               <td><a href="/s/{{ bond.issuer_equity_ticker }}">{{ bond.issuer_equity_ticker }}</a></td>
             </tr>
           {% endif %}
         </table>
         {% if bond.prospectus_news %}
-          <h3 style="margin-top:12px;">Prospectus / admission news</h3>
+          <h3 style="margin-top:12px;">{{ "Prospectus / admission news"|t }}</h3>
           <ul class="dim">
             {% for n in bond.prospectus_news %}
               <li>
@@ -110,8 +110,8 @@
     {% endif %}
   </div>
   {% if bond.source_url %}
-    <div class="dim" style="margin-top: 8px;">source: <a href="{{ bond.source_url }}" target="_blank" rel="noopener">brvm.org</a></div>
+    <div class="dim" style="margin-top: 8px;">{{ "source"|t }}: <a href="{{ bond.source_url }}" target="_blank" rel="noopener">brvm.org</a></div>
   {% endif %}
 {% else %}
-  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+  <div class="dim" style="padding: 16px;">{{ "No bond data available for this ticker."|t }}</div>
 {% endif %}

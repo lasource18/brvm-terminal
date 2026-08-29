@@ -7,10 +7,10 @@
   <table class="quotes">
     <thead>
       <tr>
-        <th>DATE</th>
-        <th class="rt">COUPON</th>
-        <th class="rt">PRINCIPAL</th>
-        <th class="rt">TOTAL</th>
+        <th>{{ "DATE"|t }}</th>
+        <th class="rt">{{ "COUPON"|t }}</th>
+        <th class="rt">{{ "PRINCIPAL"|t }}</th>
+        <th class="rt">{{ "TOTAL"|t }}</th>
       </tr>
     </thead>
     <tbody>
@@ -26,25 +26,23 @@
   </table>
   {% set cadence = {1: 'annual', 2: 'semi-annual', 4: 'quarterly'}.get(bond.schedule.payments_per_year, 'annual') %}
   <p class="dim" style="margin-top: 12px;">
-    Schedule assumes <strong>bullet redemption</strong> + <strong>{{ cadence }} coupons</strong>
-    at a nominal of {{ "{:,.0f}".format(bond.schedule.nominal) }} XOF
-    (annual coupon: {{ "{:,.2f}".format(bond.schedule.annual_coupon) }} XOF).
-    Coupon cadence is inferred from the exchange's last-coupon amount vs.
-    price — verify against the prospectus for atypical issues.
-    Coupon anchor:
+    {{ "Schedule assumes"|t }} <strong>{{ "bullet redemption"|t }}</strong> + <strong>{{ cadence|t }} {{ "coupons"|t }}</strong>
+    {{ "at a nominal of"|t }} {{ "{:,.0f}".format(bond.schedule.nominal) }} XOF
+    ({{ "annual coupon"|t }}: {{ "{:,.2f}".format(bond.schedule.annual_coupon) }} XOF).
+    {{ "Coupon cadence is inferred from the exchange's last-coupon amount vs. price — verify against the prospectus for atypical issues."|t }}
+    {{ "Coupon anchor:"|t }}
     {% if bond.last_snapshot and bond.last_snapshot.last_coupon_date %}
-      last-payment anniversary
+      {{ "last-payment anniversary"|t }}
       ({{ bond.last_snapshot.last_coupon_date.isoformat() }})
     {% elif bond.issue_date %}
-      issue-date anniversary
+      {{ "issue-date anniversary"|t }}
       ({{ bond.issue_date.isoformat() }})
     {% else %}—{% endif %}.
   </p>
 {% elif bond %}
   <div class="dim" style="padding: 16px;">
-    Cash-flow schedule unavailable — this bond is missing coupon rate,
-    maturity year, or a coupon-date anchor.
+    {{ "Cash-flow schedule unavailable — this bond is missing coupon rate, maturity year, or a coupon-date anchor."|t }}
   </div>
 {% else %}
-  <div class="dim" style="padding: 16px;">No bond data available for this ticker.</div>
+  <div class="dim" style="padding: 16px;">{{ "No bond data available for this ticker."|t }}</div>
 {% endif %}

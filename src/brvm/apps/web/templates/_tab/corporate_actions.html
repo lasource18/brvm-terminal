@@ -1,25 +1,25 @@
 <div class="panel">
-  <h2>Corporate actions · {{ sec.ticker }}</h2>
+  <h2>{{ "Corporate actions"|t }} · {{ sec.ticker }}</h2>
   {% if actions %}
     <table class="quotes">
       <thead>
         <tr>
-          <th>EX-DATE</th><th>KIND</th>
-          <th>AMOUNT</th><th>YIELD%</th>
-          <th>PAY DATE</th><th>NOTE</th>
+          <th>{{ "EX-DATE"|t }}</th><th>{{ "KIND"|t }}</th>
+          <th>{{ "AMOUNT"|t }}</th><th>{{ "YIELD%"|t }}</th>
+          <th>{{ "PAY DATE"|t }}</th><th>{{ "NOTE"|t }}</th>
         </tr>
       </thead>
       <tbody>
         {% for a in actions %}
           <tr>
-            <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">TBD</span>{% endif %}</td>
+            <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">{{ "TBD"|t }}</span>{% endif %}</td>
             <td>{{ a.kind }}</td>
             <td>{% if a.amount is not none %}{{ "{:,.2f}".format(a.amount) }}{% if a.currency %} {{ a.currency }}{% endif %}{% else %}—{% endif %}</td>
             <td>{% if a.yield_pct is not none %}{{ "%.2f"|format(a.yield_pct) }}%{% else %}—{% endif %}</td>
             <td>{% if a.pay_date %}{{ a.pay_date }}{% else %}—{% endif %}</td>
             <td class="dim">
               {{ a.note or '' }}
-              {% if a.source_url %} · <a href="{{ a.source_url }}" target="_blank" rel="noopener">source</a>{% endif %}
+              {% if a.source_url %} · <a href="{{ a.source_url }}" target="_blank" rel="noopener">{{ "source"|t }}</a>{% endif %}
             </td>
           </tr>
         {% endfor %}
@@ -27,7 +27,7 @@
     </table>
   {% else %}
     <div class="dim" style="padding: 12px;">
-      No upcoming corporate actions for {{ sec.ticker }} in the next 90 days.
+      {{ "No upcoming corporate actions for"|t }} {{ sec.ticker }} {{ "in the next 90 days."|t }}
     </div>
   {% endif %}
 </div>

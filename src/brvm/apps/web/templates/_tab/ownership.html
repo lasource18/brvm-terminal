@@ -1,17 +1,17 @@
 {# Ownership tab — top shareholders as of the latest extracted period. #}
 {% set own = ownership %}
 <div class="panel">
-  <h2>Ownership · {{ sec.ticker }}</h2>
+  <h2>{{ "Ownership"|t }} · {{ sec.ticker }}</h2>
   {% if own.has_data %}
     <div class="dim" style="margin-bottom: 8px;">
-      As of {{ own.period_year }} ({{ own.period_kind }})
+      {{ "As of"|t }} {{ own.period_year }} ({{ own.period_kind }})
     </div>
     <table class="quotes">
       <thead>
         <tr>
-          <th>HOLDER</th>
+          <th>{{ "HOLDER"|t }}</th>
           <th>%</th>
-          <th>SHARES</th>
+          <th>{{ "SHARES"|t }}</th>
         </tr>
       </thead>
       <tbody>
@@ -38,7 +38,7 @@
     </table>
   {% else %}
     <div class="dim" style="padding: 12px;">
-      No ownership data extracted yet for {{ sec.ticker }}.
+      {{ "No ownership data extracted yet for"|t }} {{ sec.ticker }}.
     </div>
   {% endif %}
 </div>
