@@ -153,6 +153,13 @@ class PeerRow(BaseModel):
     pe: float | None = None
     roe: float | None = None            # percentage points, e.g. 12.3
     net_margin: float | None = None     # percentage points
+    # PR-F — cash-flow ratios sourced from the same `services/ratios`
+    # bundle. EV/EBITDA is a proxy: EV≈market_cap (no net debt yet) and
+    # EBITDA≈operating_income (no D&A yet); the ratios service tags this
+    # in `provenance` and the Peers legend surfaces the caveat.
+    pfcf: float | None = None           # multiple, e.g. 8.5
+    fcf_yield: float | None = None      # percentage points, negative allowed
+    ev_ebitda: float | None = None      # multiple; proxy — see legend
     # True for the "self" row appended to the peers list so the currently-
     # viewed company shows up in the comparison table (rendered at the
     # bottom, visually distinguished by the template).

@@ -42,12 +42,84 @@
       </table>
     </div>
   </div>
+  {% set cadence = {1: 'annual', 2: 'semi-annual', 4: 'quarterly'}.get(
+      bond.schedule.payments_per_year if bond.schedule else 1, 'annual') %}
   <p class="dim" style="margin-top: 12px;">
-    YTM solved via bisection on the bullet + annual cash-flow schedule
+    YTM solved via bisection on the bullet + {{ cadence }} cash-flow schedule
     ({{ bond.schedule.coupons_remaining if bond.schedule else 0 }}
     coupons remaining). Duration is <em>modified</em>, in years —
     scales price sensitivity to a small parallel shift in the yield.
   </p>
+
+  <details class="panel" style="margin-top: 12px;">
+    <summary><strong>Yield &amp; risk glossary</strong> <span class="dim">— formulas + reading guide</span></summary>
+    <table class="kv" style="margin-top: 8px;">
+      <tr>
+        <th>Clean price</th>
+        <td>
+          Quoted market price, <strong>excluding</strong> accrued interest since the last coupon.
+          What you see on brvm.org's cotation page.
+        </td>
+      </tr>
+      <tr>
+        <th>Accrued coupon</th>
+        <td>
+          Interest that has built up since the last coupon date. Belongs to the seller in a settled trade.
+        </td>
+      </tr>
+      <tr>
+        <th>Dirty price</th>
+        <td>
+          <strong>Clean + accrued</strong> — the actual cash paid on settlement. YTM discounts future cash
+          flows to the dirty price, not the clean.
+        </td>
+      </tr>
+      <tr>
+        <th>Current yield</th>
+        <td>
+          <strong>Annual coupon / clean price.</strong> Quick income yield if you hold for a year;
+          ignores capital gain/loss to maturity, so trades above par read too high and trades below par too low.
+        </td>
+      </tr>
+      <tr>
+        <th>Yield to maturity</th>
+        <td>
+          <strong>The single yield that discounts all remaining coupons + principal to the dirty price.</strong>
+          Total-return yield if you hold to maturity and reinvest coupons at the same rate. Solved by bisection
+          over [−50%, +100%]. Returns "—" for prices outside that bracket.
+        </td>
+      </tr>
+      <tr>
+        <th>Macaulay duration</th>
+        <td>
+          <strong>Weighted-average time to receive the bond's cash flows</strong>, in years, weighted by
+          each cash flow's present value. Always &lt; maturity for coupon-paying bonds (interim coupons pull
+          the average earlier).
+        </td>
+      </tr>
+      <tr>
+        <th>Modified duration</th>
+        <td>
+          <strong>Macaulay / (1 + y).</strong> Approximate <em>percent</em> price change per <em>1 percentage
+          point</em> parallel shift in yield: ΔP/P ≈ −ModD × Δy. A 5-year modified duration means a +1% yield
+          bump implies roughly a −5% price move.
+        </td>
+      </tr>
+      <tr>
+        <th>Convexity</th>
+        <td>
+          Second-order correction: <strong>ΔP/P ≈ −ModD × Δy + ½ × Convexity × Δy²</strong>.
+          Always positive for vanilla bonds — captures the fact that duration under-predicts price gains
+          when yields fall and over-predicts losses when yields rise. Higher = more curvature = the linear
+          duration approximation errs more on large yield moves.
+        </td>
+      </tr>
+    </table>
+    <div class="dim" style="margin-top: 8px;">
+      All figures assume bullet redemption and the inferred coupon cadence — see the Cash flow tab
+      for the exact schedule and the anchor date.
+    </div>
+  </details>
 {% elif bond %}
   <div class="dim" style="padding: 16px;">
     Yield analytics unavailable — missing price or coupon information.

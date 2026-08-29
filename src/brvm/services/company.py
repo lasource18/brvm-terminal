@@ -191,7 +191,8 @@ def clear_cache() -> None:
 
 
 def _annotate_with_ratios(peers: list[PeerRow]) -> list[PeerRow]:
-    """Attach P/E, ROE, net margin to each peer row.
+    """Attach P/E, ROE, net margin, P/FCF, FCF yield, and EV/EBITDA to
+    each peer row.
 
     Called on Peers-tab render; each ticker triggers one small SQL query
     (list_financials LIMIT 2 + latest quote + company_facts). At ~5 peers
@@ -207,6 +208,14 @@ def _annotate_with_ratios(peers: list[PeerRow]) -> list[PeerRow]:
             p.roe = view.roe.value
         if view.net_margin:
             p.net_margin = view.net_margin.value
+        # PR-F: cash-flow ratios. `fcf_yield` can legitimately be negative
+        # (loss-making FCF), so guard on `is not None` rather than truthiness.
+        if view.pfcf:
+            p.pfcf = view.pfcf.value
+        if view.fcf_yield is not None:
+            p.fcf_yield = view.fcf_yield.value
+        if view.ev_ebitda:
+            p.ev_ebitda = view.ev_ebitda.value
     return peers
 
 
@@ -250,7 +259,9 @@ def _self_row(ticker: str) -> PeerRow | None:
 
 
 _PEER_STAT_FIELDS: tuple[str, ...] = (
-    "pe", "roe", "net_margin", "change_ytd_pct", "change_day_pct",
+    "pe", "roe", "net_margin",
+    "pfcf", "fcf_yield", "ev_ebitda",
+    "change_ytd_pct", "change_day_pct",
 )
 
 
