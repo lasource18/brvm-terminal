@@ -252,8 +252,37 @@ def resolve_ticker(
 
 
 def _filings_root() -> Path:
+    """Absolute path to the filings corpus root, used for filesystem
+    I/O. Storage (see `_relativize`) writes project-relative paths so
+    a `data/` corpus stays portable across Mac → VPS moves (F-23)."""
     p = Path(settings.filings_root)
     return p if p.is_absolute() else Path.cwd() / p
+
+
+def _project_root() -> Path:
+    """Absolute path to the project root — one level up from `src/`.
+    Anchors the relative form of `filings.file_path` (F-23) so a
+    corpus can move between machines without every extract logging
+    `skipped_missing_file`."""
+    # `.../brvm-terminal/src/brvm/services/filings.py` → `.../brvm-terminal`
+    return Path(__file__).resolve().parents[3]
+
+
+def _relativize(dest: Path) -> str:
+    """Convert an absolute download destination to the project-
+    relative form persisted in `filings.file_path`. Absolute paths
+    outside the project root are stored verbatim (nothing safe to
+    strip); the corpus almost always sits under `data/filings/`
+    beneath the project so this happy-path fires on every ingest."""
+    dest = dest.resolve()
+    root = _project_root()
+    try:
+        return str(dest.relative_to(root))
+    except ValueError:
+        # Corpus was pointed somewhere outside the project (e.g. an
+        # absolute FILINGS_ROOT under /mnt or ~). Keep the absolute
+        # form — `_resolve_path` handles both.
+        return str(dest)
 
 
 def _size_ok(size_bytes: int) -> bool:
@@ -462,10 +491,10 @@ def pull_all(
                         counts["filings_oversize_or_broken"] += 1
                         continue
 
-                    # Store the path exactly as constructed — a relative
-                    # FILINGS_ROOT stays relative to CWD, an absolute one is
-                    # honoured as-is. Callers who need a real path resolve
-                    # against `settings.filings_root` themselves.
+                    # F-23: store the project-relative form of the
+                    # download destination so the corpus stays portable
+                    # across Mac → VPS. Readers resolve absolute paths
+                    # via `_resolve_path` in ocr / fundamentals.
                     filing = Filing(
                         ticker=ticker,
                         issuer_name=pf.issuer_code or entry.display_name,
@@ -477,7 +506,7 @@ def pull_all(
                         source_url=pf.source_url,
                         url_hash=uhash,
                         published_date=pf.published_date,
-                        file_path=str(dest),
+                        file_path=_relativize(dest),
                         size_bytes=size_bytes,
                         sha256=sha256_hex,
                         page_count=page_count,

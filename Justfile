@@ -52,6 +52,13 @@ bonds-poll:
 boc-reconcile:
     uv run python -m brvm.jobs.boc_reconcile --once
 
+# F-23: one-shot migration for filings.file_path stored as absolute
+# paths. Run once after upgrading to a build that persists relative
+# paths going forward, and again before a Mac → VPS deploy so the
+# corpus stays portable. Dry-run by default; pass APPLY=1 to commit.
+filings-paths-rewrite:
+    uv run python scripts/rewrite_filings_paths.py {{ if env_var_or_default("APPLY", "") == "" { "" } else { "--apply" } }}
+
 # Bulk-populate daily_bars for every equity so the Directory's period-return
 # columns (1W/1M/3M/YTD/1Y/ALL%) render values for the whole universe rather
 # than only the tickers a user has personally clicked into. Idempotent within
