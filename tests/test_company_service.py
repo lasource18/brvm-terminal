@@ -208,6 +208,76 @@ def test_peers_with_ratios_annotates_from_ratios_service(company_env, monkeypatc
         assert ontbf.net_margin is None
 
 
+def test_peers_with_ratios_annotates_cash_flow_ratios(
+    company_env, monkeypatch, tmp_path
+):
+    """PR-F: the Peers tab now surfaces P/FCF, FCF yield, and EV/EBITDA
+    in addition to P/E / ROE / net margin. Verify a peer with a positive
+    free_cash_flow and operating_income row picks up all three."""
+    from brvm.models import Filing, Quote
+    from brvm.store import filings as filings_repo
+    from brvm.store import financials as fin_repo
+    from brvm.store import quotes as quotes_repo
+
+    def fake_secteur(ticker, country, client=None):
+        return {
+            "sector": "TELECOMS",
+            "peers": [
+                {"ticker": "SNTS", "country": "SN", "name": "SONATEL",
+                 "last": 32500, "change_day_pct": 1.0, "change_ytd_pct": 1.0,
+                 "volume": 100},
+                {"ticker": "ORAC", "country": "CI", "name": "ORANGE CI",
+                 "last": 19000, "change_day_pct": 1.0, "change_ytd_pct": 1.0,
+                 "volume": 100},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+    )
+
+    db_path = tmp_path / "brvm.sqlite"
+    with connect(db_path) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
+        ])
+        sec_repo.update_company_facts(
+            conn, "ORAC", shares_outstanding=150_000_000,
+        )
+        quotes_repo.insert_snapshots(conn, [
+            Quote(ticker="ORAC", source="sikafinance", last=19000.0, change_pct=1.0),
+        ])
+        filings_repo.upsert_filings(conn, [Filing(
+            ticker="ORAC", issuer_name="ORANGE CI", doc_type="rapport_annuel",
+            period_kind="annual", period_year=2024, source="brvm_org",
+            source_url="u1", url_hash="h1",
+            file_path="p1", size_bytes=1, sha256="a", page_count=1,
+        )])
+        filing_id = int(conn.execute("SELECT id FROM filings").fetchone()["id"])
+        # Positive FCF + operating income → all three cash-flow ratios populated.
+        fin_repo.replace_period(conn, filing_id=filing_id, financials=fin_repo.FinancialsRow(
+            ticker="ORAC", period_year=2024,
+            revenue=1_500_000_000_000,
+            operating_income=400_000_000_000,
+            net_income=300_000_000_000,
+            eps=2000,
+            total_equity=1_000_000_000_000,
+            total_assets=3_000_000_000_000,
+            free_cash_flow=200_000_000_000,
+        ))
+
+    view = company_env.get_peers_with_ratios("SNTS")
+    orac = next(p for p in view.peers if p.ticker == "ORAC")
+
+    # market_cap = 150e6 x 19_000 = 2.85e12
+    # P/FCF = 2.85e12 / 200e9 = 14.25x
+    # FCF yield = 200e9 / 2.85e12 * 100 = 7.02%
+    # EV/EBITDA proxy = 2.85e12 / 400e9 = 7.125x
+    assert orac.pfcf == pytest.approx(14.25, rel=1e-3)
+    assert orac.fcf_yield == pytest.approx(7.0175, rel=1e-3)
+    assert orac.ev_ebitda == pytest.approx(7.125, rel=1e-3)
+
+
 def test_peers_with_ratios_appends_self_row_at_the_bottom(company_env, monkeypatch, tmp_path):
     """The currently-viewed company shows up as an `is_self=True` row at
     the end of the peers list so the ratios table doubles as a
