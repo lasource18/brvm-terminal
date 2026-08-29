@@ -7,9 +7,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from brvm import __version__
 from brvm.apps.web import tabs
-from brvm.apps.web._common import base_ctx, templates
+from brvm.apps.web._common import (
+    LANG_COOKIE,
+    LANG_COOKIE_MAX_AGE,
+    base_ctx,
+    templates,
+)
 from brvm.clock import is_market_open, utc_iso
 from brvm.config import settings
+from brvm.i18n import normalize
 from brvm.services import (
     alerts as alerts_svc,
 )
@@ -27,8 +33,32 @@ def index(request: Request):
     return templates.TemplateResponse(
         request,
         "overview.html",
-        {**base_ctx(), "overview": market.overview(limit=10)},
+        {**base_ctx(request), "overview": market.overview(limit=10)},
     )
+
+
+@router.get("/lang/{code}")
+def set_locale(code: str, next: str = "/"):
+    """Persist the user's locale choice in a cookie, then redirect back.
+
+    Called from the FR|EN toggle in `base.html`. `next` is the URL to
+    return to; we constrain it to a same-origin path so the toggle can't
+    be turned into an open-redirect vector (the topbar always passes the
+    current path, so this only rejects hand-crafted attacks). Unknown
+    codes fall back to the default locale rather than 4xx-ing — the UI
+    should never present a language button it can't accept."""
+    resolved = normalize(code)
+    # Only allow same-origin, path-only redirects. Absolute URLs, "//host"
+    # schemes, or anything starting with a scheme are dropped to root.
+    safe_next = next if next.startswith("/") and not next.startswith("//") else "/"
+    resp = RedirectResponse(url=safe_next, status_code=303)
+    resp.set_cookie(
+        LANG_COOKIE, resolved,
+        max_age=LANG_COOKIE_MAX_AGE,
+        httponly=False,   # a preference — not a session token; keep it visible to JS
+        samesite="lax",
+    )
+    return resp
 
 
 @router.get("/s/{ticker}", response_class=HTMLResponse)
@@ -54,7 +84,7 @@ def security_tab(request: Request, ticker: str, tab: str):
             status_code=404, detail=f"tab {tab!r} not available for {sec.kind}"
         )
     ctx = {
-        **base_ctx(),
+        **base_ctx(request),
         "sec": sec,
         "tabs": tabs.visible_for(sec.kind),
         "active_tab": spec.key,
@@ -128,7 +158,7 @@ def analyst_note_by_week(request: Request, ticker: str, week_start: str):
         )
     spec = tabs.get("analyst")
     ctx = {
-        **base_ctx(),
+        **base_ctx(request),
         "sec": sec,
         "tabs": tabs.visible_for(sec.kind),
         "active_tab": "analyst",
@@ -172,7 +202,7 @@ def news_page(
         request,
         "news.html",
         {
-            **base_ctx(),
+            **base_ctx(request),
             "feed": feed,
             "categories": news_svc.CATEGORIES,
         },
@@ -193,7 +223,7 @@ def directory_page(
         request,
         "directory.html",
         {
-            **base_ctx(),
+            **base_ctx(request),
             "rows": directory.list_directory(
                 country=country, sector=sector, q=q, kind=kind,
                 sort=sort, direction=direction,
@@ -214,7 +244,7 @@ def watchlists_index(request: Request):
     return templates.TemplateResponse(
         request,
         "watchlists.html",
-        {**base_ctx(), "watchlists": watchlist.list_all()},
+        {**base_ctx(request), "watchlists": watchlist.list_all()},
     )
 
 
@@ -228,7 +258,7 @@ def watchlist_page(request: Request, slug: str):
         request,
         "watchlist.html",
         {
-            **base_ctx(),
+            **base_ctx(request),
             "wl": wl,
             "market_open": is_market_open(),
             "generated_utc": utc_iso(),
@@ -242,7 +272,7 @@ def alerts_page(request: Request):
         request,
         "alerts.html",
         {
-            **base_ctx(),
+            **base_ctx(request),
             "rules": alerts_svc.list_rules(),
             "events": alerts_svc.list_recent_events(limit=25),
             "has_discord": settings.has_discord,
@@ -256,7 +286,7 @@ def _render_brief_page(request: Request, brief) -> HTMLResponse:
         request,
         "brief.html",
         {
-            **base_ctx(),
+            **base_ctx(request),
             "brief": brief,
             "body_html": body_html,
             "archive": brief_svc.list_recent_briefs(limit=30),
