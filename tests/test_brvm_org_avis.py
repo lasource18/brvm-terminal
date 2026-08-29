@@ -67,6 +67,68 @@ class TestParseAvisPage:
         assert all(not r.is_admission for r in tpci_o77_rows)
 
 
+class TestExtractSpecs:
+    """Issue #49: fallback spec extraction for older avis whose title
+    and filename don't embed a ticker code. The coupon+years matcher
+    downstream keys on `(issuer_brand, coupon%, iy, my)`."""
+
+    def _specs(self, title: str, pdf_url: str):
+        return avis._extract_specs(title, pdf_url)
+
+    def test_title_spec_extracts_issuer_coupon_years(self):
+        specs = self._specs(
+            "Résultats de première cotation - ETAT DU MALI 6,55 % 2026-2036",
+            "https://www.brvm.org/sites/default/files/20260827_-_avis.pdf",
+        )
+        by = {s.issuer_brand: s for s in specs}
+        assert "ETAT DU MALI" in by
+        s = by["ETAT DU MALI"]
+        assert s.coupon_pct == 6.55
+        assert s.issue_year == 2026
+        assert s.maturity_year == 2036
+
+    def test_filename_spec_recovers_ticker_less_older_avis(self):
+        """Blocker case for issue #49: TPCI.O18 (5.85% 2014-2021) has
+        an admission avis whose filename lacks the ticker slug. The
+        filename spec must still lift the (TPCI, 5.85, 2014, 2021)
+        triple."""
+        specs = self._specs(
+            "Première cotation TPCI",
+            "https://www.brvm.org/sites/default/files/"
+            "20140301_-_premiere_cotation_-_tpci_585_2014-2021_.pdf",
+        )
+        by = {s.issuer_brand: s for s in specs}
+        assert "TPCI" in by
+        s = by["TPCI"]
+        assert s.coupon_pct == 5.85
+        assert s.issue_year == 2014
+        assert s.maturity_year == 2021
+
+    def test_filename_spec_multi_word_issuer(self):
+        specs = self._specs(
+            "Première cotation",
+            "https://www.brvm.org/sites/default/files/"
+            "20260430_-_avis_ndeg116_brvmdg_-_premiere_cotation_-_"
+            "etat_du_mali_655_2026-2036_eom.o21_et_"
+            "etat_du_mali_635_2026-2033_eom.o22_.pdf",
+        )
+        by = {(s.issuer_brand, s.maturity_year): s for s in specs}
+        assert ("ETAT DU MALI", 2036) in by
+        assert by[("ETAT DU MALI", 2036)].coupon_pct == 6.55
+        assert ("ETAT DU MALI", 2033) in by
+        assert by[("ETAT DU MALI", 2033)].coupon_pct == 6.35
+
+    def test_implausible_year_range_dropped(self):
+        """Reject specs where maturity is before issue or tenor > 40y
+        — guards against a stray digit run mimicking the coupon-years
+        shape."""
+        specs = self._specs(
+            "junk 5% 2030-2020",
+            "https://www.brvm.org/dummy.pdf",
+        )
+        assert specs == ()
+
+
 class TestParseLastPageIndex:
     def test_returns_last_page_number_from_pager(self):
         # The live avis feed has ~188 pages at capture time; the fixture

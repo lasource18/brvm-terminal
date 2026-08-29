@@ -741,7 +741,20 @@ def pin_prospectus_urls(
             continue
         if not a.is_admission:
             continue
-        for ticker in a.tickers:
+        # Primary path: ticker embedded in title / filename (post-2019
+        # avis + all multi-ticker bulk-admission avis).
+        candidate_tickers: list[str] = list(a.tickers)
+        # Fallback path (issue #49): resolve (issuer, coupon, iy, my)
+        # specs against `securities` for older avis whose filenames
+        # don't carry the ticker slug (e.g. TPCI 5.85% 2014-2021).
+        # Skipped when we already have tickers because the direct
+        # extraction is unambiguous and cheaper.
+        if not candidate_tickers:
+            for spec in a.specs:
+                resolved = _resolve_bond_spec(conn, spec)
+                if resolved is not None and resolved not in candidate_tickers:
+                    candidate_tickers.append(resolved)
+        for ticker in candidate_tickers:
             if ticker in seen:
                 # Newest wins because callers walk pages newest-first;
                 # a later (older) match doesn't get to overwrite.
@@ -763,6 +776,54 @@ def pin_prospectus_urls(
             pinned += cur.rowcount
     conn.commit()
     return pinned
+
+
+def _resolve_bond_spec(conn: sqlite3.Connection, spec) -> str | None:
+    """Look up the unique bond ticker for a `(issuer_brand, coupon,
+    issue_year, maturity_year)` triple.
+
+    Match rule: issuer_name contains the brand token, coupon_rate is
+    within 0.005 of the spec (tolerates rounding — the exchange
+    quotes 6,55 while some DB rows carry 6.55 vs. 6.5), and
+    maturity_year matches exactly. issue_date year matches when
+    populated but isn't required — some older rows have NULL
+    issue_date.
+
+    Returns None on zero matches (unknown bond, or the audit's
+    "matured before we tracked it" case) and on more than one match
+    (ambiguous — refuse to guess). The caller logs but doesn't fail
+    on either.
+    """
+    from brvm.sources.brvm_org_avis import BondSpec  # local: avoid cycle
+    if not isinstance(spec, BondSpec):
+        return None
+    like = f"%{spec.issuer_brand}%"
+    rows = conn.execute(
+        """
+        SELECT ticker, issue_date FROM securities
+        WHERE kind = 'bond'
+          AND UPPER(issuer_name) LIKE ?
+          AND coupon_rate IS NOT NULL
+          AND ABS(coupon_rate - ?) < 0.005
+          AND maturity_year = ?
+        """,
+        (like, spec.coupon_pct, spec.maturity_year),
+    ).fetchall()
+    if not rows:
+        return None
+    # Prefer rows whose stored `issue_date` year matches the avis's
+    # issue year — kills ambiguity in the "same issuer re-tapped the
+    # same maturity+coupon in a later year" edge case.
+    same_year = [
+        r for r in rows
+        if r["issue_date"]
+        and r["issue_date"].startswith(str(spec.issue_year))
+    ]
+    if len(same_year) == 1:
+        return same_year[0]["ticker"]
+    if len(rows) == 1:
+        return rows[0]["ticker"]
+    return None  # ambiguous — refuse to guess
 
 
 def list_issuer_news(ticker: str, limit: int = 25) -> list[sqlite3.Row]:
