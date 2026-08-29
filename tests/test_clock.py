@@ -1,8 +1,14 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from freezegun import freeze_time
 
-from brvm.clock import is_market_open, session_date_for, to_abidjan, utc_iso
+from brvm.clock import (
+    is_market_open,
+    last_completed_session_date,
+    session_date_for,
+    to_abidjan,
+    utc_iso,
+)
 
 
 @freeze_time("2026-08-18 10:30:00", tz_offset=0)  # UTC == Abidjan
@@ -35,3 +41,33 @@ def test_to_abidjan_naive_input_treated_as_utc():
 def test_utc_iso_endswith_z():
     dt = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
     assert utc_iso(dt).endswith("Z")
+
+
+# F-11: last_completed_session_date must roll back correctly on
+# weekends and pre-open weekday mornings so ingest paths that call it
+# never stamp a Sat/Sun row or a phantom Monday-before-open row.
+
+
+@freeze_time("2026-08-19 12:00:00", tz_offset=0)  # Wed midday Abidjan
+def test_last_completed_session_weekday_after_open_is_today():
+    assert last_completed_session_date() == date(2026, 8, 19)
+
+
+@freeze_time("2026-08-22 12:00:00", tz_offset=0)  # Sat midday
+def test_last_completed_session_saturday_rolls_to_friday():
+    assert last_completed_session_date() == date(2026, 8, 21)
+
+
+@freeze_time("2026-08-23 12:00:00", tz_offset=0)  # Sun midday
+def test_last_completed_session_sunday_rolls_to_friday():
+    assert last_completed_session_date() == date(2026, 8, 21)
+
+
+@freeze_time("2026-08-24 06:00:00", tz_offset=0)  # Mon 06:00 Abidjan (pre-open)
+def test_last_completed_session_monday_preopen_rolls_to_friday():
+    assert last_completed_session_date() == date(2026, 8, 21)
+
+
+@freeze_time("2026-08-20 06:00:00", tz_offset=0)  # Thu 06:00 Abidjan (pre-open)
+def test_last_completed_session_weekday_preopen_rolls_back_one_day():
+    assert last_completed_session_date() == date(2026, 8, 19)

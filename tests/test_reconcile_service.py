@@ -117,6 +117,63 @@ def test_empty_pdf_returns_empty_report(monkeypatch, tmp_path):
     assert report.drift == []
 
 
+def test_session_date_defaults_to_boc_pdf_date(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    """F-04: production callers pass neither `session_date` nor
+    `pdf_bytes`. The scheduler-invoked path must fetch the PDF and
+    take the session date from the PDF's filename, NOT from
+    `MAX(daily_bars.session_date)` — which for equity tickers is
+    typically the most recent weekly-backfill row, days apart from
+    the BOC's date."""
+    db_path = tmp_path / "brvm.sqlite"
+    monkeypatch.setenv("DB_PATH", str(db_path))
+    from brvm.config import reset_settings_cache
+    reset_settings_cache()
+    _apply_migrations(db_path)
+
+    # Seed daily_bars for a *different* date to prove _latest_session()
+    # isn't the source of the returned session_date.
+    _seed(db_path, date(2026, 8, 11))
+
+    from brvm.sources import brvm_org as brvm_org_module
+    pdf = (fixtures_dir / "brvm_org" / "boc_eng_20260818_2.pdf").read_bytes()
+
+    def _fake_fetch(lang: str = "eng") -> brvm_org_module.BocFetch:
+        return brvm_org_module.BocFetch(
+            pdf_bytes=pdf, session_date=date(2026, 8, 18),
+        )
+
+    monkeypatch.setattr(brvm_org_module, "fetch_boc", _fake_fetch)
+    report = reconcile.check_boc_close(tolerance_pct=0.01)
+    # The BOC's filename-encoded date wins over `MAX(daily_bars)`.
+    assert report.session_date == date(2026, 8, 18)
+
+
+def test_session_date_falls_back_to_latest_when_boc_pdf_lacks_date(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    """Malformed BOC filename (no YYYYMMDD block) falls back to
+    _latest_session() so the reconciliation still runs against
+    something rather than silently returning session_date=None."""
+    db_path = tmp_path / "brvm.sqlite"
+    monkeypatch.setenv("DB_PATH", str(db_path))
+    from brvm.config import reset_settings_cache
+    reset_settings_cache()
+    _apply_migrations(db_path)
+    _seed(db_path, date(2026, 8, 11))
+
+    from brvm.sources import brvm_org as brvm_org_module
+    pdf = (fixtures_dir / "brvm_org" / "boc_eng_20260818_2.pdf").read_bytes()
+
+    def _fake_fetch(lang: str = "eng") -> brvm_org_module.BocFetch:
+        return brvm_org_module.BocFetch(pdf_bytes=pdf, session_date=None)
+
+    monkeypatch.setattr(brvm_org_module, "fetch_boc", _fake_fetch)
+    report = reconcile.check_boc_close(tolerance_pct=0.01)
+    assert report.session_date == date(2026, 8, 11)
+
+
 def test_report_flags_has_drift():
     from brvm.services.reconcile import CloseDrift, ReconcileReport
     empty = ReconcileReport(session_date=None, boc_rows=0, matched=0, drift=[])

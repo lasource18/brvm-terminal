@@ -238,6 +238,57 @@ def test_new_filing_rerun_is_deduped(monkeypatch, tmp_path):
     assert svc.evaluate_all().total_deduped == 1
 
 
+def test_new_filing_rule_skips_rows_older_than_rule_created_utc(
+    monkeypatch, tmp_path
+):
+    """F-16: adding a fresh wildcard rule after a real filings pull
+    used to fire ~100 events about years-old documents (roughly 50 min
+    of Discord spam at the 10-per-5-min delivery cap). Rows whose
+    fetched_utc pre-dates the rule must be silently skipped."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    # Seed a historical filing FIRST so its fetched_utc is earlier
+    # than the rule's created_utc.
+    _seed_filing(db_path, ticker="SNTS", url_suffix="hist")
+    # Roll `fetched_utc` back so the historical row is unambiguously
+    # older than what create_rule() will stamp on the rule below.
+    with connect(db_path) as conn:
+        conn.execute(
+            "UPDATE filings SET fetched_utc = ? WHERE url_hash = ?",
+            ("2020-01-01T00:00:00+00:00", "hash-SNTS-hist"),
+        )
+        conn.commit()
+    svc.create_rule(AlertRule(kind="new_filing", ticker=None))
+    # New filing arrives after rule creation — should fire.
+    _seed_filing(db_path, ticker="ORAC", url_suffix="new")
+    counts = svc.evaluate_all()
+    assert counts.new_filing_fired == 1
+    ev = svc.list_recent_events()[0]
+    assert ev.ticker == "ORAC"
+
+
+def test_news_rule_skips_rows_older_than_rule_created_utc(
+    monkeypatch, tmp_path
+):
+    """F-16 mirror for the news evaluator: a min_relevance=0 news rule
+    added late must not replay the tagged historical corpus."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    _seed_news(db_path, title="OLD news",
+               tickers_llm="SNTS", relevance=8, category="earnings")
+    with connect(db_path) as conn:
+        conn.execute(
+            "UPDATE news_items SET fetched_utc = ? WHERE title = ?",
+            ("2020-01-01T00:00:00+00:00", "OLD news"),
+        )
+        conn.commit()
+    svc.create_rule(AlertRule(kind="news", ticker=None, min_relevance=0))
+    _seed_news(db_path, title="FRESH news",
+               tickers_llm="ORAC", relevance=9, category="dividend")
+    counts = svc.evaluate_all()
+    assert counts.news_fired == 1
+    ev = svc.list_recent_events()[0]
+    assert "FRESH news" in ev.subject
+
+
 # --- evaluators: news ------------------------------------------------------
 
 

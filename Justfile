@@ -47,6 +47,11 @@ snapshot:
 bonds-poll:
     uv run python -m brvm.jobs.bonds_snapshot --once
 
+# F-04: cross-check `daily_bars.close` against the official BOC PDF for
+# the day the PDF actually covers. Read-only — prints per-ticker drift.
+boc-reconcile:
+    uv run python -m brvm.jobs.boc_reconcile --once
+
 # Bulk-populate daily_bars for every equity so the Directory's period-return
 # columns (1W/1M/3M/YTD/1Y/ALL%) render values for the whole universe rather
 # than only the tickers a user has personally clicked into. Idempotent within

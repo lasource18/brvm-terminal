@@ -277,6 +277,16 @@ def evaluate_new_filings(
         for rule in filing_rules:
             if not _rule_watches(rule, row["ticker"]):
                 continue
+            # F-16: only rows ingested after the rule was created are
+            # eligible. Without this, adding a wildcard filing rule
+            # would replay years of historical filings into the
+            # delivery queue at 10 events per 5 min (~50 min of spam).
+            if (
+                rule.created_utc is not None
+                and row["fetched_utc"] is not None
+                and row["fetched_utc"] < rule.created_utc
+            ):
+                continue
             doc_types = _doc_types_set(rule)
             if doc_types and row["doc_type"] not in doc_types:
                 continue
@@ -357,6 +367,15 @@ def evaluate_news(
         for rule in news_rules:
             floor = rule.min_relevance if rule.min_relevance is not None else 0
             if (row["relevance"] or 0) < floor:
+                continue
+            # F-16: only news ingested after the rule was created are
+            # eligible. Prevents a fresh news rule from re-firing on
+            # the tagged historical corpus.
+            if (
+                rule.created_utc is not None
+                and row["fetched_utc"] is not None
+                and row["fetched_utc"] < rule.created_utc
+            ):
                 continue
             # A row can carry multiple tickers via `tickers_llm`. For a
             # rule watching a specific ticker, require the ticker to

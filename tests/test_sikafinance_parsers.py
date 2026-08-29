@@ -59,6 +59,32 @@ class TestParseAAZ:
         securities, _, _ = parse_aaz(html)
         assert all(s.source_url and s.source_url.startswith("https://") for s in securities)
 
+    def test_index_levels_stamp_provided_session_date(self, fixtures_dir):
+        """F-11: `parse_aaz` used to hardcode `date.today()`, so weekend
+        polls accumulated a phantom Sat/Sun row and Montreal-eve polls
+        stamped a date one behind the true Abidjan calendar. Callers
+        must be able to pin the session date explicitly."""
+        html = _read(fixtures_dir, "sikafinance/aaz.html")
+        pinned = date(2026, 8, 18)
+        _, _, indices = parse_aaz(html, session_date=pinned)
+        assert indices
+        assert all(i.session_date == pinned for i in indices)
+
+    def test_index_levels_default_to_last_completed_session(self, fixtures_dir):
+        """When no session_date is passed, `parse_aaz` falls back to
+        `clock.last_completed_session_date()` — which rolls back to
+        the previous weekday on weekends and pre-open weekday
+        mornings. Guards against a regression that silently
+        reintroduces `date.today()` for the default path."""
+        from brvm.clock import last_completed_session_date
+        html = _read(fixtures_dir, "sikafinance/aaz.html")
+        _, _, indices = parse_aaz(html)
+        expected = last_completed_session_date()
+        # Never a weekend, regardless of when the test runs.
+        assert expected.weekday() < 5
+        assert indices
+        assert all(i.session_date == expected for i in indices)
+
 
 class TestParseCotation:
     def test_snts_prices(self, fixtures_dir):

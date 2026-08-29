@@ -59,7 +59,24 @@ def parse_boc_pdf_date(filename: str) -> date | None:
 # ---------- fetchers ----------
 
 
-def fetch_boc_pdf(client: httpx.Client | None = None, lang: str = "eng") -> bytes | None:
+@dataclass(frozen=True)
+class BocFetch:
+    """Result of a BOC pull. `session_date` is what the PDF filename
+    encodes — the authoritative day the bulletin covers, which is what
+    reconciliation must compare against rather than the local
+    `daily_bars.MAX(session_date)` (F-04)."""
+
+    pdf_bytes: bytes
+    session_date: date | None
+
+
+def fetch_boc(
+    client: httpx.Client | None = None, lang: str = "eng"
+) -> BocFetch | None:
+    """Resolve today's BOC PDF URL and download the bytes, returning the
+    session date embedded in the filename alongside. Returns None when
+    the landing page doesn't advertise a matching PDF (weekends /
+    holidays / a source outage) so the caller can degrade cleanly."""
     close = client is None
     client = client or make_client()
     try:
@@ -70,10 +87,19 @@ def fetch_boc_pdf(client: httpx.Client | None = None, lang: str = "eng") -> byte
             return None
         pdf_r = client.get(url)
         pdf_r.raise_for_status()
-        return pdf_r.content
+        return BocFetch(
+            pdf_bytes=pdf_r.content,
+            session_date=parse_boc_pdf_date(url),
+        )
     finally:
         if close:
             client.close()
+
+
+def fetch_boc_pdf(client: httpx.Client | None = None, lang: str = "eng") -> bytes | None:
+    """Backwards-compatible bytes-only wrapper around `fetch_boc`."""
+    f = fetch_boc(client=client, lang=lang)
+    return f.pdf_bytes if f else None
 
 
 # ---------- BOC row extraction --------------------------------------------
@@ -101,13 +127,17 @@ class BocRow:
 
 # The equity market table on pages 2-3 uses 4-letter tickers (occasionally
 # 5 with a country suffix, e.g. BOABF, ONTBF, BOABF, ETIT). Each row
-# starts on a fresh line with a board prefix (CB/CD/ENE/FIN/IND/SPU),
-# then the ticker. `_ROW_RE` captures rows where pypdf kept all core
-# columns on one line — the wider "close previous change" trio. Rows
-# that wrapped (long company names split across a text-stream break) are
-# skipped rather than mis-parsed; the tickers we care about most for
-# reconciliation (the ones with real volume) reliably fit on one line.
-_BOC_BOARD_RE = re.compile(r"^(?:CB|CD|ENE|FIN|IND|SPU)\s+")
+# starts on a fresh line with a board prefix, then the ticker. `_ROW_RE`
+# captures rows where pypdf kept all core columns on one line — the
+# wider "close previous change" trio. Rows that wrapped (long company
+# names split across a text-stream break) are skipped rather than
+# mis-parsed; the tickers we care about most for reconciliation (the
+# ones with real volume) reliably fit on one line.
+#
+# F-04: `TEL` (Télécoms) was missing from the whitelist, silently
+# dropping SNTS, ORAC, and ONTBF — the highest-turnover names — from
+# every reconciliation cycle even though their BOC rows parse cleanly.
+_BOC_BOARD_RE = re.compile(r"^(?:CB|CD|ENE|FIN|IND|SPU|TEL)\s+")
 _BOC_TICKER_RE = re.compile(r"^([A-Z]{3,5})\s+")
 
 # `<number> <number> <number> <±number> %` — previous / open / close /

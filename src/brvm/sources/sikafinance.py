@@ -67,14 +67,26 @@ def _ticker_from_href(href: str) -> tuple[str, str | None]:
     return m.group(1), m.group(2)
 
 
-def parse_aaz(html: str) -> tuple[list[Security], list[Quote], list[IndexLevel]]:
+def parse_aaz(
+    html: str, *, session_date: date | None = None
+) -> tuple[list[Security], list[Quote], list[IndexLevel]]:
     """Parse the A-to-Z listing page.
 
     Returns:
       securities: canonical equities + indices (name, kind, country, source_url)
-      quotes: today's snapshot for every equity (with volume/turnover)
-      index_levels: today's level for every index / composite gauge
+      quotes: latest-cotation snapshot for every equity (with volume/turnover)
+      index_levels: latest-cotation level for every index / composite gauge
+
+    F-11: `session_date` defaults to `clock.last_completed_session_date()`
+    — the Abidjan calendar date of the most recent trading day that has
+    actually happened. Weekend and pre-open polls used to stamp
+    `date.today()` (server-local) which both mis-attributed the level
+    to Sat/Sun rows and, on a Montreal server before the Abidjan
+    midnight roll, stamped a date one behind the true Abidjan day.
     """
+    from brvm.clock import last_completed_session_date
+    if session_date is None:
+        session_date = last_completed_session_date()
     tree = HTMLParser(html)
     securities: list[Security] = []
     quotes: list[Quote] = []
@@ -117,7 +129,7 @@ def parse_aaz(html: str) -> tuple[list[Security], list[Quote], list[IndexLevel]]
                 index_levels.append(
                     IndexLevel(
                         ticker=ticker,
-                        session_date=date.today(),
+                        session_date=session_date,
                         level=level,
                         change_pct=change_pct,
                         source=SOURCE_NAME,

@@ -23,6 +23,7 @@ from brvm.services.history import backfill_all as backfill_history
 from brvm.services.news import poll_all as poll_news
 from brvm.services.ocr import ocr_pending
 from brvm.services.quotes import snapshot_bonds_once, snapshot_once
+from brvm.services.reconcile import check_boc_close
 from brvm.services.tagging import tag_pending
 
 log = get(__name__)
@@ -160,6 +161,24 @@ def _brief_job() -> None:
         log.info("scheduled brief run ok: %s", result.as_dict())
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled brief run failed: %s", e)
+
+
+def _boc_reconcile_job() -> None:
+    """F-04: cross-check `daily_bars.close` against the official BOC
+    PDF once per weekday, ~30 min after the exchange publishes the day's
+    bulletin. Read-only — mismatches land in the log for now; a follow-
+    up will route them into `alert_events` once the shape is stable."""
+    log.info("scheduled BOC reconciliation start")
+    try:
+        report = check_boc_close()
+        log.info(
+            "scheduled BOC reconciliation ok: session=%s boc_rows=%d "
+            "matched=%d drift=%d",
+            report.session_date, report.boc_rows, report.matched,
+            len(report.drift),
+        )
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled BOC reconciliation failed: %s", e)
 
 
 def _analyst_notes_job() -> None:
@@ -303,6 +322,16 @@ def build_scheduler() -> BackgroundScheduler:
         _brief_job,
         CronTrigger(day_of_week="mon-fri", hour="15", minute="30", timezone=str(ABIDJAN)),
         id="brief_daily",
+        replace_existing=True,
+    )
+    # BOC reconciliation: daily at 16:00 Abidjan — brvm.org typically
+    # publishes the day's bulletin between 15:30 and 15:50 after the
+    # 15:00 close, so a 16:00 pass reliably lands on the fresh PDF.
+    # Weekend/holiday runs no-op (BOC PDF unavailable → warning only).
+    sched.add_job(
+        _boc_reconcile_job,
+        CronTrigger(day_of_week="mon-fri", hour="16", minute="0", timezone=str(ABIDJAN)),
+        id="boc_reconcile_daily",
         replace_existing=True,
     )
     # Analyst notes: weekly Saturday 20:00 Abidjan. All the sub-daily
