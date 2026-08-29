@@ -41,6 +41,7 @@ from brvm.models import Brief
 from brvm.services import llm as llm_svc
 from brvm.services import market
 from brvm.services import news as news_svc
+from brvm.services import translation as translation_svc
 from brvm.store import briefs as briefs_repo
 from brvm.store import spend as spend_repo
 
@@ -363,11 +364,27 @@ def generate_for(
         log.warning("brief for %s failed (no billing): %s", day_iso, e)
         return result
 
+    # PR-I: translate the freshly-generated EN markdown into FR. Runs
+    # inside the same generation pass so the two versions land together
+    # in one DB write. A failure here (transport error, empty reply,
+    # budget cap crossed by the primary call) is *soft*: the brief still
+    # persists in EN, `markdown_fr` stays NULL, and the /brief route
+    # falls back with a "translation pending" badge. Next brief re-run
+    # gets another shot at translation.
+    markdown_fr: str | None = None
+    translation_generated_utc: str | None = None
+    translation_usage = _translate_or_none(markdown, client=client, day=day)
+    if translation_usage is not None:
+        markdown_fr = translation_usage[0]
+        translation_generated_utc = utc_iso()
+
     brief = Brief(
         day=day_iso,
         model=model_id,
         title=_title_from_markdown(markdown),
         markdown=markdown,
+        markdown_fr=markdown_fr,
+        translation_generated_utc=translation_generated_utc,
         context_json=json.dumps(context, ensure_ascii=False),
         input_tokens=usage.input_tokens
         + usage.cache_read_tokens
@@ -387,14 +404,72 @@ def generate_for(
             day=day,
             table="brief_spend",
         )
+        # Translation billing rides on the same daily counter — it's
+        # conceptually the same product (the day's brief) and the cap
+        # was sized with translation in mind.
+        if translation_usage is not None:
+            _, t_usage = translation_usage
+            spend_repo.add_usage(
+                conn,
+                input_tokens=t_usage.input_tokens
+                + t_usage.cache_read_tokens
+                + t_usage.cache_write_tokens,
+                output_tokens=t_usage.output_tokens,
+                usd_micros=t_usage.usd_micros,
+                day=day,
+                table="brief_spend",
+            )
     result.brief = brief
     result.usage = usage
     log.info(
-        "brief for %s: %d in / %d out ($%.4f) via %s",
+        "brief for %s: %d in / %d out ($%.4f) via %s%s",
         day_iso, brief.input_tokens, brief.output_tokens,
         brief.usd_micros / 1_000_000, model_id,
+        " · fr translated" if markdown_fr else " · fr pending",
     )
     return result
+
+
+def _translate_or_none(
+    source_markdown: str,
+    *,
+    client: Any | None,
+    day: date,
+) -> tuple[str, llm_svc.Usage] | None:
+    """Attempt an EN → FR translation, returning (text, usage) on success
+    or None on any soft failure (no key, empty reply, transport error).
+
+    Called from `generate_for` inside the same DB transaction as the
+    primary brief write so both versions land atomically. Kept as a
+    module-level helper (not a nested function) so tests can monkey-patch
+    it to skip the second LLM call.
+    """
+    if client is None and not translation_svc.has_llm():
+        return None
+    try:
+        result = translation_svc.translate_markdown_to_fr(
+            source_markdown, client=client
+        )
+    except llm_svc.LLMResponseError as e:
+        # Translation billed but returned nothing usable — still record
+        # the spend against the daily counter so the cap stays honest.
+        log.warning("brief translation failed (empty reply): %s", e)
+        with connect(_db_path()) as conn:
+            spend_repo.add_usage(
+                conn,
+                input_tokens=e.usage.input_tokens
+                + e.usage.cache_read_tokens
+                + e.usage.cache_write_tokens,
+                output_tokens=e.usage.output_tokens,
+                usd_micros=e.usage.usd_micros,
+                day=day,
+                table="brief_spend",
+            )
+        return None
+    except Exception as e:  # transport / SDK error — no billing
+        log.warning("brief translation failed (no billing): %s", e)
+        return None
+    return result.text, result.usage
 
 
 # ---------------------------------------------------------------------------

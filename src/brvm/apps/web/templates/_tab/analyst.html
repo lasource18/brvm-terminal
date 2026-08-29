@@ -12,6 +12,11 @@
         (${{ '%.4f'|format(note.usd_micros / 1_000_000) }})
       </span>
       <span class="badge machine">{{ "machine-generated"|t }}</span>
+      {% if translation_pending %}
+        <span class="badge stale" title="{{ 'Showing English source — French translation not yet available.'|t }}">
+          {{ "translation pending"|t }}
+        </span>
+      {% endif %}
     </div>
 
     <div class="analyst-layout">

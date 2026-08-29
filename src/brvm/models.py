@@ -229,12 +229,20 @@ class Brief(BaseModel):
     render a Monday brief that summarizes Friday's session without
     ambiguity). `context_json` is the raw structured input the model saw
     (movers / news / upcoming CA) — kept so a future re-run with a
-    different prompt doesn't need to re-gather the source data."""
+    different prompt doesn't need to re-gather the source data.
+
+    PR-I: `markdown_fr` is the cached French translation of `markdown`
+    (the source language). NULL until the translation task succeeds —
+    the /brief route falls back to `markdown` with a "translation pending"
+    badge when locale=fr but `markdown_fr` isn't ready yet.
+    """
 
     day: str                                 # 'YYYY-MM-DD' UTC
     model: str
     title: str | None = None
     markdown: str
+    markdown_fr: str | None = None
+    translation_generated_utc: str | None = None
     context_json: str
     input_tokens: int = 0
     output_tokens: int = 0
@@ -252,13 +260,19 @@ class AnalystNote(BaseModel):
     on the same week's data is what a reader expects). `context_json` is
     the raw structured input the model saw (recent news + financials +
     ratios + price stats + snapshot) — kept so a future re-run with a
-    different prompt doesn't need to re-gather the source data."""
+    different prompt doesn't need to re-gather the source data.
+
+    PR-I: `markdown_fr` mirrors `Brief.markdown_fr` — cached FR
+    translation of `markdown`, NULL when translation is pending.
+    """
 
     ticker: str
     week_start: str                          # 'YYYY-MM-DD' Monday (ISO week)
     model: str
     title: str | None = None
     markdown: str
+    markdown_fr: str | None = None
+    translation_generated_utc: str | None = None
     context_json: str
     input_tokens: int = 0
     output_tokens: int = 0
