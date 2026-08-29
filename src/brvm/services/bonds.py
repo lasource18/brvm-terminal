@@ -712,6 +712,59 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
     )
 
 
+def pin_prospectus_urls(
+    conn: sqlite3.Connection, avis_iter, *, overwrite: bool = False
+) -> int:
+    """Pin the admission-avis PDF URL on `securities.prospectus_url` for
+    every bond ticker referenced by an admission-flagged Avis row.
+
+    `avis_iter` yields `brvm.sources.brvm_org_avis.Avis` dataclasses.
+    Non-admission rows are skipped so a coupon-fixing avis doesn't
+    overwrite a real admission link. A ticker that isn't in `securities`
+    (older re-numbered bond, cross-market listing) is silently ignored.
+
+    Idempotence: by default the UPDATE only fires when `prospectus_url
+    IS NULL`, so a manual override made in the DB is respected. Pass
+    `overwrite=True` when refreshing after a URL is known to have
+    changed (rare — brvm.org's `/sites/default/files/` links are
+    stable across years).
+
+    Returns the number of `securities` rows touched. Commits once at
+    the end so the whole backfill lands or nothing does.
+    """
+    from brvm.sources.brvm_org_avis import Avis  # local import: avoids cycle
+
+    pinned = 0
+    seen: set[str] = set()
+    for a in avis_iter:
+        if not isinstance(a, Avis):
+            continue
+        if not a.is_admission:
+            continue
+        for ticker in a.tickers:
+            if ticker in seen:
+                # Newest wins because callers walk pages newest-first;
+                # a later (older) match doesn't get to overwrite.
+                continue
+            seen.add(ticker)
+            if overwrite:
+                cur = conn.execute(
+                    "UPDATE securities SET prospectus_url = ? "
+                    "WHERE ticker = ? AND kind = 'bond'",
+                    (a.pdf_url, ticker),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE securities SET prospectus_url = ? "
+                    "WHERE ticker = ? AND kind = 'bond' "
+                    "AND prospectus_url IS NULL",
+                    (a.pdf_url, ticker),
+                )
+            pinned += cur.rowcount
+    conn.commit()
+    return pinned
+
+
 def list_issuer_news(ticker: str, limit: int = 25) -> list[sqlite3.Row]:
     """News rows tagged for this bond via the issuer-name substring
     fallback. The news tagger only stamps equity tickers, so bond News

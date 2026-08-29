@@ -699,6 +699,116 @@ class TestGetBondView:
         assert view is not None
         assert view.prospectus_url is None
 
+    def test_pin_prospectus_urls_from_admission_avis(
+        self, monkeypatch, tmp_path
+    ):
+        """`pin_prospectus_urls` writes an admission-avis URL onto every
+        referenced bond ticker, skips non-admission rows, and respects
+        an existing manual pin (idempotent — later runs don't overwrite
+        by default). Also verifies the newest-wins ordering when the
+        same ticker turns up twice in the input iterable."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        from brvm.sources.brvm_org_avis import Avis
+
+        with connect(db_path) as conn:
+            _seed_mali(conn)  # seeds EOM.O10, EOM.O11, EOM.O2
+            # Manual pin on EOM.O2 that must survive the backfill.
+            conn.execute(
+                "UPDATE securities SET prospectus_url = ? WHERE ticker = ?",
+                ("https://manual.example/eom-o2.pdf", "EOM.O2"),
+            )
+            conn.commit()
+
+            avis_rows = [
+                # Newest admission avis for EOM.O10 (should win).
+                Avis(
+                    title="Résultats de première cotation - ETAT DU MALI (EOM.O10)",
+                    pdf_url="https://www.brvm.org/sites/default/files/20260827_-_premiere_cotation_eom.o10.pdf",
+                    published_date=date(2026, 8, 27),
+                    tickers=("EOM.O10",),
+                    is_admission=True,
+                ),
+                # Older admission avis for the same ticker — must not
+                # overwrite the newer pin above.
+                Avis(
+                    title="Première cotation (EOM.O10, older)",
+                    pdf_url="https://www.brvm.org/sites/default/files/20230101_-_premiere_cotation_eom.o10.pdf",
+                    published_date=date(2023, 1, 1),
+                    tickers=("EOM.O10",),
+                    is_admission=True,
+                ),
+                # Multi-ticker admission covers EOM.O11.
+                Avis(
+                    title="Première cotation EOM.O11 et EOM.O12",
+                    pdf_url="https://www.brvm.org/sites/default/files/20260101_-_premiere_cotation_eom.o11_eom.o12.pdf",
+                    published_date=date(2026, 1, 1),
+                    tickers=("EOM.O11", "EOM.O12"),
+                    is_admission=True,
+                ),
+                # Non-admission row — must be ignored so a coupon-fixing
+                # avis can't stomp on an existing prospectus link.
+                Avis(
+                    title="Fixation du taux d'intérêt EOM.O10",
+                    pdf_url="https://www.brvm.org/sites/default/files/20260201_-_taux_dinteret_eom.o10.pdf",
+                    published_date=date(2026, 2, 1),
+                    tickers=("EOM.O10",),
+                    is_admission=False,
+                ),
+            ]
+            pinned = bonds_svc.pin_prospectus_urls(conn, avis_rows)
+            assert pinned == 2  # EOM.O10 + EOM.O11; EOM.O12 not in DB
+
+            urls = dict(conn.execute(
+                "SELECT ticker, prospectus_url FROM securities WHERE kind='bond'"
+            ).fetchall())
+
+        assert urls["EOM.O10"] == (
+            "https://www.brvm.org/sites/default/files/20260827_-_premiere_cotation_eom.o10.pdf"
+        )
+        assert urls["EOM.O11"] == (
+            "https://www.brvm.org/sites/default/files/20260101_-_premiere_cotation_eom.o11_eom.o12.pdf"
+        )
+        # Manual pin on EOM.O2 was left alone.
+        assert urls["EOM.O2"] == "https://manual.example/eom-o2.pdf"
+
+    def test_pin_prospectus_urls_overwrite_replaces_manual_pin(
+        self, monkeypatch, tmp_path
+    ):
+        """`overwrite=True` is the escape hatch for a URL that we know
+        moved — it replaces the manual pin instead of respecting it."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        from brvm.sources.brvm_org_avis import Avis
+
+        with connect(db_path) as conn:
+            _seed_mali(conn)
+            conn.execute(
+                "UPDATE securities SET prospectus_url = ? WHERE ticker = ?",
+                ("https://stale.example/eom-o10.pdf", "EOM.O10"),
+            )
+            conn.commit()
+            avis_rows = [
+                Avis(
+                    title="Première cotation (EOM.O10)",
+                    pdf_url="https://www.brvm.org/sites/default/files/fresh.pdf",
+                    published_date=date(2026, 8, 27),
+                    tickers=("EOM.O10",),
+                    is_admission=True,
+                ),
+            ]
+            bonds_svc.pin_prospectus_urls(conn, avis_rows, overwrite=True)
+            url = conn.execute(
+                "SELECT prospectus_url FROM securities WHERE ticker='EOM.O10'"
+            ).fetchone()["prospectus_url"]
+        assert url == "https://www.brvm.org/sites/default/files/fresh.pdf"
+
     def test_prospectus_url_is_surfaced_when_set(self, monkeypatch, tmp_path):
         """A pinned prospectus URL on `securities` threads all the way
         through to the view — the Bloomberg-style "Prospectus: <link>"
@@ -719,73 +829,3 @@ class TestGetBondView:
         assert view is not None
         assert view.prospectus_url == "https://example.org/prospectus-eom-o10.pdf"
 
-    def test_prospectus_url_seed_matches_admission_communique(
-        self, monkeypatch, tmp_path
-    ):
-        """Re-runs the 0016 backfill UPDATE against a hand-seeded
-        news_items + securities pair to prove the WHERE clause picks the
-        newest matching prospectus/admission communiqué and pins its URL
-        on the correct bond issuer. Guards against the backfill picking
-        up unrelated news or the very first (oldest) match."""
-        db_path = tmp_path / "brvm.sqlite"
-        monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
-        reset_settings_cache()
-        _apply_migrations(db_path)
-        from brvm.models import NewsItem
-        from brvm.store import news as news_repo
-
-        with connect(db_path) as conn:
-            _seed_mali(conn)
-            news_repo.upsert_news_items(conn, [
-                NewsItem(
-                    source="sikafinance", kind="communique",
-                    url="https://sikafinance.com/old-admission",
-                    url_hash="hash-old-adm",
-                    title="ETAT DU MALI — Admission à la cote (2015)",
-                    issuer_name="ETAT DU MALI",
-                    published_at="2015-06-01T00:00:00+00:00",
-                ),
-                NewsItem(
-                    source="sikafinance", kind="communique",
-                    url="https://sikafinance.com/new-obligation",
-                    url_hash="hash-new-obl",
-                    title="ETAT DU MALI — Obligation 2023-2029",
-                    issuer_name="ETAT DU MALI",
-                    published_at="2023-02-15T00:00:00+00:00",
-                ),
-                NewsItem(
-                    source="sikafinance", kind="news",
-                    url="https://sikafinance.com/unrelated",
-                    url_hash="hash-unrelated",
-                    title="ETAT DU MALI — Résultat budgétaire trimestriel",
-                    issuer_name="ETAT DU MALI",
-                    published_at="2024-03-01T00:00:00+00:00",
-                ),
-            ])
-            conn.execute(
-                """
-                UPDATE securities
-                SET prospectus_url = (
-                    SELECT n.url
-                    FROM news_items AS n
-                    WHERE n.issuer_name = securities.issuer_name
-                      AND (
-                        LOWER(n.title) LIKE '%obligat%' OR
-                        LOWER(n.title) LIKE '%cotation%' OR
-                        LOWER(n.title) LIKE '%admission%'
-                      )
-                    ORDER BY COALESCE(n.published_at, n.fetched_utc) DESC
-                    LIMIT 1
-                )
-                WHERE kind = 'bond'
-                  AND issuer_name IS NOT NULL
-                  AND prospectus_url IS NULL
-                """
-            )
-            conn.commit()
-        view = bonds_svc.get_bond_view("EOM.O10", today=TODAY)
-        assert view is not None
-        # Newest matching communiqué wins; unrelated budget news is
-        # filtered out even though it has the newest date overall.
-        assert view.prospectus_url == "https://sikafinance.com/new-obligation"
