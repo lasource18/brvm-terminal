@@ -647,10 +647,13 @@ class TickerView(Vertical):
         # Cash-flow schedule.
         if view.schedule:
             s = view.schedule
+            cadence = {1: "annual", 2: "semi-annual", 4: "quarterly"}.get(
+                s.payments_per_year, "annual"
+            )
             lines.append(
                 f"[b {ACCENT}]Cash flow[/]  "
                 f"({s.coupons_remaining} left, nominal "
-                f"{num(s.nominal, decimals=0)} XOF, bullet + annual)"
+                f"{num(s.nominal, decimals=0)} XOF, bullet + {cadence})"
             )
             hdr = f"  {'DATE':<12} {'COUPON':>12} {'PRINCIPAL':>12} {'TOTAL':>12}"
             lines.append(hdr)
@@ -705,12 +708,15 @@ class TickerView(Vertical):
         coupon = f"{view.coupon_rate:.2f}%" if view.coupon_rate is not None else "—"
         maturity = str(view.maturity_year) if view.maturity_year else "—"
         issue = view.issue_date.isoformat() if view.issue_date else "—"
+        cadence = {1: "annual", 2: "semi-annual", 4: "quarterly"}.get(
+            view.schedule.payments_per_year if view.schedule else 1, "annual"
+        )
         lines: list[str] = [
             f"[b {ACCENT}]{view.ticker}[/]  {view.name}",
             f"  Issuer:   {view.issuer_name or '—'}",
             f"  Category: {view.sector or '—'}"
             + (f"  ·  {view.country}" if view.country else ""),
-            f"  Coupon:   {coupon}  (annual)",
+            f"  Coupon:   {coupon}  ({cadence})",
             f"  Issue:    {issue}",
             f"  Maturity: {maturity}",
         ]

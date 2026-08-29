@@ -239,6 +239,149 @@ class TestCurrentYield:
         assert y is not None and 48.7 < y < 48.9
 
 
+class TestInferBondTerms:
+    """PR-G: coupon frequency + residual inference from snap x price.
+
+    BRVM doesn't publish coupon frequency structurally, so the ratio
+    `price / (last_coupon x 100 / rate)` disambiguates annual from
+    semi-annual and quarterly. Amortising annual issues fall out of the
+    same rule because price ≈ derived residual under annual cadence.
+    """
+
+    def test_annual_full_nominal(self):
+        # BOAD.O11-shape: 5.95% annual on 10 000 nominal, coupon 595.
+        snap = BondSnapshot(
+            ticker="BOADO11", session_date=TODAY,
+            last_coupon_amount=595.0, source="brvm_org",
+        )
+        t = bonds_svc.infer_bond_terms(snap, 5.95, 10_000.0)
+        assert t.payments_per_year == 1
+        assert abs(t.residual_nominal - 10_000.0) < 1.0
+        assert t.confidence == "high"
+
+    def test_semi_annual_full_nominal(self):
+        # CRRH.O3-shape: 6.00% semi-annual on 10 000, coupon 300.
+        snap = BondSnapshot(
+            ticker="CRRHO3", session_date=TODAY,
+            last_coupon_amount=300.0, source="brvm_org",
+        )
+        t = bonds_svc.infer_bond_terms(snap, 6.00, 10_000.0)
+        assert t.payments_per_year == 2
+        assert abs(t.residual_nominal - 10_000.0) < 1.0
+        assert t.confidence == "high"
+
+    def test_annual_amortized(self):
+        # BIDC.O4-shape: 6.10% annual on residual 1 250, coupon 76.25.
+        snap = BondSnapshot(
+            ticker="BIDCO4", session_date=TODAY,
+            last_coupon_amount=76.25, source="brvm_org",
+        )
+        t = bonds_svc.infer_bond_terms(snap, 6.10, 1_250.0)
+        assert t.payments_per_year == 1
+        assert abs(t.residual_nominal - 1_250.0) < 1.0
+        assert t.confidence == "high"
+
+    def test_semi_annual_amortized(self):
+        # CRRH.O7-shape: 5.95% semi-annual on residual 2 917, coupon 86.77.
+        snap = BondSnapshot(
+            ticker="CRRHO7", session_date=TODAY,
+            last_coupon_amount=86.77, source="brvm_org",
+        )
+        t = bonds_svc.infer_bond_terms(snap, 5.95, 2_917.0)
+        assert t.payments_per_year == 2
+        assert abs(t.residual_nominal - 2_917.0) < 5.0
+        assert t.confidence == "high"
+
+    def test_missing_snap_returns_low_confidence_annual(self):
+        t = bonds_svc.infer_bond_terms(None, 6.10, 10_000.0)
+        assert t.payments_per_year == 1
+        assert t.residual_nominal is None
+        assert t.confidence == "low"
+
+    def test_missing_price_falls_back_to_annual_shape_residual(self):
+        # No price → we can't disambiguate. Return the annual-shape
+        # residual (backward-compatible with the pre-inference behaviour)
+        # so callers that lack a price still see a sensible schedule.
+        snap = BondSnapshot(
+            ticker="X", session_date=TODAY,
+            last_coupon_amount=300.0, source="brvm_org",
+        )
+        t = bonds_svc.infer_bond_terms(snap, 6.00, None)
+        assert t.payments_per_year == 1
+        assert abs(t.residual_nominal - 5_000.0) < 1.0
+        assert t.confidence == "low"
+
+    def test_ambiguous_ratio_falls_back_to_annual(self):
+        # Ratio 1.55 sits between the annual (≤1.35) and semi-annual
+        # (1.70-2.30) bands — return annual + low confidence rather
+        # than mis-classify.
+        snap = BondSnapshot(
+            ticker="X", session_date=TODAY,
+            last_coupon_amount=200.0, source="brvm_org",
+        )
+        # derived_annual = 200 * 100 / 6 = 3333, ratio = 5000/3333 = 1.5
+        t = bonds_svc.infer_bond_terms(snap, 6.00, 5_000.0)
+        assert t.payments_per_year == 1
+        assert t.confidence == "low"
+
+
+class TestSemiAnnualSchedule:
+    def test_semi_annual_walks_six_month_periods_and_halves_coupon(self):
+        # 6.00% coupon, semi-annual, matures 2028; anchor 2026-03-15.
+        # Expect payments 2026-09, 2027-03, 2027-09, 2028-03, 2028-09
+        # (terminal). Coupon per row = 600/2 = 300.
+        s = bonds_svc.build_schedule(
+            coupon_rate=6.00, maturity_year=2028,
+            last_coupon_date=date(2026, 3, 15), issue_date=None,
+            today=TODAY, nominal=10_000.0, payments_per_year=2,
+        )
+        assert s is not None
+        assert s.payments_per_year == 2
+        assert s.coupons_remaining == 5
+        assert s.annual_coupon == 600.0
+        assert all(abs(r.coupon - 300.0) < 1e-6 for r in s.rows)
+        # Terminal in maturity year, with principal.
+        assert s.rows[-1].payment_date.year == 2028
+        assert s.rows[-1].principal == 10_000.0
+        # All intermediate rows are coupon-only.
+        for r in s.rows[:-1]:
+            assert r.principal == 0.0
+
+    def test_semi_annual_ytm_at_par_equals_coupon(self):
+        # 5-year semi-annual bullet at par: YTM converges to the coupon
+        # rate under the days-based discount (small drift from 365.25
+        # vs. exact 0.5-year steps; ≤0.001 is well within tolerance).
+        rows: list[bonds_svc.CashFlowRow] = []
+        nominal = 10_000.0
+        coupon = 0.06 / 2 * nominal
+        for i in range(1, 11):
+            principal = nominal if i == 10 else 0.0
+            rows.append(bonds_svc.CashFlowRow(
+                payment_date=date(2026, 1, 1),  # date unused by solver
+                coupon=coupon, principal=principal,
+                total=coupon + principal,
+                year_fraction=i * 0.5,
+            ))
+        y = bonds_svc.solve_ytm(rows, dirty_price=10_000.0)
+        assert y is not None
+        # Semi-annual convention: bond-equivalent yield ≈ 2 * per-period
+        # rate. Solver returns the per-year rate that reproduces the
+        # bullet at par → 0.06 within 1e-4.
+        assert abs(y - 0.06) < 1e-3
+
+    def test_invalid_ppy_falls_back_to_annual(self):
+        # A caller passing an unsupported cadence (e.g. monthly ppy=12)
+        # should get an annual schedule, not a crash.
+        s = bonds_svc.build_schedule(
+            coupon_rate=6.00, maturity_year=2028,
+            last_coupon_date=date(2025, 12, 9), issue_date=None,
+            today=TODAY, nominal=10_000.0, payments_per_year=12,
+        )
+        assert s is not None
+        assert s.payments_per_year == 1
+        assert all(abs(r.coupon - 600.0) < 1e-6 for r in s.rows)
+
+
 class TestDeriveResidualNominal:
     def test_recovers_residual_from_last_coupon_amount(self):
         """F-09: `last_coupon_amount = residual * coupon / 100`. Given the
@@ -470,6 +613,65 @@ class TestGetBondView:
         # terminal principal row now reflects the balance actually due.
         assert view.schedule is not None
         assert abs(view.schedule.nominal - 1_250.0) < 0.01
+
+    def test_semi_annual_bond_schedule_and_residual(
+        self, monkeypatch, tmp_path
+    ):
+        """PR-G end-to-end: a CRRH.O3-shape 6.00% semi-annual bond priced
+        near par (10 000 XOF) with a 300 XOF last coupon should render:
+        - schedule.payments_per_year == 2
+        - schedule.nominal ≈ 10 000 (the true residual, NOT the halved
+          annual-shape 5 000 that the pre-fix code returned)
+        - terminal principal row of 10 000 (not 5 000, which is what
+          the user reported seeing as "half the current price")
+        """
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        with connect(db_path) as conn:
+            sec_repo.upsert(conn, [
+                Security(
+                    ticker="CRRHO3",
+                    name="CRRH-UEMOA 6% 2020-2028",
+                    kind="bond", country="TG",
+                    sector="Obligations privées",
+                    coupon_rate=6.00, maturity_year=2028,
+                    issue_date=date(2020, 4, 26),
+                    issuer_name="CRRH-UEMOA",
+                ),
+            ])
+            quotes_repo.upsert_daily_bars(conn, [
+                DailyBar(
+                    ticker="CRRHO3", session_date=TODAY,
+                    close=10_000.0, source="brvm_org",
+                ),
+            ])
+            bonds_repo.upsert_snapshots(conn, [
+                BondSnapshot(
+                    ticker="CRRHO3", session_date=TODAY,
+                    accrued_coupon=100.0,
+                    last_coupon_date=date(2026, 4, 26),
+                    last_coupon_amount=300.0,   # 6% x 10 000 / 2
+                    source="brvm_org",
+                ),
+            ])
+        view = bonds_svc.get_bond_view("CRRHO3", today=TODAY)
+        assert view is not None
+        assert view.schedule is not None
+        assert view.schedule.payments_per_year == 2
+        assert abs(view.schedule.nominal - 10_000.0) < 1.0
+        # Terminal row: principal reflects the true residual, not the
+        # halved annual-shape value the pre-fix code showed.
+        terminal = view.schedule.rows[-1]
+        assert abs(terminal.principal - 10_000.0) < 1.0
+        # Every coupon row pays half the annual coupon.
+        for r in view.schedule.rows:
+            assert abs(r.coupon - 300.0) < 1e-6
+        # Current yield at par ≈ coupon rate.
+        assert view.yield_ is not None
+        assert abs(view.yield_.current_yield_pct - 6.00) < 0.05
 
     def test_state_bond_has_no_equity_cross_link(self, monkeypatch, tmp_path):
         db_path = tmp_path / "brvm.sqlite"

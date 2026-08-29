@@ -2,21 +2,23 @@
 
 Everything the `/s/{ticker}/{overview,cashflow,yield,related}` tabs
 need is composed here so the Web and TUI templates stay dumb views over
-a single view-model. The pricing math (YTM, duration, convexity)
-assumes bullet-and-annual, which matches ~all currently-listed BRVM
-bonds; amortising and quarterly-pay issues (rare — some FCTC / social
-bonds) surface a footnote noting the assumption instead of trying to
-derive the schedule from a name we can't trust.
+a single view-model. The schedule builder walks bullet-redemption
+timelines at the inferred coupon cadence (annual, semi-annual, or
+quarterly); the exchange doesn't publish frequency structurally so we
+infer it from `last_coupon_amount / (rate/100 x price)` — see
+`infer_bond_terms`. Amortising issues fall out of the same inference
+because a bond quoted at ~residual with an "annual-shape" coupon lands
+as `(residual = price, payments_per_year = 1)`.
 
 BRVM bond nominal is nearly always 10 000 XOF (a handful of legacy
-issues are at 1 000). We default to 10 000 and expose the assumption on
-the Cash flow tab so a reader can spot the mismatch — the price column
-on the source page is close enough to par for real bonds that the
-default is a safe fallback when we're missing an explicit nominal.
+issues are at 1 000). We default to 10 000 when we lack the inputs to
+infer otherwise, and expose the inferred residual + cadence on the tab
+so a reader can spot a mismatch.
 """
 
 from __future__ import annotations
 
+import calendar
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
@@ -28,6 +30,11 @@ from brvm.models import BondSnapshot
 from brvm.store import bonds as bonds_repo
 
 DEFAULT_NOMINAL_XOF = 10_000.0
+
+# Recognised coupon cadences. Bonds outside this set (monthly, custom
+# amortisation schedules) fall back to the default annual assumption
+# rather than pretend we can infer them.
+_VALID_PPY: frozenset[int] = frozenset({1, 2, 4})
 
 # YTM bisection window. -50% (deeply discounted, close to default) …
 # +100% (freshly-admitted at a fraction of par) covers every realistic
@@ -65,6 +72,17 @@ def _add_years(d: date, n: int) -> date:
     return date(year, d.month, day)
 
 
+def _add_months(d: date, n: int) -> date:
+    """Shift `d` by `n` calendar months, clamping day to the target
+    month's length (e.g. Aug 31 + 1 month → Sep 30). Used to step
+    semi-annual (n=6) and quarterly (n=3) coupon periods."""
+    total = d.month - 1 + n
+    year = d.year + total // 12
+    month = total % 12 + 1
+    day = min(d.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
 # ---------- cash-flow schedule ---------------------------------------------
 
 
@@ -90,6 +108,7 @@ class BondSchedule:
     annual_coupon: float
     next_coupon_date: date | None
     coupons_remaining: int
+    payments_per_year: int = 1
 
 
 def build_schedule(
@@ -100,16 +119,24 @@ def build_schedule(
     issue_date: date | None,
     today: date,
     nominal: float = DEFAULT_NOMINAL_XOF,
+    payments_per_year: int = 1,
 ) -> BondSchedule | None:
-    """Bullet + annual coupon schedule.
+    """Bullet-redemption cash-flow schedule at the given coupon cadence.
 
-    The anchor for coupon anniversaries is `last_coupon_date` when known
-    (it's what the exchange actually disbursed most recently — a real
-    payment beats a derived one) and falls back to `issue_date` for
-    freshly-admitted bonds whose first coupon hasn't paid yet. Without
-    either, we can't place the coupon flow on the calendar and return
-    None so the tab renders a "schedule unavailable" state instead of
-    fabricating dates.
+    The anchor for coupon dates is `last_coupon_date` when known (it's
+    what the exchange actually disbursed most recently — a real payment
+    beats a derived one) and falls back to `issue_date` for freshly-
+    admitted bonds whose first coupon hasn't paid yet. Without either,
+    we can't place the coupon flow on the calendar and return None so
+    the tab renders a "schedule unavailable" state instead of fabricating
+    dates.
+
+    `payments_per_year` is the inferred coupon cadence (1 = annual,
+    2 = semi-annual, 4 = quarterly). The period coupon amount is
+    `coupon_rate/100 x nominal / payments_per_year`; forward steps are
+    `12 / payments_per_year` calendar months from the anchor. Invalid
+    cadences silently fall back to annual — the caller supplies an
+    inferred value; garbage in shouldn't crash the schedule.
     """
     if coupon_rate is None or maturity_year is None:
         return None
@@ -117,17 +144,21 @@ def build_schedule(
     if anchor is None:
         return None
 
+    if payments_per_year not in _VALID_PPY:
+        payments_per_year = 1
+    step_months = 12 // payments_per_year
     annual_coupon = coupon_rate / 100.0 * nominal
+    period_coupon = annual_coupon / payments_per_year
 
     # Walk anniversaries forward from the anchor. The first future
-    # anniversary is the next coupon.
+    # date at the coupon cadence is the next payment.
     next_dt = anchor
     while next_dt <= today:
-        next_dt = _add_years(next_dt, 1)
+        next_dt = _add_months(next_dt, step_months)
 
     # Cap at year-end of `maturity_year` — the exchange doesn't publish
-    # the exact maturity day, and the last anniversary that falls within
-    # the maturity year is the closest thing to a canonical maturity date.
+    # the exact maturity day, so we treat the last coupon in the maturity
+    # year as terminal.
     def _within_maturity(d: date) -> bool:
         return d.year <= maturity_year
 
@@ -137,20 +168,20 @@ def build_schedule(
         # Days-based year fraction so the discount factor cares about
         # actual elapsed calendar time, not just an integer count.
         t_years = (dt - today).days / 365.25
-        is_terminal = _add_years(dt, 1).year > maturity_year
+        is_terminal = not _within_maturity(_add_months(dt, step_months))
         principal = nominal if is_terminal else 0.0
         rows.append(
             CashFlowRow(
                 payment_date=dt,
-                coupon=annual_coupon,
+                coupon=period_coupon,
                 principal=principal,
-                total=annual_coupon + principal,
+                total=period_coupon + principal,
                 year_fraction=round(t_years, 4),
             )
         )
         if is_terminal:
             break
-        dt = _add_years(dt, 1)
+        dt = _add_months(dt, step_months)
 
     # F-31: a bond whose last coupon anniversary is now past the maturity
     # year produces an empty forward schedule. Return None so the tab
@@ -165,6 +196,7 @@ def build_schedule(
         annual_coupon=annual_coupon,
         next_coupon_date=next_dt,
         coupons_remaining=len(rows),
+        payments_per_year=payments_per_year,
     )
 
 
@@ -254,14 +286,14 @@ def derive_residual_nominal(
     snap: BondSnapshot | None, coupon_rate: float | None
 ) -> float | None:
     """Recover a bond's residual face value from the exchange-published
-    last-coupon amount: `residual = last_coupon_amount / (coupon_rate / 100)`.
+    last-coupon amount, assuming ANNUAL coupon cadence:
+    `residual = last_coupon_amount / (coupon_rate / 100)`.
 
     Returns None when either input is missing or the coupon rate is 0
-    (avoids a divide-by-zero on a placeholder row). The exchange doesn't
-    publish the residual directly per session, but it does publish the
-    last coupon amount alongside the price, and coupons on amortizing
-    issues track the current outstanding face, so the ratio holds. Falls
-    back to None (caller uses DEFAULT_NOMINAL_XOF) when we can't tell.
+    (avoids a divide-by-zero on a placeholder row). Prefer
+    `infer_bond_terms` for the full picture — this helper stays for
+    callers that only need the annual-shape derivation and don't have
+    a price to disambiguate semi-annual from amortising.
     """
     if snap is None or coupon_rate is None or coupon_rate == 0:
         return None
@@ -269,6 +301,83 @@ def derive_residual_nominal(
     if amount is None:
         return None
     return amount * 100.0 / coupon_rate
+
+
+@dataclass(frozen=True)
+class BondTerms:
+    """Inferred structural facts about a bond used by the schedule and
+    yield math. Everything is a best-effort inference from the exchange's
+    published price + last-coupon-amount; we prefer being wrong-by-annual
+    (the pre-inference default) over being wrong-by-guessed-cadence when
+    the inputs don't clearly point at a semi-annual or quarterly shape.
+    """
+
+    residual_nominal: float | None
+    payments_per_year: int  # 1, 2, or 4
+    confidence: str  # "high" | "low"
+
+
+def infer_bond_terms(
+    snap: BondSnapshot | None,
+    coupon_rate: float | None,
+    price: float | None,
+) -> BondTerms:
+    """Infer (residual, coupon cadence) from the exchange snapshot + price.
+
+    BRVM doesn't publish coupon frequency structurally, so we lean on
+    the ratio `price / (last_coupon_amount x 100 / coupon_rate)`. The
+    denominator is what `derive_residual_nominal` computes — a residual
+    that assumes annual cadence. Under real annual cadence the ratio
+    trends to 1.0 (price sits near residual par); under semi-annual, the
+    denominator is half the true residual, so the ratio trends to 2.0;
+    quarterly trends to 4.0. Amortising annual issues (BIDC.O4-shape)
+    also land at ratio ≈ 1.0 because both numerator and denominator
+    shrink together as the residual pays down.
+
+    Returns `BondTerms(residual=None, payments_per_year=1, "low")` when
+    we can't infer — either input missing, coupon rate zero, or a ratio
+    that lands between the tolerance bands. Callers fall back to
+    `DEFAULT_NOMINAL_XOF` + annual in that case.
+    """
+    annual_shape_residual = derive_residual_nominal(snap, coupon_rate)
+    if annual_shape_residual is None:
+        return BondTerms(residual_nominal=None, payments_per_year=1, confidence="low")
+
+    # Without a price we can't disambiguate — return the annual-shape
+    # residual and let the caller decide whether it matches reality.
+    if price is None or price <= 0:
+        return BondTerms(
+            residual_nominal=annual_shape_residual,
+            payments_per_year=1, confidence="low",
+        )
+
+    ratio = price / annual_shape_residual
+
+    # Tolerance bands sized so the ambiguous middle (1.4-1.6, 2.7-3.3)
+    # falls through to annual + low confidence rather than mis-classifying
+    # a stressed price as a different cadence. Real-data samples land
+    # squarely inside these bands.
+    if abs(ratio - 1.0) <= 0.35:
+        return BondTerms(
+            residual_nominal=annual_shape_residual,
+            payments_per_year=1, confidence="high",
+        )
+    if abs(ratio - 2.0) <= 0.30:
+        return BondTerms(
+            residual_nominal=annual_shape_residual * 2.0,
+            payments_per_year=2, confidence="high",
+        )
+    if abs(ratio - 4.0) <= 0.50:
+        return BondTerms(
+            residual_nominal=annual_shape_residual * 4.0,
+            payments_per_year=4, confidence="high",
+        )
+    # Ambiguous — fall back to annual on the derived residual, flagged
+    # low-confidence so the tab can dim the assumption.
+    return BondTerms(
+        residual_nominal=annual_shape_residual,
+        payments_per_year=1, confidence="low",
+    )
 
 
 # ---------- read-side view models ------------------------------------------
@@ -527,12 +636,14 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
             date.fromisoformat(row["issue_date"]) if row["issue_date"] else None
         )
         last_coupon = snap.last_coupon_date if snap else None
-        # F-09: derive the current residual balance from the exchange's
-        # last-coupon amount and thread it into both the schedule (so
-        # the terminal principal row reflects the balance actually due)
-        # and the current-yield calculation (so an amortizing bond
-        # quoted at residual reads its coupon rate, not 48 %).
-        residual = derive_residual_nominal(snap, row["coupon_rate"])
+        # F-09 + PR-G: infer both the residual balance and the coupon
+        # cadence from the exchange's snapshot vs. the market price. The
+        # cadence disambiguates semi-annual issues (CRRH.O*, BIDC.O2/O5)
+        # from amortising annual issues (BIDC.O4-shape); without it the
+        # terminal principal row lands at half the true residual and the
+        # YTM comes out biased low.
+        terms = infer_bond_terms(snap, row["coupon_rate"], price)
+        residual = terms.residual_nominal
         schedule = build_schedule(
             coupon_rate=row["coupon_rate"],
             maturity_year=row["maturity_year"],
@@ -540,6 +651,7 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
             issue_date=issue_date_val,
             today=today,
             nominal=residual if residual else DEFAULT_NOMINAL_XOF,
+            payments_per_year=terms.payments_per_year,
         )
 
         ysum = None
