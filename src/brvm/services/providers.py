@@ -107,12 +107,68 @@ class ApiProvider:
         raise NotImplementedError
 
 
+class FallbackProvider:
+    """Composes an API-first provider with a scrape fallback.
+
+    F-13: previously `select_provider` returned the raw `ApiProvider`
+    whenever `BRVM_API_*` was configured. Because `ApiProvider` is a
+    stub that raises `NotImplementedError`, filling those vars (as
+    `env.example` invites) silently killed every ingest cycle — no
+    scrape, no data, and combined with F-10 no visible badge either.
+
+    The fallback catches `NotImplementedError` from the primary and
+    delegates to the scraper. Real transport errors (`httpx.HTTPError`,
+    `ValueError` from a bad response) are NOT caught — those are
+    genuine API failures worth surfacing, not "API isn't wired up".
+    Logs a warning on the first fallback so an operator notices.
+    """
+
+    name = "api+scrape"
+
+    def __init__(self, primary: QuoteProvider, fallback: QuoteProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._warned_refresh = False
+        self._warned_history: set[str] = set()
+
+    def refresh_securities(self) -> tuple[list[Security], list[Quote], list[IndexLevel]]:
+        try:
+            return self._primary.refresh_securities()
+        except NotImplementedError:
+            if not self._warned_refresh:
+                log.warning(
+                    "provider %s.refresh_securities not implemented; "
+                    "falling back to %s", self._primary.name, self._fallback.name,
+                )
+                self._warned_refresh = True
+            return self._fallback.refresh_securities()
+
+    def history(self, ticker: str, country: str | None) -> list[DailyBar]:
+        try:
+            return self._primary.history(ticker, country)
+        except NotImplementedError:
+            key = f"{ticker}:{country or ''}"
+            if key not in self._warned_history:
+                log.warning(
+                    "provider %s.history(%s) not implemented; "
+                    "falling back to %s", self._primary.name, ticker,
+                    self._fallback.name,
+                )
+                self._warned_history.add(key)
+            return self._fallback.history(ticker, country)
+
+
 def select_provider() -> QuoteProvider:
     """Return the provider dictated by the current settings.
 
     ScrapeProvider is always safe; ApiProvider is only selected when both
-    BRVM_API_BASE and BRVM_API_KEY are non-empty.
+    BRVM_API_BASE and BRVM_API_KEY are non-empty, and is always wrapped
+    in `FallbackProvider` so a stubbed / partial API doesn't take
+    everything down (F-13).
     """
     if settings.has_api_provider:
-        return ApiProvider(settings.brvm_api_base, settings.brvm_api_key)
+        return FallbackProvider(
+            primary=ApiProvider(settings.brvm_api_base, settings.brvm_api_key),
+            fallback=ScrapeProvider(),
+        )
     return ScrapeProvider()

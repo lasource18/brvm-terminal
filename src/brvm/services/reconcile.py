@@ -81,19 +81,31 @@ def check_boc_close(
     report tickers whose local `daily_bars.close` disagrees with the
     bulletin by more than `tolerance_pct` percent.
 
-    `session_date` scopes the local lookup; when None, uses the newest
-    session already in `daily_bars`. Tickers on the BOC but missing
+    `session_date` scopes the local lookup; when None, the BOC's own
+    filename-encoded session date is used — the audit's F-04 root cause
+    was falling back to `MAX(daily_bars.session_date)`, which for
+    equity tickers is typically the most recent *weekly* backfill,
+    days apart from the BOC's date. Tickers on the BOC but missing
     locally are surfaced with `local_close=None` and `delta_pct=None`
     so a reader can see the gap without a division-by-zero.
     """
     if pdf_bytes is None:
-        pdf_bytes = brvm_org.fetch_boc_pdf(lang="eng")
+        fetched = brvm_org.fetch_boc(lang="eng")
+        if fetched is None:
+            log.warning("BOC PDF unavailable; skipping reconciliation")
+            return ReconcileReport(
+                session_date=session_date, boc_rows=0, matched=0, drift=[],
+            )
+        pdf_bytes = fetched.pdf_bytes
+        boc_session = fetched.session_date
+    else:
+        boc_session = None
     if not pdf_bytes:
         log.warning("BOC PDF unavailable; skipping reconciliation")
         return ReconcileReport(
             session_date=session_date, boc_rows=0, matched=0, drift=[],
         )
-    session = session_date or _latest_session()
+    session = session_date or boc_session or _latest_session()
     if session is None:
         log.warning("no local daily_bars; nothing to reconcile")
         return ReconcileReport(

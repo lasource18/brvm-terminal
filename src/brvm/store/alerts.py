@@ -34,6 +34,7 @@ def _row_to_rule(r: sqlite3.Row) -> AlertRule:
         doc_types=r["doc_types"],
         label=r["label"],
         enabled=bool(r["enabled"]),
+        created_utc=r["created_utc"],
     )
 
 

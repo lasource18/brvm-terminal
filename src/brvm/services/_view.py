@@ -7,9 +7,19 @@ storage layer.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 from pydantic import BaseModel, Field
+
+# F-10: STALE means "the scraper is behind", not "the market is closed".
+# Thresholds are generous enough to survive normal cadence jitter but
+# tight enough to flag a dead scraper. The market-hours snapshot runs
+# every 10 min; the outside-hours job runs hourly at :17. `_STALE_OPEN`
+# catches "two market-hours snapshots missed" and `_STALE_CLOSED`
+# catches "two hourly outside snapshots missed", which is when a
+# scraper outage is worth showing to a reader.
+_STALE_OPEN = timedelta(minutes=30)
+_STALE_CLOSED = timedelta(minutes=90)
 
 
 class IndexTile(BaseModel):
@@ -58,7 +68,28 @@ class Overview(BaseModel):
 
     @property
     def is_stale(self) -> bool:
-        return not self.market_open
+        """F-10: STALE reflects scraper freshness, not market status.
+
+        A dead scraper during trading hours is the case the charter's
+        "stale-data badges" requirement exists for; the previous
+        `not market_open` rule inverted the meaning, hiding the badge
+        during real outages and lighting it up every evening on fresh
+        close data. Rule:
+          - No snapshot on record: STALE.
+          - Market open: STALE if newest snapshot > 30 min old.
+          - Market closed: STALE if newest snapshot > 90 min old.
+        Unparseable timestamps are treated as STALE to fail loud.
+        """
+        if not self.last_snapshot_utc:
+            return True
+        try:
+            snap = datetime.fromisoformat(self.last_snapshot_utc.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        if snap.tzinfo is None:
+            snap = snap.replace(tzinfo=UTC)
+        threshold = _STALE_OPEN if self.market_open else _STALE_CLOSED
+        return datetime.now(UTC) - snap > threshold
 
 
 class WatchlistView(BaseModel):

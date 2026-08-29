@@ -200,6 +200,11 @@ class AlertRule(BaseModel):
     doc_types: str | None = None             # new_filing: CSV of FilingDocType
     label: str | None = None
     enabled: bool = True
+    # F-16: filing/news evaluators skip rows whose fetched_utc is
+    # earlier than this so a freshly-added wildcard rule doesn't fire
+    # against the historical corpus. Populated by the store at insert
+    # time; left None on hand-built rules used only in tests.
+    created_utc: str | None = None
 
 
 class AlertEvent(BaseModel):

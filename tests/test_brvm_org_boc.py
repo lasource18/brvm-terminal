@@ -98,3 +98,19 @@ class TestParseBocRows:
     def test_close_prices_are_positive(self, fixtures_dir):
         rows = self._rows(fixtures_dir)
         assert all(r.close > 0 for r in rows)
+
+    def test_tel_board_rows_are_extracted(self, fixtures_dir):
+        """F-04: the TEL (Télécoms) board carries SNTS, ORAC, and ONTBF
+        — the highest-turnover tickers on the exchange. The prior
+        whitelist omitted TEL, silently dropping these rows from every
+        reconciliation cycle even though pypdf extracts them cleanly."""
+        rows = self._rows(fixtures_dir)
+        by = {r.ticker: r for r in rows}
+        # Values cross-referenced against the 2026-08-18 BOC page 2.
+        assert "SNTS" in by
+        assert by["SNTS"].close == 32_500.0
+        assert by["SNTS"].previous == 31_900.0
+        assert "ORAC" in by
+        assert by["ORAC"].close == 19_000.0
+        assert "ONTBF" in by
+        assert by["ONTBF"].close == 2_900.0
