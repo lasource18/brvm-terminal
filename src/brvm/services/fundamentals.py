@@ -92,7 +92,21 @@ def _persist(
     if anything usable landed (i.e. we know the period + at least one
     non-null financial line OR at least one segment/owner row)."""
     period_year = extract.period_year or row["period_year"]
-    period_kind = extract.period_kind or row["period_kind"] or "annual"
+    # F-28: prefer the filing's own period_kind (derived deterministically
+    # from the filename by `brvm_org_filings._classify_period`) over the
+    # model's guess. A mislabelled interim from the LLM (e.g., an H1
+    # report the model called "annual") would otherwise full-replace a
+    # genuine annual row via `replace_period`. Log a warning when the
+    # two disagree so the mismatch is investigatable without noise on
+    # every filing.
+    filing_kind = row["period_kind"]
+    if extract.period_kind and filing_kind and extract.period_kind != filing_kind:
+        log.warning(
+            "extract period_kind %s disagrees with filing %s for %s "
+            "(filing id=%d); trusting filing",
+            extract.period_kind, filing_kind, row["ticker"], row["id"],
+        )
+    period_kind = filing_kind or extract.period_kind or "annual"
     if period_year is None:
         # Without a period we can't key the row. Stamp the filing so we
         # don't retry, but count it as an empty payload.

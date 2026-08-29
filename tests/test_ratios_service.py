@@ -93,6 +93,27 @@ def test_valuation_ratios_currency_mismatch_returns_none_for_price_ratios():
     assert got["payout_ratio"].value == pytest.approx(40.0)
 
 
+def test_valuation_ratios_suppress_negative_pe():
+    """F-28: negative EPS produced a negative P/E multiple that reads
+    as "cheap" to a skim reader. The peers tooltip already promised
+    "negative EPS → suppressed"; align the ratio path with that."""
+    got = valuation_ratios(_fin(eps=-4.0), _mkt(), currency_mismatch=False)
+    assert got["pe"] is None
+
+
+def test_valuation_ratios_suppress_negative_pb():
+    """Negative total_equity (distressed issuer) → negative book value
+    per share → negative P/B. Same suppress rule."""
+    got = valuation_ratios(_fin(total_equity=-500.0), _mkt(), currency_mismatch=False)
+    assert got["pb"] is None
+
+
+def test_valuation_ratios_suppress_zero_denominator_price_ratio():
+    """Zero denominators also blow up the multiple; suppress cleanly."""
+    got = valuation_ratios(_fin(eps=0.0), _mkt(), currency_mismatch=False)
+    assert got["pe"] is None
+
+
 def test_valuation_ratios_missing_inputs():
     # No shares — P/B and P/S can't be computed but P/E still can.
     got = valuation_ratios(_fin(), _mkt(shares_outstanding=None), currency_mismatch=False)
@@ -154,6 +175,24 @@ def test_growth_ratios_prior_same_kind_only():
         "net_income_growth": None,
         "eps_growth": None,
     }
+
+
+def test_growth_ratios_suppresses_gap_year_comparison():
+    """F-28: growth across a gap year (2024 vs. 2022 because 2023's
+    filing never landed) isn't "YoY" — the template's label — and
+    including it beside true YoY rows misleads a reader. Suppress."""
+    curr = _fin(period_year=2024, revenue=1_200.0, net_income=240.0, eps=12.0)
+    prior_gap = _fin(period_year=2022, revenue=1_000.0, net_income=200.0, eps=10.0)
+    got = growth_ratios(curr, prior_gap)
+    assert got == {
+        "revenue_growth": None,
+        "net_income_growth": None,
+        "eps_growth": None,
+    }
+    # Sanity: consecutive years still compute.
+    prior_year = _fin(period_year=2023, revenue=1_000.0, net_income=200.0, eps=10.0)
+    got_yoy = growth_ratios(curr, prior_year)
+    assert got_yoy["revenue_growth"].value == pytest.approx(20.0)
 
 
 def test_growth_ratios_negative_prior_reports_signed_direction():
