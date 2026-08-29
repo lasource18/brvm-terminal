@@ -53,6 +53,61 @@ _ADMISSION_HINTS: tuple[str, ...] = ("premiere_cotation",)
 # shape as the filings-index pager.
 _PAGER_LAST_HREF_RE = re.compile(r"[?&]page=(\d+)")
 
+# Issue #49 title-side spec: "ETAT DU MALI 6,55 % 2026-2036" — issuer
+# tokens, coupon (comma or period decimal), issue year, maturity
+# year. U+2013 en-dash is accepted alongside `-`. Multi-issuer titles
+# yield multiple captures because we finditer.
+_TITLE_SPEC_RE = re.compile(
+    r"([A-Z][A-Z0-9'.\-\s]+?)\s+(\d{1,2}(?:[.,]\d{1,3})?)\s*%\s+"
+    r"(\d{4})\s*[-\u2013]\s*(\d{4})"
+)
+
+# Issue #49 filename-side spec: brvm.org drops the decimal separator
+# in the coupon (`_tpci_585_2014-2021_`); the coupon is always 3-4
+# digits. Split as `<issuer_slug>_<coupon>_<iy>-<my>`; the issuer slug
+# is a stretch of one-or-more underscore-separated lowercase tokens.
+_FILENAME_SPEC_RE = re.compile(
+    r"_((?:[a-z]+(?:'[a-z]+)?_)+)"      # issuer slug, trailing underscore
+    r"(\d{3,4})_"                        # coupon x100 (e.g. 585 → 5.85)
+    r"(\d{4})-(\d{4})"                   # issue-maturity year range
+)
+
+# Slug tokens that appear in filenames but aren't part of an issuer
+# name — mostly bond-type prefixes ("social bond", "diaspora bond",
+# "gender bond"). We strip these so `_social_bond_crrh_uemoa_600_...`
+# resolves against `CRRH-UEMOA`, not `SOCIAL BOND CRRH-UEMOA`.
+_FILENAME_ISSUER_STRIPS: tuple[str, ...] = (
+    "premiere_cotation_",
+    "resultats_de_premiere_cotation_",
+    "resultat_de_premiere_cotation_",
+    "social_bond_",
+    "gender_bond_",
+    "diaspora_bond_",
+    "diaspora_bonds_",
+    "gss_baobab_",
+    "keur_samba_",
+    "et_",
+)
+
+
+@dataclass(frozen=True)
+class BondSpec:
+    """A `(issuer, coupon%, issue_year, maturity_year)` triple lifted
+    from an avis title or filename. Feeds the coupon+years matcher
+    that resolves specs to bond tickers when the avis itself doesn't
+    embed the ticker code — the case for older/matured bonds like
+    TPCI.O18 whose 2014 admission avis pre-dates the ticker-in-
+    filename convention.
+
+    `issuer_brand` is uppercased and stripped of bond-type prefixes so
+    downstream SQL can `WHERE UPPER(issuer_name) LIKE '%<brand>%'`.
+    """
+
+    issuer_brand: str
+    coupon_pct: float
+    issue_year: int
+    maturity_year: int
+
 
 @dataclass(frozen=True)
 class Avis:
@@ -61,6 +116,7 @@ class Avis:
     published_date: date | None
     tickers: tuple[str, ...]  # canonical uppercase, e.g. ("EOM.O23", "EOM.O24")
     is_admission: bool
+    specs: tuple[BondSpec, ...] = ()  # fallback when tickers is empty
 
 
 def _parse_date_iso(raw: str | None) -> date | None:
@@ -90,6 +146,77 @@ def _extract_tickers(title: str, pdf_url: str) -> tuple[str, ...]:
 def _is_admission(pdf_url: str) -> bool:
     lower = pdf_url.lower()
     return any(h in lower for h in _ADMISSION_HINTS)
+
+
+def _clean_title_issuer(raw: str) -> str:
+    """Normalise a title-side issuer capture. Strips leading bond-type
+    prefixes (SOCIAL BOND, GENDER BOND, DIASPORA BONDS, KEUR SAMBA)
+    and stray dash-punctuation left over from title separators."""
+    up = raw.upper().strip(" -\u2013")
+    for prefix in ("SOCIAL BOND ", "GENDER BOND ",
+                   "DIASPORA BONDS ", "DIASPORA BOND ",
+                   "KEUR SAMBA ", "GSS BAOBAB ", "GSS "):
+        if up.startswith(prefix):
+            up = up[len(prefix):]
+    return up.strip()
+
+
+def _clean_filename_issuer(raw: str) -> str:
+    """Convert `etat_du_mali_` (trailing underscore) → `ETAT DU MALI`,
+    stripping bond-type prefixes and separator tokens along the way."""
+    s = raw
+    for junk in _FILENAME_ISSUER_STRIPS:
+        s = s.replace(junk, "")
+    # Drop the trailing separator underscore left after the coupon
+    # match consumed the numeric block.
+    return s.strip("_").replace("_", " ").upper().strip()
+
+
+def _extract_specs(title: str, pdf_url: str) -> tuple[BondSpec, ...]:
+    """Return the `(issuer, coupon, iy, my)` triples referenced by one
+    row — deduped in insertion order.
+
+    Older admission avis (~pre-2019) don't embed the ticker in either
+    title or filename; the audit's blocker case TPCI.O18 (a 2014-2021
+    bond) falls into that bucket. Extracting the spec lets the
+    downstream matcher resolve it against `securities` on `(issuer
+    LIKE brand, coupon_rate ≈, maturity_year =)`.
+    """
+    seen: dict[tuple[str, float, int, int], None] = {}
+    for m in _TITLE_SPEC_RE.finditer(title):
+        issuer = _clean_title_issuer(m.group(1))
+        if not issuer or len(issuer) < 2:
+            continue
+        try:
+            coupon = float(m.group(2).replace(",", "."))
+        except ValueError:
+            continue
+        iy, my = int(m.group(3)), int(m.group(4))
+        if my < iy or my - iy > 40:
+            continue
+        seen.setdefault((issuer, coupon, iy, my), None)
+    # Filename path: the coupon is decimal-stripped (`585` = 5.85).
+    for m in _FILENAME_SPEC_RE.finditer(pdf_url.lower()):
+        issuer = _clean_filename_issuer(m.group(1))
+        if not issuer or len(issuer) < 2:
+            continue
+        raw = m.group(2)
+        # Two conventions in the wild: `585` (3-digit) → 5.85 and
+        # `0575` (4-digit leading zero) → 5.75. Divide 3-digit by 100,
+        # 4-digit by 100 as well since the extra zero encodes the
+        # tenths not-yet-published coupon.
+        coupon = int(raw) / 100.0
+        iy, my = int(m.group(3)), int(m.group(4))
+        if my < iy or my - iy > 40:
+            continue
+        seen.setdefault((issuer, coupon, iy, my), None)
+    return tuple(
+        BondSpec(
+            issuer_brand=k[0], coupon_pct=k[1],
+            issue_year=k[2], maturity_year=k[3],
+        )
+        for k in seen
+    )
 
 
 def parse_avis_page(html: str) -> list[Avis]:
@@ -122,6 +249,7 @@ def parse_avis_page(html: str) -> list[Avis]:
         )
 
         tickers = _extract_tickers(title, pdf_url)
+        specs = _extract_specs(title, pdf_url)
         out.append(
             Avis(
                 title=title,
@@ -129,6 +257,7 @@ def parse_avis_page(html: str) -> list[Avis]:
                 published_date=published,
                 tickers=tickers,
                 is_admission=_is_admission(pdf_url),
+                specs=specs,
             )
         )
     return out

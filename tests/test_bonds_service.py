@@ -775,6 +775,102 @@ class TestGetBondView:
         # Manual pin on EOM.O2 was left alone.
         assert urls["EOM.O2"] == "https://manual.example/eom-o2.pdf"
 
+    def test_pin_prospectus_urls_resolves_coupon_years_spec_when_no_ticker(
+        self, monkeypatch, tmp_path
+    ):
+        """Issue #49: older avis whose title and filename don't embed
+        the ticker (e.g. TPCI's 2014 admission avis) resolve via the
+        `(issuer_brand, coupon, iy, my)` spec against `securities`.
+        Blocker case in the audit report."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        from brvm.sources.brvm_org_avis import Avis, BondSpec
+
+        with connect(db_path) as conn:
+            # Seed a matured TPCI bond with the shape of TPCI.O18.
+            sec_repo.upsert(conn, [
+                Security(
+                    ticker="TPCI.O18", name="TPCI 5.85% 2014-2021",
+                    kind="bond", country="CI", sector="Obligations d'Etat",
+                    coupon_rate=5.85, maturity_year=2021,
+                    issue_date=date(2014, 6, 15),
+                    issuer_name="TPCI",
+                ),
+            ])
+            # An avis with no ticker in title/filename, only a spec.
+            avis_row = Avis(
+                title="Première cotation TPCI",
+                pdf_url=(
+                    "https://www.brvm.org/sites/default/files/"
+                    "20140301_-_premiere_cotation_-_tpci_585_2014-2021_.pdf"
+                ),
+                published_date=date(2014, 3, 1),
+                tickers=(),
+                is_admission=True,
+                specs=(
+                    BondSpec(
+                        issuer_brand="TPCI", coupon_pct=5.85,
+                        issue_year=2014, maturity_year=2021,
+                    ),
+                ),
+            )
+            pinned = bonds_svc.pin_prospectus_urls(conn, [avis_row])
+            assert pinned == 1
+            url = conn.execute(
+                "SELECT prospectus_url FROM securities WHERE ticker='TPCI.O18'"
+            ).fetchone()["prospectus_url"]
+        assert "tpci_585_2014-2021" in url
+
+    def test_pin_prospectus_urls_spec_ambiguous_match_refuses_to_guess(
+        self, monkeypatch, tmp_path
+    ):
+        """Two bonds with the same issuer + coupon + maturity_year but
+        different issue years are ambiguous. `_resolve_bond_spec`
+        breaks ties on `issue_date` year; when even that doesn't
+        disambiguate, refuse to guess and leave both rows untouched."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        from brvm.sources.brvm_org_avis import Avis, BondSpec
+
+        with connect(db_path) as conn:
+            sec_repo.upsert(conn, [
+                Security(
+                    ticker="TPCI.OA", name="TPCI 5.85% 2014-2021 A",
+                    kind="bond", country="CI",
+                    coupon_rate=5.85, maturity_year=2021,
+                    issue_date=None,  # NULL — can't disambiguate on year
+                    issuer_name="TPCI",
+                ),
+                Security(
+                    ticker="TPCI.OB", name="TPCI 5.85% 2014-2021 B",
+                    kind="bond", country="CI",
+                    coupon_rate=5.85, maturity_year=2021,
+                    issue_date=None,
+                    issuer_name="TPCI",
+                ),
+            ])
+            avis_row = Avis(
+                title="Première cotation TPCI",
+                pdf_url="https://www.brvm.org/tpci_585_2014-2021_.pdf",
+                published_date=date(2014, 3, 1),
+                tickers=(),
+                is_admission=True,
+                specs=(
+                    BondSpec(
+                        issuer_brand="TPCI", coupon_pct=5.85,
+                        issue_year=2014, maturity_year=2021,
+                    ),
+                ),
+            )
+            pinned = bonds_svc.pin_prospectus_urls(conn, [avis_row])
+            assert pinned == 0
+
     def test_pin_prospectus_urls_overwrite_replaces_manual_pin(
         self, monkeypatch, tmp_path
     ):
