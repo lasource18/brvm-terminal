@@ -684,3 +684,108 @@ class TestGetBondView:
         view = bonds_svc.get_bond_view("EOM.O10", today=TODAY)
         assert view is not None
         assert view.issuer_equity_ticker is None
+
+    def test_prospectus_url_defaults_to_none(self, monkeypatch, tmp_path):
+        """No prospectus link seeded → view exposes the field as None so
+        the template can hide the row rather than render a broken link."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        with connect(db_path) as conn:
+            _seed_mali(conn)
+        view = bonds_svc.get_bond_view("EOM.O10", today=TODAY)
+        assert view is not None
+        assert view.prospectus_url is None
+
+    def test_prospectus_url_is_surfaced_when_set(self, monkeypatch, tmp_path):
+        """A pinned prospectus URL on `securities` threads all the way
+        through to the view — the Bloomberg-style "Prospectus: <link>"
+        row on the bond overview reads this field."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        with connect(db_path) as conn:
+            _seed_mali(conn)
+            conn.execute(
+                "UPDATE securities SET prospectus_url = ? WHERE ticker = ?",
+                ("https://example.org/prospectus-eom-o10.pdf", "EOM.O10"),
+            )
+            conn.commit()
+        view = bonds_svc.get_bond_view("EOM.O10", today=TODAY)
+        assert view is not None
+        assert view.prospectus_url == "https://example.org/prospectus-eom-o10.pdf"
+
+    def test_prospectus_url_seed_matches_admission_communique(
+        self, monkeypatch, tmp_path
+    ):
+        """Re-runs the 0016 backfill UPDATE against a hand-seeded
+        news_items + securities pair to prove the WHERE clause picks the
+        newest matching prospectus/admission communiqué and pins its URL
+        on the correct bond issuer. Guards against the backfill picking
+        up unrelated news or the very first (oldest) match."""
+        db_path = tmp_path / "brvm.sqlite"
+        monkeypatch.setenv("DB_PATH", str(db_path))
+        from brvm.config import reset_settings_cache
+        reset_settings_cache()
+        _apply_migrations(db_path)
+        from brvm.models import NewsItem
+        from brvm.store import news as news_repo
+
+        with connect(db_path) as conn:
+            _seed_mali(conn)
+            news_repo.upsert_news_items(conn, [
+                NewsItem(
+                    source="sikafinance", kind="communique",
+                    url="https://sikafinance.com/old-admission",
+                    url_hash="hash-old-adm",
+                    title="ETAT DU MALI — Admission à la cote (2015)",
+                    issuer_name="ETAT DU MALI",
+                    published_at="2015-06-01T00:00:00+00:00",
+                ),
+                NewsItem(
+                    source="sikafinance", kind="communique",
+                    url="https://sikafinance.com/new-obligation",
+                    url_hash="hash-new-obl",
+                    title="ETAT DU MALI — Obligation 2023-2029",
+                    issuer_name="ETAT DU MALI",
+                    published_at="2023-02-15T00:00:00+00:00",
+                ),
+                NewsItem(
+                    source="sikafinance", kind="news",
+                    url="https://sikafinance.com/unrelated",
+                    url_hash="hash-unrelated",
+                    title="ETAT DU MALI — Résultat budgétaire trimestriel",
+                    issuer_name="ETAT DU MALI",
+                    published_at="2024-03-01T00:00:00+00:00",
+                ),
+            ])
+            conn.execute(
+                """
+                UPDATE securities
+                SET prospectus_url = (
+                    SELECT n.url
+                    FROM news_items AS n
+                    WHERE n.issuer_name = securities.issuer_name
+                      AND (
+                        LOWER(n.title) LIKE '%obligat%' OR
+                        LOWER(n.title) LIKE '%cotation%' OR
+                        LOWER(n.title) LIKE '%admission%'
+                      )
+                    ORDER BY COALESCE(n.published_at, n.fetched_utc) DESC
+                    LIMIT 1
+                )
+                WHERE kind = 'bond'
+                  AND issuer_name IS NOT NULL
+                  AND prospectus_url IS NULL
+                """
+            )
+            conn.commit()
+        view = bonds_svc.get_bond_view("EOM.O10", today=TODAY)
+        assert view is not None
+        # Newest matching communiqué wins; unrelated budget news is
+        # filtered out even though it has the newest date overall.
+        assert view.prospectus_url == "https://sikafinance.com/new-obligation"

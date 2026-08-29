@@ -433,6 +433,7 @@ class BondView:
     related: list[RelatedBond] = field(default_factory=list)
     issuer_equity_ticker: str | None = None  # cross-link if the issuer is also listed as equity
     prospectus_news: list[ProspectusNews] = field(default_factory=list)
+    prospectus_url: str | None = None  # canonical prospectus / admission link (0016 seed or manual)
 
 
 def _latest_close(conn: sqlite3.Connection, ticker: str) -> float | None:
@@ -583,7 +584,8 @@ def _list_related(
 def _fmt_bond_view(row: sqlite3.Row, snap: BondSnapshot | None, price: float | None,
                    schedule: BondSchedule | None, ysum: YieldSummary | None,
                    related: list[RelatedBond], equity_link: str | None,
-                   prospectus: list[ProspectusNews]) -> BondView:
+                   prospectus: list[ProspectusNews],
+                   prospectus_url: str | None) -> BondView:
     issue_date_raw = row["issue_date"]
     issue_date_val = date.fromisoformat(issue_date_raw) if issue_date_raw else None
     return BondView(
@@ -603,6 +605,7 @@ def _fmt_bond_view(row: sqlite3.Row, snap: BondSnapshot | None, price: float | N
         related=related,
         issuer_equity_ticker=equity_link,
         prospectus_news=prospectus,
+        prospectus_url=prospectus_url,
     )
 
 
@@ -621,7 +624,8 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
         row = conn.execute(
             """
             SELECT ticker, name, kind, country, sector, source_url,
-                   coupon_rate, maturity_year, issue_date, issuer_name
+                   coupon_rate, maturity_year, issue_date, issuer_name,
+                   prospectus_url
             FROM securities WHERE ticker = ?
             """,
             (ticker,),
@@ -702,7 +706,10 @@ def get_bond_view(ticker: str, today: date | None = None) -> BondView | None:
             if row["issuer_name"] else []
         )
 
-    return _fmt_bond_view(row, snap, price, schedule, ysum, related, equity_link, prospectus)
+    return _fmt_bond_view(
+        row, snap, price, schedule, ysum, related, equity_link, prospectus,
+        row["prospectus_url"],
+    )
 
 
 def list_issuer_news(ticker: str, limit: int = 25) -> list[sqlite3.Row]:

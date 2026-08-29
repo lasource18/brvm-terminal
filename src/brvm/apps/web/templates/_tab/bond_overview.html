@@ -85,13 +85,18 @@
       </table>
     </div>
 
-    {% if bond.issuer_equity_ticker or bond.prospectus_news %}
+    {% if bond.issuer_equity_ticker or bond.prospectus_url or bond.prospectus_news %}
       <div class="panel">
         <h2>{{ "Related"|t }}</h2>
         <table class="kv">
           {% if bond.issuer_equity_ticker %}
             <tr><th>{{ "Issuer equity"|t }}</th>
               <td><a href="/s/{{ bond.issuer_equity_ticker }}">{{ bond.issuer_equity_ticker }}</a></td>
+            </tr>
+          {% endif %}
+          {% if bond.prospectus_url %}
+            <tr><th>{{ "Prospectus"|t }}</th>
+              <td><a href="{{ bond.prospectus_url }}" target="_blank" rel="noopener">{{ "View"|t }}</a></td>
             </tr>
           {% endif %}
         </table>

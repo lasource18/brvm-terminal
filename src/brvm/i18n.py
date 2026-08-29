@@ -206,6 +206,8 @@ _FR: dict[str, str] = {
     "left": "restants",
     "Related": "Liens",
     "Issuer equity": "Action de l'émetteur",
+    "Prospectus": "Prospectus",
+    "View": "Consulter",
     "Prospectus / admission news": "Actualités prospectus / admission",
     "No bond data available for this ticker.":
         "Aucune donnée d'obligation disponible pour ce ticker.",
