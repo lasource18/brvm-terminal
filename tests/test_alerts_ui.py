@@ -106,3 +106,34 @@ def test_create_rule_with_unknown_kind_rejected(client):
         data={"kind": "bogus"},
     )
     assert r.status_code == 400
+
+
+def test_create_price_move_rule_rejects_non_numeric_threshold(client):
+    """F-21: `float('abc')` used to bubble a 500 through the fragment.
+    Non-numeric input is user error and should return 400."""
+    r = client.post(
+        "/_frag/alerts/rules",
+        data={"kind": "price_move", "threshold_pct": "abc"},
+    )
+    assert r.status_code == 400
+    assert "numeric" in r.text.lower()
+
+
+def test_create_price_move_rule_rejects_zero_threshold(client):
+    """F-21: a 0 threshold matches every move (|change| >= 0 is
+    always true), turning any price_move rule into a fire-on-
+    everything trap. Require > 0."""
+    r = client.post(
+        "/_frag/alerts/rules",
+        data={"kind": "price_move", "threshold_pct": "0"},
+    )
+    assert r.status_code == 400
+
+
+def test_create_news_rule_rejects_non_numeric_relevance(client):
+    """Same as F-21 for the news rule's min_relevance field."""
+    r = client.post(
+        "/_frag/alerts/rules",
+        data={"kind": "news", "min_relevance": "very"},
+    )
+    assert r.status_code == 400

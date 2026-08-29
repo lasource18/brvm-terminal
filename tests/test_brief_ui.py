@@ -83,3 +83,15 @@ def test_html_is_escaped_not_raw(client):
     # markdown-it's html=False setting escapes raw HTML in the source.
     assert "<script>alert(1)</script>" not in r.text
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in r.text
+
+
+def test_bare_urls_render_as_anchors(client):
+    """F-39: the `linkify: True` option on markdown-it-py is inert
+    without an explicit `.enable('linkify')`. Before the fix, briefs
+    that referenced sikafinance / brvm.org URLs rendered them as
+    plain text — readers had to copy-paste. Confirm the anchor tag
+    now appears in the rendered HTML."""
+    _seed(markdown="See https://www.brvm.org/fr for details.")
+    r = client.get("/brief")
+    assert r.status_code == 200
+    assert '<a href="https://www.brvm.org/fr">https://www.brvm.org/fr</a>' in r.text

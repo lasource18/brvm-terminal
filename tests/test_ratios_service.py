@@ -156,6 +156,24 @@ def test_growth_ratios_prior_same_kind_only():
     }
 
 
+def test_growth_ratios_negative_prior_reports_signed_direction():
+    """F-08: `(now - then) / then` flips sign when `then` < 0. Divide
+    by |then| so a loss worsening reports negative growth and a
+    recovery reports positive growth — matching the intuition the
+    analyst-note prompt quotes verbatim."""
+    # Loss deepens: -100 → -200. Direction is negative (deterioration).
+    curr = _fin(period_year=2024, net_income=-200.0)
+    prior = _fin(period_year=2023, net_income=-100.0)
+    got = growth_ratios(curr, prior)
+    assert got["net_income_growth"].value == pytest.approx(-100.0)
+
+    # Recovery: -100 → +50. Direction is positive (improvement).
+    curr = _fin(period_year=2024, net_income=50.0)
+    prior = _fin(period_year=2023, net_income=-100.0)
+    got = growth_ratios(curr, prior)
+    assert got["net_income_growth"].value == pytest.approx(150.0)
+
+
 def test_growth_ratios_no_prior_returns_none():
     got = growth_ratios(_fin(), None)
     assert got == {

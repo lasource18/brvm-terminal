@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     log_level: str = "INFO"
     db_path: str = "./data/brvm.sqlite"
-    user_tz: str = "America/Montreal"
 
     brvm_api_base: str = ""
     brvm_api_key: str = ""

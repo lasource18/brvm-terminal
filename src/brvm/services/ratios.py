@@ -291,7 +291,12 @@ def growth_ratios(
     def _yoy(now: float | None, then: float | None, label: str) -> Ratio | None:
         if now is None or then is None or then == 0:
             return None
-        v = (now - then) / then * 100.0
+        # F-08: `(now - then) / then` flips sign when `then` is negative
+        # (loss worsening from -100 to -200 rendered "+100% growth";
+        # recovery from -100 to +50 rendered "-150%"). Divide by |then|
+        # so the direction matches the intuitive sign: numerator alone
+        # already carries the "improved vs. deteriorated" signal.
+        v = (now - then) / abs(then) * 100.0
         return Ratio(
             value=v,
             provenance=f"{label}({curr.period_year}) vs {label}({prior.period_year})",

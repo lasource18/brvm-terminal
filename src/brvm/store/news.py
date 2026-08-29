@@ -77,6 +77,25 @@ def upsert_corporate_actions(
                 "WHERE ticker = ? AND kind = ? AND ex_date = ?",
                 (a.ticker, a.kind, ex_iso),
             ).fetchone()
+            # F-12: when the real ex-date lands, promote any prior
+            # "A préciser" (NULL ex_date) row for the same (ticker,
+            # kind) instead of leaving it stranded next to the new
+            # dated row — the calendar was listing the same dividend
+            # twice. Match either NULL amount (bare placeholder) or
+            # matching amount so an unrelated older placeholder for a
+            # different exercise year doesn't get eaten.
+            if row is None:
+                row = conn.execute(
+                    "SELECT id FROM corporate_actions "
+                    "WHERE ticker = ? AND kind = ? AND ex_date IS NULL "
+                    "AND (amount IS NULL OR amount = ?)",
+                    (a.ticker, a.kind, a.amount),
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        "UPDATE corporate_actions SET ex_date = ? WHERE id = ?",
+                        (ex_iso, row["id"]),
+                    )
 
         if row is None:
             conn.execute(

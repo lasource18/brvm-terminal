@@ -155,9 +155,16 @@ def analyst_note_by_week(request: Request, ticker: str, week_start: str):
     sec = market.get_security(ticker)
     if sec is None:
         raise HTTPException(status_code=404, detail=f"unknown ticker: {ticker}")
-    if sec.kind == "index":
+    # F-33: the tab-route hides analyst for both indices AND bonds
+    # (the tab spec is equity-only), but this archive route only
+    # blocked indices. A hand-crafted `/s/EOM.O10/analyst/2026-08-24`
+    # would 404 on "no note" today but would render happily if a bond
+    # note ever landed in the DB — inconsistent gating between the
+    # two entry points.
+    if sec.kind in {"index", "bond"}:
         raise HTTPException(
-            status_code=404, detail="analyst view is not available for indices"
+            status_code=404,
+            detail=f"analyst view is not available for {sec.kind}s",
         )
     note = notes_svc.get_note(sec.ticker, week_start)
     if note is None:
@@ -186,9 +193,21 @@ def analyst_note_by_week(request: Request, ticker: str, week_start: str):
 
 def _render_markdown(md: str) -> str:
     """Server-side markdown → HTML with `html=False` so any raw HTML in
-    the source is escaped. Same rendering config as the /brief route."""
+    the source is escaped. Same rendering config as the /brief route.
+
+    F-39: `linkify: True` in the options dict alone is inert —
+    markdown-it-py requires an explicit `.enable("linkify")` before the
+    renderer treats bare URLs as anchors. Without both, URLs in briefs
+    and analyst notes rendered as plain text and readers had to copy-
+    paste. Verified empirically before/after: `.enable("linkify")` is
+    what makes `<a href="...">` appear.
+    """
     from markdown_it import MarkdownIt
-    return MarkdownIt("commonmark", {"html": False, "linkify": True}).render(md)
+    return (
+        MarkdownIt("commonmark", {"html": False, "linkify": True})
+        .enable("linkify")
+        .render(md)
+    )
 
 
 def _pick_localized_markdown(

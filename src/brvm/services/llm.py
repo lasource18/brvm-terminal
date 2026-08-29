@@ -51,11 +51,20 @@ CATEGORIES: tuple[str, ...] = (
 # Cache reads bill at 0.1x input, cache writes at 1.25x input.
 _PRICES_PER_MTOK: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5": (1.00, 5.00),
-    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-5": (2.00, 10.00),
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-opus-5": (5.00, 25.00),
 }
-_FALLBACK_PRICE = (1.00, 5.00)
+# F-17: unknown-model fallback now uses the MOST expensive known rate,
+# not the cheapest. Under the old Haiku-rate fallback, an Opus-class
+# override under-recorded spend ~5x, so a "$3/day" cap effectively
+# allowed ~$15. Falling back to the ceiling keeps the hard-cap gates
+# honest — worst case an unknown model over-bills (safe direction);
+# the caller sees the log warning and can add a real price entry.
+_FALLBACK_PRICE: tuple[float, float] = (
+    max(p[0] for p in _PRICES_PER_MTOK.values()),
+    max(p[1] for p in _PRICES_PER_MTOK.values()),
+)
 _CACHE_READ_MULTIPLIER = 0.10
 _CACHE_WRITE_MULTIPLIER = 1.25
 
@@ -144,7 +153,10 @@ def price_per_mtok(model: str) -> tuple[float, float]:
         if model.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
             best = (prefix, price)
     if best is None:
-        log.warning("no price entry for model %r; billing at Haiku rates", model)
+        log.warning(
+            "no price entry for model %r; billing at ceiling rates (%.2f/%.2f)",
+            model, _FALLBACK_PRICE[0], _FALLBACK_PRICE[1],
+        )
         return _FALLBACK_PRICE
     return best[1]
 

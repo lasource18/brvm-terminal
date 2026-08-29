@@ -72,38 +72,77 @@ def get_with_quotes(slug: str) -> WatchlistView:
         wl = repo.get_by_slug(conn, slug)
         if wl is None:
             raise WatchlistNotFound(slug)
+        # F-38: bond tickers have no `quote_snapshots` row — their
+        # prices land in `daily_bars` (clean price) and
+        # `bond_snapshots` (accrued coupon). Without a fallback, bond
+        # watchlist rows rendered permanent em-dashes even when the
+        # exchange page had a live price. `latest_bond_bar` picks the
+        # newest close per bond ticker so the quote board can degrade
+        # gracefully.
         rows = conn.execute(
             """
-            WITH latest AS (
+            WITH latest_snap AS (
                 SELECT ticker, MAX(captured_utc) AS captured_utc
                 FROM quote_snapshots
                 GROUP BY ticker
+            ),
+            latest_bond_bar AS (
+                SELECT ticker, MAX(session_date) AS session_date
+                FROM daily_bars
+                GROUP BY ticker
             )
-            SELECT s.ticker, s.name, s.country,
-                   qs.last, qs.change_pct, qs.volume, qs.turnover, qs.captured_utc
+            SELECT s.ticker, s.name, s.country, s.kind,
+                   qs.last, qs.change_pct, qs.volume, qs.turnover,
+                   qs.captured_utc,
+                   db.close  AS bond_close,
+                   db.volume AS bond_volume,
+                   db.turnover AS bond_turnover,
+                   db.ingested_utc AS bond_ingested_utc
             FROM watchlist_items wi
             JOIN securities s USING (ticker)
-            LEFT JOIN latest l USING (ticker)
+            LEFT JOIN latest_snap ls USING (ticker)
             LEFT JOIN quote_snapshots qs
-                ON qs.ticker = l.ticker AND qs.captured_utc = l.captured_utc
+                ON qs.ticker = ls.ticker AND qs.captured_utc = ls.captured_utc
+            LEFT JOIN latest_bond_bar lb
+                ON lb.ticker = s.ticker AND s.kind = 'bond'
+            LEFT JOIN daily_bars db
+                ON db.ticker = lb.ticker AND db.session_date = lb.session_date
             WHERE wi.watchlist_id = ?
             ORDER BY wi.sort_order, wi.added_utc
             """,
             (wl["id"],),
         ).fetchall()
-    items = [
-        QuoteRow(
-            ticker=r["ticker"],
-            name=r["name"],
-            country=r["country"],
-            last=r["last"],
-            change_pct=r["change_pct"],
-            volume=r["volume"],
-            turnover=r["turnover"],
-            captured_utc=r["captured_utc"],
+    items = []
+    for r in rows:
+        # Equities read `quote_snapshots`; bonds fall back to
+        # `daily_bars`. `change_pct` is intentionally None for bond
+        # rows — the exchange doesn't publish a bond-side day-change
+        # % and computing one from a two-day daily_bars diff would be
+        # misleading vs. equities' true intraday %.
+        if r["kind"] == "bond":
+            last = r["bond_close"]
+            change_pct = None
+            volume = r["bond_volume"]
+            turnover = r["bond_turnover"]
+            captured_utc = r["bond_ingested_utc"]
+        else:
+            last = r["last"]
+            change_pct = r["change_pct"]
+            volume = r["volume"]
+            turnover = r["turnover"]
+            captured_utc = r["captured_utc"]
+        items.append(
+            QuoteRow(
+                ticker=r["ticker"],
+                name=r["name"],
+                country=r["country"],
+                last=last,
+                change_pct=change_pct,
+                volume=volume,
+                turnover=turnover,
+                captured_utc=captured_utc,
+            )
         )
-        for r in rows
-    ]
     return WatchlistView(
         id=wl["id"],
         slug=wl["slug"],
