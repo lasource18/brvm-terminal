@@ -465,19 +465,28 @@ def extract_filing(
     last_error = "unknown error"
 
     for attempt in range(1, max_attempts + 1):
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_output_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": _SYSTEM_PROMPT,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=messages,
-            output_config={"format": {"type": "json_schema", "schema": _RESULT_SCHEMA}},
-        )
+        # F-22: transport failures must surface as `LLMResponseError`
+        # so the caller records the tokens spent on prior successful
+        # attempts. See `services.llm.tag_batch` for the same fix.
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_output_tokens,
+                system=[
+                    {
+                        "type": "text",
+                        "text": _SYSTEM_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=messages,
+                output_config={"format": {"type": "json_schema", "schema": _RESULT_SCHEMA}},
+            )
+        except Exception as e:
+            raise LLMResponseError(
+                f"transport error on attempt {attempt}/{max_attempts}: {e}",
+                total,
+            ) from e
         total = total + _usage_from_response(response, model)
 
         stop_reason = getattr(response, "stop_reason", None)

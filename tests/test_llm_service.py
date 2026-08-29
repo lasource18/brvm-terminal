@@ -159,6 +159,25 @@ def test_tag_batch_does_not_retry_a_truncated_reply():
     assert client.call_count == 1  # a verbatim retry would truncate identically
 
 
+def test_tag_batch_preserves_billed_usage_on_transport_retry_error():
+    """F-22: attempt 1 succeeds with an unusable reply (billed).
+    Attempt 2's transport raises before returning. The prior generic-
+    exception branch in `tagging.py` assumed nothing was billed and
+    lost attempt 1's spend inside a hard-capped system. Now the
+    transport error surfaces as `LLMResponseError(total)` carrying
+    attempt 1's tokens, and the caller records them."""
+    client = FakeAnthropic([
+        reply("bogus"),                 # attempt 1 billed, unusable
+        RuntimeError("connection reset"),  # attempt 2 transport error
+    ])
+    with pytest.raises(llm.LLMResponseError) as exc:
+        llm.tag_batch(ITEMS[:1], UNIVERSE, client=client)
+    # Attempt 1 was billed even though the transport died on attempt 2.
+    assert exc.value.usage.calls == 1
+    assert exc.value.usage.usd_micros == 3000
+    assert "transport error" in str(exc.value)
+
+
 def test_tag_batch_surfaces_a_refusal():
     refused = FakeResponse(content=[], stop_reason="refusal")
     client = FakeAnthropic([refused])

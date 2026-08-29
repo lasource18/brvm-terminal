@@ -194,6 +194,22 @@ def test_extract_filing_does_not_retry_truncation():
     assert client.call_count == 1
 
 
+def test_extract_filing_preserves_billed_usage_on_transport_retry_error():
+    """F-22 mirror for the extractor: attempt 1 billed but unusable,
+    attempt 2 raises a transport error. The `LLMResponseError` carries
+    attempt 1's usage so the caller's spend recording lands correctly."""
+    client = FakeAnthropic([
+        reply("bogus"),
+        RuntimeError("connection reset"),
+    ])
+    with pytest.raises(extraction.LLMResponseError) as exc:
+        extraction.extract_filing(
+            ticker="SNTS", issuer_name=None, pdf_text="text", client=client
+        )
+    assert exc.value.usage.calls == 1
+    assert "transport error" in str(exc.value)
+
+
 def test_extract_filing_surfaces_refusal():
     refused = FakeResponse(content=[], stop_reason="refusal")
     client = FakeAnthropic([refused])

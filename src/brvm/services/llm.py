@@ -448,19 +448,31 @@ def tag_batch(
     last_error = "unknown error"
 
     for attempt in range(1, max_attempts + 1):
-        response = client.messages.create(
-            model=model,
-            max_tokens=max_output_tokens,
-            system=[
-                {
-                    "type": "text",
-                    "text": build_system_prompt(universe),
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=messages,
-            output_config={"format": {"type": "json_schema", "schema": _RESULT_SCHEMA}},
-        )
+        # F-22: any exception from the transport (httpx timeout, TLS
+        # error, SDK re-raise) MUST surface as `LLMResponseError` so
+        # the caller records the tokens already billed on prior
+        # attempts. The pre-fix generic-exception branch in
+        # `tagging.py` assumed "nothing billed" and lost attempt-1
+        # spend inside a hard-capped system.
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_output_tokens,
+                system=[
+                    {
+                        "type": "text",
+                        "text": build_system_prompt(universe),
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=messages,
+                output_config={"format": {"type": "json_schema", "schema": _RESULT_SCHEMA}},
+            )
+        except Exception as e:
+            raise LLMResponseError(
+                f"transport error on attempt {attempt}/{max_attempts}: {e}",
+                total,
+            ) from e
         total = total + _usage_from_response(response, model)
 
         stop_reason = getattr(response, "stop_reason", None)

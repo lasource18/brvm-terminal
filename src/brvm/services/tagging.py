@@ -162,7 +162,7 @@ def tag_pending(
                 counts["llm_disabled"] = 1
                 log.warning("news tagging stopped: %s", e)
                 break
-            except Exception as e:  # API/network error: nothing billed, try the next batch
+            except Exception as e:  # unexpected error path (transport now surfaces as LLMResponseError)
                 counts["failed_batches"] += 1
                 consecutive_failures += 1
                 log.warning("tagging batch errored: %s", e)
