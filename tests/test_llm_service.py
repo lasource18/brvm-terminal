@@ -63,8 +63,13 @@ def test_price_lookup_matches_dated_snapshot():
     assert llm.price_per_mtok("claude-opus-5") == (5.00, 25.00)
 
 
-def test_price_lookup_falls_back_for_unknown_model():
-    assert llm.price_per_mtok("claude-something-new") == (1.00, 5.00)
+def test_price_lookup_falls_back_to_ceiling_for_unknown_model():
+    """F-17: unknown models bill at the MOST expensive known rate, not
+    the cheapest. Falling back to Haiku ($1/$5) meant an Opus-class
+    override would under-record ~5x, defeating the daily cap. Falling
+    back to Opus ($5/$25) keeps the cap honest — worst case an unknown
+    model over-bills (safe direction)."""
+    assert llm.price_per_mtok("claude-something-new") == (5.00, 25.00)
 
 
 def test_cost_is_tracked_below_one_cent():

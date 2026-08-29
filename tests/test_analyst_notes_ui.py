@@ -78,6 +78,25 @@ def test_analyst_archive_indices_404(client):
     assert r.status_code == 404
 
 
+def test_analyst_archive_bonds_404(client, monkeypatch):
+    """F-33: the archive route only blocked indices; the tab route
+    hides analyst for bonds too. Bring them into alignment so a bond
+    note (should one ever be seeded) doesn't leak through the
+    archive URL."""
+    from brvm.config import settings
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+    with connect(settings.db_path) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="BOND1", name="TEST BOND",
+                     kind="bond", country="CI"),
+        ])
+    r = client.get("/s/BOND1/analyst/2026-08-24")
+    assert r.status_code == 404
+    assert "bond" in r.json()["detail"].lower()
+
+
 def test_archive_sidebar_lists_prior_weeks(client):
     for w in ("2026-08-10", "2026-08-17", "2026-08-24"):
         _seed(week=w)

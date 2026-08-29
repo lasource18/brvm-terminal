@@ -97,6 +97,65 @@ def test_corporate_actions_upsert(tmp_db_path: Path):
         assert row["yield_pct"] == 6.60
 
 
+def test_null_ex_date_row_is_promoted_when_real_date_lands(tmp_db_path: Path):
+    """F-12: sikafinance publishes "A préciser" first, then a real
+    ex-date. The upsert used to insert both, so the upcoming-dividends
+    calendar listed the same dividend twice (about half the live
+    calendar is "A préciser"). Promotion collapses the placeholder."""
+    _init(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="SMBC", name="SMB CI", kind="equity", country="CI"),
+        ])
+        # First poll: placeholder with amount known, ex-date unknown.
+        news_repo.upsert_corporate_actions(conn, [
+            CorporateAction(ticker="SMBC", kind="dividend", ex_date=None,
+                            amount=489.0, currency="XOF",
+                            note="A préciser", source="sikafinance"),
+        ])
+        # Second poll: real ex-date on the same (ticker, kind, amount).
+        news_repo.upsert_corporate_actions(conn, [
+            CorporateAction(ticker="SMBC", kind="dividend",
+                            ex_date=date(2026, 9, 15),
+                            amount=489.0, currency="XOF",
+                            source="sikafinance"),
+        ])
+        rows = conn.execute(
+            "SELECT ex_date, amount FROM corporate_actions "
+            "WHERE ticker = 'SMBC' AND kind = 'dividend' ORDER BY id"
+        ).fetchall()
+        # Only one row survives, and it carries the newly-published date.
+        assert len(rows) == 1
+        assert rows[0]["ex_date"] == "2026-09-15"
+        assert rows[0]["amount"] == 489.0
+
+
+def test_null_ex_date_row_survives_when_amounts_differ(tmp_db_path: Path):
+    """A dated dividend for the same (ticker, kind) but a DIFFERENT
+    amount must NOT collapse the placeholder — it's a different
+    exercise. The dated row inserts alongside, and the placeholder
+    stays until its own dated row arrives."""
+    _init(tmp_db_path)
+    with connect(tmp_db_path) as conn:
+        sec_repo.upsert(conn, [
+            Security(ticker="SMBC", name="SMB CI", kind="equity", country="CI"),
+        ])
+        news_repo.upsert_corporate_actions(conn, [
+            CorporateAction(ticker="SMBC", kind="dividend", ex_date=None,
+                            amount=489.0, source="sikafinance"),
+        ])
+        news_repo.upsert_corporate_actions(conn, [
+            CorporateAction(ticker="SMBC", kind="dividend",
+                            ex_date=date(2026, 9, 15),
+                            amount=250.0, source="sikafinance"),
+        ])
+        rows = conn.execute(
+            "SELECT ex_date, amount FROM corporate_actions "
+            "WHERE ticker = 'SMBC' AND kind = 'dividend' ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 2
+
+
 def test_upcoming_window_and_ticker_filter(tmp_db_path: Path):
     _init(tmp_db_path)
     today = date(2026, 8, 20)

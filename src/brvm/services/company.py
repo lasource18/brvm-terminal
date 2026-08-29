@@ -95,13 +95,12 @@ def get_description(ticker: str) -> CompanyProfile | None:
         log.warning("sikafinance societe failed for %s: %s", ticker, e)
 
     if profile is None:
-        try:
-            _, _bars = afx_kwayisi.fetch_ticker(ticker)
-        except Exception as e:
-            log.warning("afx ticker fetch failed for %s: %s", ticker, e)
-            _bars = None
-        # We need the page HTML, not just the parsed quote — fetch it fresh
-        # via the raw client so we can pull the factsheet block.
+        # F-15: previously called `afx_kwayisi.fetch_ticker(ticker)`
+        # here — but its return value was discarded and the same page
+        # was then fetched again a few lines later for the factsheet
+        # HTML. Two GETs against afx for one page view. Only the raw
+        # HTML matters here since `parse_factsheet` takes the full
+        # body; drop the redundant first hit.
         try:
             import httpx as _httpx
 

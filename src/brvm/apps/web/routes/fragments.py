@@ -182,11 +182,36 @@ def create_alert_rule(
         raise HTTPException(status_code=400, detail=f"unknown kind: {kind}")
     t = (ticker or "").strip().upper() or None
     lbl = (label or "").strip() or None
-    thr = float(threshold_pct) if kind == "price_move" and threshold_pct else None
+    # F-21: parse threshold_pct inside a try — the previous `float(...)`
+    # ran ahead of the outer try block, so `abc` returned a 500 instead
+    # of a 400. Also gate on threshold > 0: a 0 threshold matches every
+    # move and turns any price_move rule into a fire-on-everything.
+    thr: float | None = None
+    if kind == "price_move" and threshold_pct:
+        try:
+            thr = float(threshold_pct)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"threshold_pct must be numeric, got {threshold_pct!r}",
+            ) from e
+        if thr <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="threshold_pct must be > 0 (0 fires on every move)",
+            )
     if kind == "price_move" and thr is None:
         raise HTTPException(status_code=400, detail="price_move needs threshold_pct")
     docs = (doc_types or "").strip() or None if kind == "new_filing" else None
-    rel = int(min_relevance) if kind == "news" and min_relevance else None
+    rel: int | None = None
+    if kind == "news" and min_relevance:
+        try:
+            rel = int(min_relevance)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"min_relevance must be integer, got {min_relevance!r}",
+            ) from e
     try:
         alerts_svc.create_rule(
             AlertRule(

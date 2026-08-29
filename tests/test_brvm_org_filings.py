@@ -374,6 +374,58 @@ def test_resolve_ticker_uses_slug_map_then_fuzzy(monkeypatch, tmp_path):
         assert row2 is not None and row2["ticker"] is None
 
 
+def test_resolve_ticker_persisted_null_skips_fuzzy_matcher(monkeypatch, tmp_path):
+    """F-26: the docstring, phase log, and comment on the neighbouring
+    test all claim that a persisted NULL short-circuits — the code
+    used to re-run the fuzzy matcher on every poll anyway. Pin the
+    intended behaviour: after a persisted NULL, a follow-up call must
+    NOT re-invoke the fuzzy resolver."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN"),
+        ])
+        # First call: fuzzy runs, returns None, persists NULL.
+        assert svc.resolve_ticker(conn, "brvm_org", "unknown-slug",
+                                  "Some Random Company") is None
+        # Second call: monkeypatch the fuzzy resolver so it BLOWS UP
+        # if called. If the second attempt reaches the fuzzy branch,
+        # the assertion in `_boom` trips.
+        def _boom(*args, **kwargs):
+            raise AssertionError("fuzzy resolver must not run on persisted NULL")
+        monkeypatch.setattr(svc, "_fuzzy_resolve", _boom)
+        assert svc.resolve_ticker(conn, "brvm_org", "unknown-slug",
+                                  "Some Random Company") is None
+
+
+def test_resolve_ticker_persisted_null_still_consults_alias_table(
+    monkeypatch, tmp_path
+):
+    """F-26 companion: a persisted NULL must still allow the manual
+    alias table to rescue the slug on a later poll — the alias check
+    runs BEFORE the fuzzy skip so operators can drop in a hand-mapped
+    entry and pick up previously-unresolved slugs without a DB wipe."""
+    svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="XYZC", name="XYZ CI", kind="equity", country="CI"),
+        ])
+        # Empty alias table on first call — persists NULL.
+        monkeypatch.setattr(svc, "_MANUAL_SLUG_ALIASES", {})
+        assert svc.resolve_ticker(conn, "brvm_org", "mystery-slug",
+                                  "Some Random Company") is None
+        # Operator adds a hand mapping and re-polls: alias resolves,
+        # fuzzy still doesn't need to run.
+        monkeypatch.setattr(svc, "_MANUAL_SLUG_ALIASES", {"mystery-slug": "XYZC"})
+        def _boom(*args, **kwargs):
+            raise AssertionError("fuzzy resolver must not run on persisted NULL")
+        monkeypatch.setattr(svc, "_fuzzy_resolve", _boom)
+        assert svc.resolve_ticker(conn, "brvm_org", "mystery-slug",
+                                  "Some Random Company") == "XYZC"
+
+
 def test_resolve_ticker_matches_when_display_name_is_the_ticker(monkeypatch, tmp_path):
     """brvm.org occasionally lists a display name that IS the ticker code
     ("NSBC" for NSIA Banque). The name index alone would miss it — the

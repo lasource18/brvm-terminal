@@ -212,26 +212,35 @@ def resolve_ticker(
     """
     known = slugs_repo.get(conn, source, slug)
     if known is not None and known["ticker"] is not None:
-        # Persisted resolution wins; a persisted NULL is treated as
-        # "still unknown" and falls through to the alias table so a new
-        # alias can rescue previously-unresolved slugs on the next poll.
+        # Persisted resolution wins.
         return known["ticker"]
 
     ticker: str | None = None
     if source == "brvm_org":
         ticker = _MANUAL_SLUG_ALIASES.get(slug)
-    if ticker is None:
+    if ticker is None and known is None:
+        # F-26: only run the O(n) fuzzy pass the FIRST time we see a
+        # slug. On subsequent polls a persisted NULL means "already
+        # tried, didn't match" — the alias table is still consulted
+        # above so a fresh `_MANUAL_SLUG_ALIASES` entry can still
+        # rescue previously-unresolved slugs, but the fuzzy scan
+        # against every equity name doesn't need to re-run every 5
+        # minutes forever.
         idx = indexes or _load_name_index(conn)
         ticker = _fuzzy_resolve(idx, display_name)
 
-    slugs_repo.remember(
-        conn,
-        source,
-        slug,
-        ticker,
-        display_name=display_name,
-        note=None if ticker else "auto: no securities.name match",
-    )
+    # Only remember when we actually resolved (or on the very first
+    # attempt for this slug). A persisted NULL that still doesn't
+    # resolve is left untouched — no need to bump `first_seen`.
+    if ticker is not None or known is None:
+        slugs_repo.remember(
+            conn,
+            source,
+            slug,
+            ticker,
+            display_name=display_name,
+            note=None if ticker else "auto: no securities.name match",
+        )
     if ticker is None:
         log.info("filings: unresolved slug source=%s slug=%s name=%r", source, slug, display_name)
     return ticker
@@ -329,6 +338,13 @@ def _download_pdf(client: httpx.Client, url: str, dest: Path) -> tuple[int, str]
                     if size > max_bytes:
                         log.warning("filings: %s exceeds %d MB cap, aborting",
                                     url, settings.extract_max_pdf_mb)
+                        # F-29: the earlier revision returned here
+                        # without unlinking `tmp`, so aborted oversize
+                        # streams left a `.part` file next to their
+                        # intended destination — Phase 4a's "never
+                        # keeps a partial" contract was broken.
+                        fh.close()
+                        tmp.unlink(missing_ok=True)
                         return None
                     sha.update(chunk)
                     fh.write(chunk)

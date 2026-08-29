@@ -1,7 +1,17 @@
 """Apply SQL migrations in migrations/ to the SQLite DB at $DB_PATH.
 
-Idempotent: every migration file is expected to use `IF NOT EXISTS`
-guards, and the applied set is tracked in a `_schema_migrations` table.
+Idempotency model: the `_schema_migrations` tracking table is the
+authoritative record. A migration whose id is present in that table
+is skipped without re-executing. SQLite lacks `ALTER TABLE ... ADD
+COLUMN IF NOT EXISTS`, so the `ALTER` migrations (0004 onward) cannot
+carry their own idempotency guards — they rely entirely on the
+tracking table. Consequences (F-40):
+  * Do NOT hand-execute a migration file outside `apply_all` unless
+    you also insert the row into `_schema_migrations` in the same
+    transaction. A half-applied ALTER + no tracker row would raise
+    `duplicate column name` on the next `just migrate`.
+  * `CREATE TABLE` / `CREATE INDEX` migrations should still carry
+    `IF NOT EXISTS` guards as a defensive belt — they're free.
 """
 
 from __future__ import annotations
