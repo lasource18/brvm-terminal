@@ -36,7 +36,13 @@ from .conftest import apply_migrations
 
 
 def _setup(monkeypatch, tmp_path: Path):
-    """Fresh DB + tickers + one snapshot + one tagged news row."""
+    """Fresh DB + tickers + one snapshot + one tagged news row.
+
+    PR-I: `generate_for` now makes two LLM calls per pass (primary
+    synthesis + FR translation). Tests that focus on the synthesis path
+    monkey-patch `_translate_or_none` to skip the second call so they
+    keep working with one reply per generation. Dedicated translation
+    tests below re-enable it and assert on both writes."""
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
@@ -44,6 +50,11 @@ def _setup(monkeypatch, tmp_path: Path):
     from brvm.services import llm as llm_mod
 
     llm_mod.reset_client()
+    # Default: skip translation so pre-PR-I tests keep passing with
+    # their single-reply FakeAnthropic queues. Tests exercising the
+    # translation path pass their own client with two replies and
+    # remove this patch by monkeypatching again below.
+    monkeypatch.setattr(svc, "_translate_or_none", lambda *a, **kw: None)
 
     with connect(db_path) as conn:
         apply_migrations(conn)

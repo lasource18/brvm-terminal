@@ -48,6 +48,7 @@ from brvm.services import fundamentals, history, market, ratios
 # Reuse the LLM helpers Phase 6b promoted to public names.
 from brvm.services import llm as llm_svc
 from brvm.services import news as news_svc
+from brvm.services import translation as translation_svc
 from brvm.store import analyst_notes as notes_repo
 from brvm.store import securities as sec_repo
 from brvm.store import spend as spend_repo
@@ -694,6 +695,42 @@ def _db_path() -> Path:
     return Path(settings.db_path)
 
 
+def _translate_or_none(
+    source_markdown: str,
+    *,
+    client: Any | None,
+    day: date,
+) -> tuple[str, llm_svc.Usage] | None:
+    """Attempt an EN → FR translation for a note, returning (text, usage)
+    on success or None on any soft failure. Mirrors the same helper in
+    `services.brief`; kept per-module so each writer's spend billing
+    points at its own daily counter (`note_spend` here)."""
+    if client is None and not translation_svc.has_llm():
+        return None
+    try:
+        result = translation_svc.translate_markdown_to_fr(
+            source_markdown, client=client
+        )
+    except llm_svc.LLMResponseError as e:
+        log.warning("note translation failed (empty reply): %s", e)
+        with connect(_db_path()) as conn:
+            spend_repo.add_usage(
+                conn,
+                input_tokens=e.usage.input_tokens
+                + e.usage.cache_read_tokens
+                + e.usage.cache_write_tokens,
+                output_tokens=e.usage.output_tokens,
+                usd_micros=e.usage.usd_micros,
+                day=day,
+                table="note_spend",
+            )
+        return None
+    except Exception as e:  # transport / SDK error — no billing
+        log.warning("note translation failed (no billing): %s", e)
+        return None
+    return result.text, result.usage
+
+
 def _call_model(
     context: dict[str, Any],
     *,
@@ -819,12 +856,26 @@ def generate_for_ticker(
         log.warning("notes %s (%s) failed (no billing): %s", ticker, week_iso, e)
         return result
 
+    # PR-I: translate the freshly-generated EN markdown into FR (see
+    # `services.brief.generate_for` for the same pattern). Soft failure —
+    # the note still persists in EN with `markdown_fr = NULL` and the
+    # analyst tab renders a "translation pending" badge until the next
+    # weekly re-run gets another shot at translation.
+    markdown_fr: str | None = None
+    translation_generated_utc: str | None = None
+    translation_usage = _translate_or_none(markdown, client=client, day=today)
+    if translation_usage is not None:
+        markdown_fr = translation_usage[0]
+        translation_generated_utc = utc_iso()
+
     note = AnalystNote(
         ticker=ticker,
         week_start=week_iso,
         model=model_id,
         title=_title_from_markdown(markdown),
         markdown=markdown,
+        markdown_fr=markdown_fr,
+        translation_generated_utc=translation_generated_utc,
         context_json=json.dumps(context, ensure_ascii=False),
         input_tokens=usage.input_tokens
         + usage.cache_read_tokens
@@ -843,6 +894,20 @@ def generate_for_ticker(
             day=today,
             table="note_spend",
         )
+        # Translation billing rides on the same per-ticker `note_spend`
+        # counter as the primary synthesis.
+        if translation_usage is not None:
+            _, t_usage = translation_usage
+            spend_repo.add_usage(
+                conn,
+                input_tokens=t_usage.input_tokens
+                + t_usage.cache_read_tokens
+                + t_usage.cache_write_tokens,
+                output_tokens=t_usage.output_tokens,
+                usd_micros=t_usage.usd_micros,
+                day=today,
+                table="note_spend",
+            )
     result.note = note
     result.usage = usage
     log.info(

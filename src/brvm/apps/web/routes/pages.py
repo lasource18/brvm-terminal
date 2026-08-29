@@ -131,7 +131,15 @@ def security_tab(request: Request, ticker: str, tab: str):
         # weeks so a reader can walk backwards without leaving the tab.
         note = notes_svc.latest_note(sec.ticker)
         ctx["note"] = note
-        ctx["note_html"] = _render_markdown(note.markdown) if note else ""
+        if note:
+            md, pending = _pick_localized_markdown(
+                note.markdown, note.markdown_fr, ctx["locale"],
+            )
+            ctx["note_html"] = _render_markdown(md)
+            ctx["translation_pending"] = pending
+        else:
+            ctx["note_html"] = ""
+            ctx["translation_pending"] = False
         ctx["archive"] = notes_svc.list_notes(sec.ticker, limit=12)
     return templates.TemplateResponse(request, "security.html", ctx)
 
@@ -157,15 +165,20 @@ def analyst_note_by_week(request: Request, ticker: str, week_start: str):
             status_code=404, detail=f"no analyst note for {ticker} week {week_start}"
         )
     spec = tabs.get("analyst")
+    base = base_ctx(request)
+    md, pending = _pick_localized_markdown(
+        note.markdown, note.markdown_fr, base["locale"],
+    )
     ctx = {
-        **base_ctx(request),
+        **base,
         "sec": sec,
         "tabs": tabs.visible_for(sec.kind),
         "active_tab": "analyst",
         "tab": spec,
         "tab_template": spec.template,
         "note": note,
-        "note_html": _render_markdown(note.markdown),
+        "note_html": _render_markdown(md),
+        "translation_pending": pending,
         "archive": notes_svc.list_notes(sec.ticker, limit=12),
     }
     return templates.TemplateResponse(request, "security.html", ctx)
@@ -176,6 +189,24 @@ def _render_markdown(md: str) -> str:
     the source is escaped. Same rendering config as the /brief route."""
     from markdown_it import MarkdownIt
     return MarkdownIt("commonmark", {"html": False, "linkify": True}).render(md)
+
+
+def _pick_localized_markdown(
+    source: str, translation: str | None, locale: str
+) -> tuple[str, bool]:
+    """Pick brief/note markdown for `locale` and return (markdown, pending).
+
+    PR-I: EN is the source language (brief + note prompts both pin
+    English output). FR is a cached translation on `markdown_fr`. When
+    the reader asks for FR but the translation hasn't landed yet we
+    fall back to the source with `pending=True` so the template can
+    render a "translation pending" badge.
+    """
+    if locale == "fr" and translation:
+        return translation, False
+    if locale == "fr":
+        return source, True
+    return source, False
 
 
 @router.get("/news", response_class=HTMLResponse)
@@ -281,14 +312,22 @@ def alerts_page(request: Request):
 
 
 def _render_brief_page(request: Request, brief) -> HTMLResponse:
-    body_html = _render_markdown(brief.markdown) if brief else ""
+    base = base_ctx(request)
+    body_html = ""
+    translation_pending = False
+    if brief:
+        md, translation_pending = _pick_localized_markdown(
+            brief.markdown, brief.markdown_fr, base["locale"],
+        )
+        body_html = _render_markdown(md)
     return templates.TemplateResponse(
         request,
         "brief.html",
         {
-            **base_ctx(request),
+            **base,
             "brief": brief,
             "body_html": body_html,
+            "translation_pending": translation_pending,
             "archive": brief_svc.list_recent_briefs(limit=30),
         },
     )

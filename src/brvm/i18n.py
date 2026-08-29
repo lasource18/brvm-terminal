@@ -374,6 +374,12 @@ _FR: dict[str, str] = {
     "New list name": "Nom de la nouvelle liste",
     "Create list": "Créer la liste",
     "No watchlists yet.": "Aucune liste pour le moment.",
+
+    # ---- PR-I: bilingual brief + analyst notes ----
+    "translation pending": "traduction en cours",
+    "Showing English source — French translation not yet available.":
+        "Version anglaise affichée — la traduction française n'est pas encore "
+        "disponible.",
 }
 
 

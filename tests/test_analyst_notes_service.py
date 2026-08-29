@@ -41,7 +41,13 @@ from .conftest import apply_migrations
 
 
 def _setup(monkeypatch, tmp_path: Path):
-    """Fresh DB + three tickers + one snapshot + one tagged news row."""
+    """Fresh DB + three tickers + one snapshot + one tagged news row.
+
+    PR-I: `generate_for_ticker` now makes two LLM calls per pass
+    (Sonnet synthesis + Haiku FR translation). Tests focused on the
+    synthesis path skip translation via a module-level monkeypatch so
+    their single-reply FakeAnthropic queues keep working. Dedicated
+    translation tests re-enable translation explicitly."""
     db_path = tmp_path / "brvm.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
@@ -51,6 +57,9 @@ def _setup(monkeypatch, tmp_path: Path):
 
     llm_mod.reset_client()
     history_mod.clear_cache()
+    # Default: skip translation. See test_analyst_notes_translation.py
+    # (added in PR-I) for coverage of the translation branch.
+    monkeypatch.setattr(svc, "_translate_or_none", lambda *a, **kw: None)
 
     with connect(db_path) as conn:
         apply_migrations(conn)
