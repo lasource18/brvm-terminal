@@ -134,10 +134,38 @@ class HomeView(Vertical):
     def action_open_news_url(self) -> None:
         """Open the highlighted news row's story URL in the default browser.
 
-        Textual's DataTable intercepts mouse clicks for row selection so an
-        OSC-8 hyperlink click inside a cell never reaches the terminal;
-        this binding is the reliable path. Falls back to a notification
-        when no URL is on file for the row (e.g. an older communiqué)."""
+        F-37: scope to the news table. Previously fired regardless of
+        which of the three tables (Gainers / Losers / News) had focus,
+        so a reader pressing `o` on a mover row still opened the
+        highlighted *news* row. Now checks the focused widget; on a
+        movers row it routes to the ticker view instead; on any other
+        widget it's a silent no-op.
+
+        Textual's DataTable intercepts mouse clicks for row selection
+        so an OSC-8 hyperlink click inside a cell never reaches the
+        terminal; this binding is the reliable path. Falls back to a
+        notification when no URL is on file for the row (e.g. an
+        older communiqué).
+        """
+        focused_id = getattr(self.app.focused, "id", None) if self.app.focused else None
+        if focused_id in {"home-gainers", "home-losers"}:
+            movers = self.query_one(f"#{focused_id}", DataTable)
+            if movers.row_count == 0:
+                return
+            try:
+                ticker = str(movers.get_cell_at((movers.cursor_row, 0)))
+            except Exception:
+                return
+            if ticker:
+                self.app.action_open_ticker_view()
+                # Route through the app's sidebar-selection path so the
+                # ticker view lands on the right ticker.
+                from brvm.apps.tui.views.ticker import TickerView
+                self.app.query_one(TickerView).set_ticker(ticker)
+            return
+        # Only news gets to open URLs.
+        if focused_id and focused_id != "home-news":
+            return
         nt = self.query_one("#home-news", DataTable)
         if nt.row_count == 0:
             return

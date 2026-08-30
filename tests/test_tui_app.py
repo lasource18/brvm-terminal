@@ -744,6 +744,61 @@ async def test_home_brief_summary_when_no_brief(tui_db):
         assert "not yet generated" in _plain(summary.render())
 
 
+async def test_paint_chrome_caches_last_snapshot_across_ticks(tui_db, monkeypatch):
+    """F-37: `_paint_chrome` used to `MAX(captured_utc)` on every
+    1-second tick — ~86 400 idle scans per day. Cache the read for
+    10 ticks so the per-second age render stays fast while the DB
+    stays quiet."""
+    from brvm.apps.tui import app as app_mod
+
+    call_count = 0
+
+    def _spy():
+        nonlocal call_count
+        call_count += 1
+        return "2026-08-30T15:00:00Z"
+
+    monkeypatch.setattr(app_mod.market_svc, "last_snapshot_utc", _spy)
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        baseline = call_count  # captures whatever mount + settle produced
+        # Fire the tick loop manually eight more times without any
+        # `await` in between, so no real interval ticks slip in.
+        for _ in range(8):
+            app._paint_chrome()
+    # Eight extra paint calls but the DB read only fires on tick 1
+    # of every 10 — so no new reads over ticks 2..9. If we hit
+    # tick 10 in the batch, one extra read is allowed.
+    assert call_count - baseline <= 1
+
+
+async def test_home_o_binding_on_movers_does_not_open_news_url(tui_db):
+    """F-37: pressing `o` while the cursor sits on the Gainers or
+    Losers table used to open the highlighted *news* row's URL —
+    unrelated to what the reader was looking at. Now it routes to
+    the ticker view for the highlighted mover instead of touching
+    the news pane."""
+    from brvm.apps.tui.views.home import HomeView
+
+    app = BRVMTerminalApp()
+    opened: list[str] = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Focus on the gainers table.
+        gainers = app.query_one("#home-gainers", DataTable)
+        gainers.focus()
+        await pilot.pause()
+        # Patch `open_url` to capture any browser opens (none should
+        # happen — a mover row has no URL).
+        app.open_url = lambda url: opened.append(url)  # type: ignore[method-assign]
+        home = app.query_one(HomeView)
+        home.action_open_news_url()
+        await pilot.pause()
+    assert opened == []
+
+
 async def test_ticker_view_has_no_brief_tab(tui_db):
     """The Brief tab was removed from the ticker view — the daily brief
     is a global summary so it lives on Home now."""

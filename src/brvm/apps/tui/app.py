@@ -102,6 +102,7 @@ class BRVMTerminalApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._chrome_tick = 0
         self._paint_chrome()
         self.set_interval(1.0, self._paint_chrome)
         self.set_interval(REFRESH_SECONDS, self._tick_refresh)
@@ -127,10 +128,18 @@ class BRVMTerminalApp(App):
             self.query_one(NewsTicker).set_paused(not market_open)
 
         last = self.query_one("#last-updated", Static)
-        try:
-            self._last_snapshot = market_svc.last_snapshot_utc()
-        except Exception:
-            self._last_snapshot = None
+        # F-37: `last_snapshot_utc` is a rare-write field (updated by
+        # the snapshot job every 10 min during market hours, hourly
+        # otherwise). Re-querying every second means ~86 400 idle
+        # `MAX(captured_utc)` scans per day. Cache it and refresh
+        # from the DB every 10 chrome ticks (10 s) — the age
+        # rendering still updates every second off the cached value.
+        self._chrome_tick += 1
+        if self._chrome_tick % 10 == 1:
+            try:
+                self._last_snapshot = market_svc.last_snapshot_utc()
+            except Exception:
+                self._last_snapshot = None
         from brvm.apps.tui.format import age
 
         last.update(f"last snapshot: {age(self._last_snapshot)}")
