@@ -10,7 +10,7 @@ from __future__ import annotations
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from brvm.clock import ABIDJAN, is_market_open
+from brvm.clock import ABIDJAN, is_market_holiday, is_market_open, session_date_for
 from brvm.logging import get
 from brvm.services.alerts import deliver_pending as deliver_alerts
 from brvm.services.alerts import evaluate_all as evaluate_alerts
@@ -167,9 +167,18 @@ def _alerts_deliver_job() -> None:
 
 
 def _brief_job() -> None:
-    """Post-close daily brief. Runs Mon-Fri at 15:30 Africa/Abidjan, ~30
-    min after the exchange close, so the last snapshot cycle has landed
-    and the news tagger has stamped the day's relevance scores."""
+    """Post-close daily brief. Runs Mon-Fri at 15:45 Africa/Abidjan
+    (F-18 shift from 15:30). The next-day tag pass runs at :07 outside
+    market hours, but the 15:00 close is followed by the 15:31 hourly
+    tagger — 15:45 gives it a 14-min head start so news polled at
+    14:45 or 15:00 gets tagged into the day's brief instead of missing
+    it. Also skips WAEMU holidays via `is_market_holiday` so a Mon-Fri
+    public holiday doesn't produce a "session recap" of the prior
+    trading day's stale data."""
+    today = session_date_for()
+    if is_market_holiday(today):
+        log.info("scheduled brief skipped: %s is a WAEMU holiday", today)
+        return
     log.info("scheduled brief run start")
     try:
         result = generate_brief()
@@ -340,12 +349,17 @@ def build_scheduler() -> BackgroundScheduler:
         id="alerts_deliver_every_5min",
         replace_existing=True,
     )
-    # Daily brief: Mon-Fri 15:30 Abidjan. BRVM closes ~15:00, and the
-    # news tag pass runs on the :23/:38/:53 (etc.) minute inside the
-    # market-hours block — 30 min buffer covers both.
+    # Daily brief: Mon-Fri 15:45 Abidjan (F-18 shift). The market-hours
+    # tag pass runs :07/:22/:37/:52 within 9-14; the hourly-outside pass
+    # fires at :31. News polled at 14:45 or 15:00 (right before close)
+    # only gets a relevance stamp at 15:31 — running the brief at 15:30
+    # missed that batch, and its `relevance IS NOT NULL` filter dropped
+    # end-of-session news from the recap. 15:45 gives 14 min after the
+    # hourly-outside tagger fires. `_brief_job` also gates on
+    # `is_market_holiday` so a public-holiday Mon-Fri no-ops.
     sched.add_job(
         _brief_job,
-        CronTrigger(day_of_week="mon-fri", hour="15", minute="30", timezone=str(ABIDJAN)),
+        CronTrigger(day_of_week="mon-fri", hour="15", minute="45", timezone=str(ABIDJAN)),
         id="brief_daily",
         replace_existing=True,
     )

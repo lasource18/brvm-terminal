@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from freezegun import freeze_time
 
 from brvm.clock import (
+    is_market_holiday,
     is_market_open,
     last_completed_session_date,
     session_date_for,
@@ -71,3 +72,40 @@ def test_last_completed_session_monday_preopen_rolls_to_friday():
 @freeze_time("2026-08-20 06:00:00", tz_offset=0)  # Thu 06:00 Abidjan (pre-open)
 def test_last_completed_session_weekday_preopen_rolls_back_one_day():
     assert last_completed_session_date() == date(2026, 8, 19)
+
+
+# F-18: is_market_holiday must cover WAEMU civil + Christian holidays
+# so the daily brief cron no-ops instead of writing a "session recap"
+# of the prior day's stale data.
+
+
+def test_market_holiday_fixed_civil_days():
+    assert is_market_holiday(date(2026, 1, 1))    # New Year
+    assert is_market_holiday(date(2026, 5, 1))    # Labour Day
+    assert is_market_holiday(date(2026, 8, 15))   # Assumption
+    assert is_market_holiday(date(2026, 11, 1))   # All Saints
+    assert is_market_holiday(date(2026, 12, 25))  # Christmas
+
+
+def test_market_holiday_movable_christian_days():
+    # Easter 2026 = Sunday April 5 (per dateutil.easter). Easter Monday
+    # is April 6.
+    assert is_market_holiday(date(2026, 4, 6))
+    # Ascension = 39 days after Easter Sunday = May 14, 2026.
+    assert is_market_holiday(date(2026, 5, 14))
+    # Pentecost Monday = 50 days after Easter Sunday = May 25, 2026.
+    assert is_market_holiday(date(2026, 5, 25))
+
+
+def test_market_holiday_ordinary_weekday_is_false():
+    assert not is_market_holiday(date(2026, 8, 20))  # random Thursday
+
+
+@freeze_time("2026-01-01 10:30:00", tz_offset=0)  # New Year, weekday
+def test_is_market_open_returns_false_on_civil_holiday():
+    assert is_market_open() is False
+
+
+@freeze_time("2026-04-06 10:30:00", tz_offset=0)  # Easter Monday
+def test_is_market_open_returns_false_on_movable_holiday():
+    assert is_market_open() is False
