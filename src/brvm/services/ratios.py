@@ -174,6 +174,13 @@ def valuation_ratios(
     def _price_ratio(field: str, denom: float | None) -> Ratio | None:
         if currency_mismatch:
             return None
+        # F-28: a negative denominator (loss-making EPS, negative
+        # book value from a distressed issuer) yields a negative
+        # multiple that reads as "cheap" to a skim reader — the
+        # tooltip and the P/FCF path already suppress this shape.
+        # Suppress here too for consistency across the whole tab.
+        if denom is None or denom <= 0:
+            return None
         v = _safe_div(price, denom)
         if v is None:
             return None
@@ -286,6 +293,12 @@ def growth_ratios(
     if prior is None:
         return {"revenue_growth": None, "net_income_growth": None, "eps_growth": None}
     if prior.period_kind != curr.period_kind:
+        return {"revenue_growth": None, "net_income_growth": None, "eps_growth": None}
+    # F-28: growth across a gap year (2024 vs. 2022 because 2023's
+    # filing never landed) is not "YoY" — the label the template
+    # renders — and mixing it in with true YoY rows misleads a
+    # skim reader. Suppress rather than mis-label.
+    if abs(curr.period_year - prior.period_year) > 1:
         return {"revenue_growth": None, "net_income_growth": None, "eps_growth": None}
 
     def _yoy(now: float | None, then: float | None, label: str) -> Ratio | None:

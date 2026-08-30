@@ -115,6 +115,41 @@ def test_extracts_a_pending_filing_and_records_spend(monkeypatch, tmp_path):
         assert spend_repo.get_day(conn, table="llm_spend") is None
 
 
+def test_persist_prefers_filing_period_kind_over_model(monkeypatch, tmp_path, caplog):
+    """F-28: a mislabelled interim from the LLM (e.g., an H1 report
+    the model calls "annual") would otherwise full-replace a genuine
+    annual row via `replace_period`. Trust the filing's own metadata
+    (from the filename regex) and log the mismatch so it's
+    investigatable."""
+    db_path, svc = _setup(monkeypatch, tmp_path, n_filings=0)
+    # Seed a filing whose parsed period_kind is H1, but the model
+    # payload wants to call it annual.
+    with connect(db_path) as conn:
+        filings_repo.upsert_filings(conn, [Filing(
+            ticker="SNTS", issuer_name="SONATEL",
+            doc_type="etats_financiers",
+            period_kind="H1", period_year=2024,
+            source="brvm_org", source_url="https://x/h1.pdf",
+            url_hash="h-h1-2024",
+            published_date=date(2024, 9, 15),
+            file_path="data/filings/SNTS/h1.pdf",
+            size_bytes=1024, sha256="deadbeef", page_count=42,
+        )])
+    payload = _happy()
+    payload["period_kind"] = "annual"  # model disagrees with filename
+    client = FakeAnthropic([_json_reply(payload)])
+    import logging
+    with caplog.at_level(logging.WARNING):
+        svc.extract_pending(client=client, project_root=tmp_path)
+    with connect(db_path) as conn:
+        rows = fin_repo.list_financials(conn, "SNTS", period_kind="H1")
+        assert len(rows) == 1
+        assert rows[0]["period_kind"] == "H1"  # filing wins
+        # No stray annual row from the model's mislabel.
+        assert fin_repo.list_financials(conn, "SNTS", period_kind="annual") == []
+    assert any("disagrees" in msg for msg in caplog.messages)
+
+
 def test_second_pass_is_a_no_op(monkeypatch, tmp_path):
     _db, svc = _setup(monkeypatch, tmp_path, n_filings=1)
     svc.extract_pending(client=FakeAnthropic([_json_reply(_happy())]), project_root=tmp_path)
