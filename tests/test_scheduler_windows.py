@@ -45,3 +45,7 @@ def test_scheduler_builds():
     assert "brief_daily" in ids
     # Phase 6c jobs.
     assert "analyst_notes_weekly" in ids
+    # F-27: filings pull daily, ahead of OCR + extract.
+    assert "filings_pull_daily" in ids
+    # F-04: BOC reconciliation daily.
+    assert "boc_reconcile_daily" in ids

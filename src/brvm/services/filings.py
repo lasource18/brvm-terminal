@@ -474,6 +474,13 @@ def pull_all(
                         dest = dest.with_stem(f"{dest.stem}_{uhash[:8]}")
 
                     got = _download_pdf(client, pf.source_url, dest)
+                    # F-27: politeness pause fires per PDF (not per
+                    # issuer) and on the failure paths too. An issuer
+                    # with 20 new filings used to blast the source 20
+                    # times back-to-back and failed downloads skipped
+                    # the sleep entirely.
+                    if delay_between_requests_s:
+                        time.sleep(delay_between_requests_s)
                     if got is None:
                         counts["filings_failed_download"] += 1
                         continue
@@ -513,9 +520,6 @@ def pull_all(
                     )
                     ins, _ = filings_repo.upsert_filings(conn, [filing])
                     counts["filings_new"] += ins
-
-                if delay_between_requests_s:
-                    time.sleep(delay_between_requests_s)
     finally:
         if close:
             client.close()
@@ -766,6 +770,10 @@ def promote_from_communiques(
                     dest = dest.with_stem(f"{dest.stem}_{uhash[:8]}")
 
                 got = _download_pdf(client, row["url"], dest)
+                # F-27: politeness pause fires per PDF and on every
+                # exit path (success + all failure branches).
+                if delay_between_requests_s:
+                    time.sleep(delay_between_requests_s)
                 if got is None:
                     counts["failed_download"] += 1
                     continue
@@ -792,16 +800,13 @@ def promote_from_communiques(
                     source_url=row["url"],
                     url_hash=uhash,
                     published_date=published,
-                    file_path=str(dest),
+                    file_path=_relativize(dest),
                     size_bytes=size_bytes,
                     sha256=sha256_hex,
                     page_count=page_count,
                 )
                 ins, _ = filings_repo.upsert_filings(conn, [filing])
                 counts["filings_new"] += ins
-
-                if delay_between_requests_s:
-                    time.sleep(delay_between_requests_s)
     finally:
         if close:
             client.close()
