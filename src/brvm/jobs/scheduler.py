@@ -18,6 +18,7 @@ from brvm.services.analyst_notes import generate_for_all as generate_analyst_not
 from brvm.services.brief import generate_for as generate_brief
 from brvm.services.company_facts import refresh_all as refresh_company_facts
 from brvm.services.enrichment import enrich_sectors
+from brvm.services.filings import pull_all as pull_filings
 from brvm.services.fundamentals import extract_pending
 from brvm.services.history import backfill_all as backfill_history
 from brvm.services.news import poll_all as poll_news
@@ -115,6 +116,20 @@ def _company_facts_refresh_job() -> None:
         log.info("scheduled company-facts refresh ok: %s", counts)
     except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
         log.exception("scheduled company-facts refresh failed: %s", e)
+
+
+def _filings_pull_job() -> None:
+    """F-27: walk brvm.org issuers and download new filing PDFs so the
+    OCR + extraction pipeline has fresh material to chew on. Runs
+    ahead of the OCR sweep (02:00 Abidjan) so a nightly cycle can go
+    pull → OCR → extract in one pass. The 0.5s per-PDF politeness
+    pause is enforced inside `pull_all` (see F-27 fix)."""
+    log.info("scheduled filings pull start")
+    try:
+        counts = pull_filings()
+        log.info("scheduled filings pull ok: %s", counts)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled filings pull failed: %s", e)
 
 
 def _filings_ocr_job() -> None:
@@ -270,6 +285,16 @@ def build_scheduler() -> BackgroundScheduler:
         _history_backfill_job,
         CronTrigger(day_of_week="sun", hour="5", minute="0", timezone=str(ABIDJAN)),
         id="history_backfill_weekly",
+        replace_existing=True,
+    )
+    # F-27: filings pull daily at 01:00 Abidjan, ahead of OCR (02:00)
+    # and extraction (03:00) so a single nightly cycle can go
+    # pull → OCR → extract. Walks every brvm.org issuer with the 0.5s
+    # per-PDF politeness pause (enforced inside `pull_all`).
+    sched.add_job(
+        _filings_pull_job,
+        CronTrigger(hour="1", minute="0", timezone=str(ABIDJAN)),
+        id="filings_pull_daily",
         replace_existing=True,
     )
     # OCR sweep: daily at 02:00 Abidjan, one hour before the extraction

@@ -648,6 +648,56 @@ def test_pull_all_honors_only_tickers_filter(monkeypatch, tmp_path):
     assert counts["issuers_resolved"] == 1
 
 
+def test_pull_all_politeness_fires_per_pdf_including_failures(
+    monkeypatch, tmp_path, fixtures_dir
+):
+    """F-27: the previous revision slept ONCE per issuer, so an issuer
+    with 20 new PDFs blasted the source 20 times back-to-back; failed
+    downloads also skipped the sleep entirely. Both are politeness
+    violations. Pin the fix: `time.sleep` fires per-PDF, including on
+    the failure path."""
+    svc, db_path, _filings_dir = _fresh_svc(tmp_path, monkeypatch)
+    with connect(db_path) as conn:
+        apply_migrations(conn)
+        sec_repo.upsert(conn, [
+            Security(ticker="SNTS", name="SONATEL", kind="equity", country="SN"),
+        ])
+
+    sonatel_html = (fixtures_dir / "brvm_org" / "rapports_societe_cotes_sonatel.html").read_text(
+        encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        bf, "fetch_issuers_index",
+        lambda client=None, max_pages=10: [
+            bf.IssuerIndexEntry(slug="sonatel", display_name="SONATEL"),
+        ],
+    )
+    monkeypatch.setattr(
+        bf, "fetch_issuer_filings",
+        lambda slug, client=None: bf.parse_issuer_page(sonatel_html),
+    )
+
+    # Force every download to fail so the failure branch runs.
+    monkeypatch.setattr(svc, "_download_pdf", lambda *a, **kw: None)
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(svc.time, "sleep", lambda s: sleeps.append(s))
+
+    class _StubClient:
+        def stream(self, method, url):
+            raise AssertionError("_download_pdf was stubbed — no stream should run")
+        def close(self):
+            pass
+
+    counts = svc.pull_all(client=_StubClient(), delay_between_requests_s=0.5)
+    # Every seen PDF trips the failure branch, so `filings_failed_download`
+    # equals `filings_seen` — and each one incurs one polite sleep.
+    assert counts["filings_seen"] > 1  # sanity: sonatel fixture has several
+    assert counts["filings_failed_download"] == counts["filings_seen"]
+    assert len(sleeps) == counts["filings_seen"]
+    assert all(s == 0.5 for s in sleeps)
+
+
 def test_pull_all_skips_unresolved_issuers(monkeypatch, tmp_path):
     svc, db_path, _ = _fresh_svc(tmp_path, monkeypatch)
     with connect(db_path) as conn:
