@@ -305,6 +305,13 @@ def generate_for(
     """
     day = day or utcnow().date()
     day_iso = day.isoformat()
+    # F-19: spend accounting keys on the real UTC day the API call
+    # happens, NOT the covered day. Backfilling N historical briefs
+    # in one real day used to get N fresh caps under the old
+    # covered-day keying (`day` below) — real-day spend was
+    # unbounded by `BRIEF_DAILY_CAP_CENTS`. Analyst notes already
+    # bill real today; brings the two in line.
+    spend_day = utcnow().date()
     result = BriefResult(day=day_iso)
 
     context = gather_context(day)
@@ -330,7 +337,7 @@ def generate_for(
     # `brief_spend` — separate from the tagger / extractor counters).
     with connect(_db_path()) as conn:
         remaining = spend_repo.remaining_micros(
-            conn, settings.brief_daily_cap_cents, day, table="brief_spend"
+            conn, settings.brief_daily_cap_cents, spend_day, table="brief_spend"
         )
     if remaining <= 0:
         result.budget_exhausted = True
@@ -353,7 +360,7 @@ def generate_for(
                 + e.usage.cache_write_tokens,
                 output_tokens=e.usage.output_tokens,
                 usd_micros=e.usage.usd_micros,
-                day=day,
+                day=spend_day,
                 table="brief_spend",
             )
         log.warning("brief for %s failed: %s", day_iso, e)
@@ -373,7 +380,7 @@ def generate_for(
     # gets another shot at translation.
     markdown_fr: str | None = None
     translation_generated_utc: str | None = None
-    translation_usage = _translate_or_none(markdown, client=client, day=day)
+    translation_usage = _translate_or_none(markdown, client=client, day=spend_day)
     if translation_usage is not None:
         markdown_fr = translation_usage[0]
         translation_generated_utc = utc_iso()
@@ -401,7 +408,7 @@ def generate_for(
             input_tokens=brief.input_tokens,
             output_tokens=brief.output_tokens,
             usd_micros=brief.usd_micros,
-            day=day,
+            day=spend_day,
             table="brief_spend",
         )
         # Translation billing rides on the same daily counter — it's
@@ -416,7 +423,7 @@ def generate_for(
                 + t_usage.cache_write_tokens,
                 output_tokens=t_usage.output_tokens,
                 usd_micros=t_usage.usd_micros,
-                day=day,
+                day=spend_day,
                 table="brief_spend",
             )
     result.brief = brief
