@@ -261,8 +261,11 @@ class TestBriefGenerateWithTranslation:
         assert result.brief.translation_generated_utc is not None
 
         # Both calls billed to brief_spend (primary + translation).
+        # F-19: brief spend keys on real UTC day, not the covered day.
+        from brvm.clock import utcnow
+        today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
-            spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
+            spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
         primary_cost = llm_svc.usd_micros_for(
             "claude-haiku-4-5-20251001", input_tokens=2000, output_tokens=200,
         )
@@ -304,8 +307,11 @@ class TestBriefGenerateWithTranslation:
         assert result.brief.translation_generated_utc is None
 
         # Only the primary was billed (transport error → no billing).
+        # F-19: brief spend keys on real UTC day, not the covered day.
+        from brvm.clock import utcnow
+        today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
-            spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
+            spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
         assert spent == llm_svc.usd_micros_for(
             "claude-haiku-4-5-20251001", input_tokens=2000, output_tokens=100,
         )
@@ -329,8 +335,11 @@ class TestBriefGenerateWithTranslation:
         assert result.brief is not None
         assert result.brief.markdown_fr is None
 
+        # F-19: brief spend keys on real UTC day, not the covered day.
+        from brvm.clock import utcnow
+        today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
-            spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
+            spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
         primary = llm_svc.usd_micros_for(
             "claude-haiku-4-5-20251001", input_tokens=2000, output_tokens=100,
         )

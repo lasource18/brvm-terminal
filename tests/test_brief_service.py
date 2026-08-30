@@ -191,10 +191,13 @@ def test_generate_happy_path_persists_and_bills(monkeypatch, tmp_path):
     assert result.brief.output_tokens == 200
     assert result.brief.usd_micros > 0
 
-    # Spend counter got the same billing.
+    # Spend counter got the same billing, keyed on the real UTC day
+    # (F-19) — not the covered day (which is 2026-08-20 here).
     _db_path_arg = _db_path
+    from brvm.clock import utcnow
+    today_iso = utcnow().date().isoformat()
     with connect(_db_path_arg) as conn:
-        spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
+        spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
     assert spent == result.brief.usd_micros
 
     # Context JSON round-trips.
@@ -234,13 +237,18 @@ def test_generate_no_api_key_is_a_warning_not_a_crash(monkeypatch, tmp_path):
 
 
 def test_generate_stops_when_budget_is_exhausted(monkeypatch, tmp_path):
+    """Cap keys on the REAL UTC day (F-19). Burn today's budget and
+    the pre-check trips regardless of which covered day we're
+    generating for."""
     _db_path, svc = _setup(monkeypatch, tmp_path)
+    from brvm.clock import utcnow
+    today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
-        # Burn the whole $0.50 (50 * 10_000 = 500_000 micros) before we
-        # start.
+        # Burn the whole $0.50 (50 * 10_000 = 500_000 micros) against
+        # today's spend row.
         spend_repo.add_usage(
             conn, input_tokens=0, output_tokens=0,
-            usd_micros=500_000, table="brief_spend", day="2026-08-20",
+            usd_micros=500_000, table="brief_spend", day=today_iso,
         )
 
     client = FakeAnthropic([])  # would raise if called
@@ -250,6 +258,31 @@ def test_generate_stops_when_budget_is_exhausted(monkeypatch, tmp_path):
     assert client.call_count == 0
 
 
+def test_generate_bills_real_utc_day_not_covered_day(monkeypatch, tmp_path):
+    """F-19: previously the cap keyed on the covered day, so back-
+    filling N historical briefs in one real day got N fresh caps.
+    Assert the successful path records spend against the real day."""
+    _db_path, svc = _setup(monkeypatch, tmp_path)
+    md = "# BRVM daily brief\nSample content.\n"
+    client = FakeAnthropic([reply(md, input_tokens=1500, output_tokens=200)])
+
+    covered = date(2020, 1, 15)  # a very old covered date
+    result = svc.generate_for(covered, client=client)
+    assert result.brief is not None
+
+    from brvm.clock import utcnow
+    today_iso = utcnow().date().isoformat()
+    with connect(_db_path) as conn:
+        spent_today = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
+        spent_covered = spend_repo.spent_micros(
+            conn, covered.isoformat(), table="brief_spend"
+        )
+    assert spent_today > 0
+    # Nothing landed against the ancient covered day — the cap can't
+    # be gamed by backfilling.
+    assert spent_covered == 0
+
+
 def test_generate_empty_reply_bills_but_marks_failed(monkeypatch, tmp_path):
     _db_path, svc = _setup(monkeypatch, tmp_path)
     client = FakeAnthropic([reply("", input_tokens=1500, output_tokens=0)])
@@ -257,9 +290,12 @@ def test_generate_empty_reply_bills_but_marks_failed(monkeypatch, tmp_path):
     result = svc.generate_for(date(2026, 8, 20), client=client)
     assert result.failed is True
     assert result.brief is None
+    from brvm.clock import utcnow
+    today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
-        spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
-    # Empty reply still cost input tokens — must be billed.
+        spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
+    # Empty reply still cost input tokens — must be billed against
+    # the real UTC day (F-19).
     assert spent > 0
 
 
@@ -275,8 +311,13 @@ def test_generate_transport_error_is_reported_not_billed(monkeypatch, tmp_path):
     result = svc.generate_for(date(2026, 8, 20), client=_Boom())
     assert result.failed is True
     assert result.reason.startswith("transport_error")
+    # F-22 update: transport errors on attempt 1 leave usage empty
+    # (nothing to record); either the covered or real day should
+    # read zero.
+    from brvm.clock import utcnow
+    today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
-        spent = spend_repo.spent_micros(conn, "2026-08-20", table="brief_spend")
+        spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
     assert spent == 0
 
 
