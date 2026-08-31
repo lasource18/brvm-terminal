@@ -166,9 +166,8 @@ Raw facts free, your work paid.
 
 | Free | Paid |
 | --- | --- |
-| Quotes **delayed 15 min**, index levels | Quotes at full scrape freshness |
+| Quotes and index levels | Chart (history + plotting) |
 | Watchlist capped at **10 securities** | Unlimited watchlists |
-| — | Chart (history + plotting) |
 | News feed (untagged listing) | Daily brief |
 | Security directory and description | Analyst view |
 | Bond reference — Overview tab | Ratios and Peers |
@@ -253,8 +252,9 @@ Continuing the PR-letter convention from where PR-U left off.
 | **P0** | Verify, don't build | Stripe country list · Flutterwave CI onboarding · kodji domain + OAPI trademark. All three can change what you build. |
 | **PR-V** | Rename to kodji | 785 import sites, zero behaviour change, green suite. Alone and first. **Shipped (#70).** |
 | **PR-W** | Production surface polish | Drop the "Bloomberg-ish" subtitle and hide model id + token counts + generation cost from the brief and analyst bylines. |
-| **PR-X** | Users, sessions, ownership | Migrations 0017+, owner scoping, magic-link auth. The big one. |
-| **PR-Y** | Plan gating | `TabSpec.min_plan`, the 15-min quote delay, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. |
+| **PR-X** | Accounts and ownership | Migration 0017, `account_id` scoping across watchlists and alert rules, subscriptions table. **Shipped.** |
+| **PR-X2** | Authentication | Magic-link sign-in and session cookies. Split out of PR-X because it needs an email provider chosen first — none is configured. |
+| **PR-Y** | Plan gating | `TabSpec.min_plan`, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. |
 | **PR-Z** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
 | **PR-AA** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
 | **PR-AB** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. |
@@ -262,27 +262,33 @@ Continuing the PR-letter convention from where PR-U left off.
 
 ## Answered (2026-08-30)
 
-- **Price point.** Anchor on what a Sikafinance or Richbourse subscription costs
-  locally, then price *above* it to reflect the added features and the downloadable
-  TUI. The exact XOF figure still needs a check of both competitors' current rates —
-  it is the one input this plan does not carry.
-- **Free tier.** Three limits, on top of tab visibility:
-  - quotes delayed **15 minutes**
-  - watchlist capped at **10 securities**
+- **Price point.** Anchor on the local competition, priced above it for the added
+  features and the downloadable TUI. Both competitors' live rates, checked 30 Aug:
+
+  | | 3 months | 6 months | 12 months | Implied /mo (annual) |
+  | --- | ---: | ---: | ---: | ---: |
+  | Sikafinance Premium | 40 000 | 60 000 | 100 000 | 8 333 |
+  | Richbourse Premium | 24 000 (Bronze) | 44 000 (Argent) | 79 000 (Or) | 6 583 |
+
+  All figures XOF. Sikafinance also sells a 350 000/yr "Gold" tier, but that buys
+  access to an analyst group — a different product, not a comparable.
+
+  So the annual band is **79 000 – 100 000**. A defensible position is **~120 000/yr
+  (10 000/mo)** — about 20% over Sikafinance and 52% over Richbourse — with a monthly
+  around **12 000–15 000**. Both competitors discount 18–37% for annual commitment, so
+  the market expects that ladder. Note Richbourse already accepts card *and* mobile
+  money, which corroborates the Flutterwave choice.
+
+- **Free tier.** Two limits, on top of tab visibility:
+  - watchlist capped at **10 securities** (distinct tickers across all lists, so the
+    same name on three lists counts once)
   - paid tabs hidden (Chart, Brief, Analyst view, Ratios, Peers, Yield & Duration,
     Cash flow, Alerts)
+
+  **The 15-minute delay idea was dropped** (30 Aug). The BRVM feed is already delayed
+  at source, so a further delay would have differentiated almost nothing while adding
+  a read-side filter to every quote path — and it would have made the paid claim hard
+  to state honestly. Feature access is the whole free/paid boundary.
+
 - **Teams: plausible.** Ownership keys on **`account_id`, not `user_id`** — a personal
-  account is auto-created per user at signup. This is settled and PR-X depends on it.
-
-### What the free-tier limits cost to build
-
-The 15-minute delay is the only one with real design weight. `quotes` rows carry their
-own `fetched_utc`, so the delay is a read-side filter — serve a free user the newest
-snapshot older than 15 minutes rather than the newest snapshot. Two consequences worth
-planning for:
-
-- It must be enforced in `services/`, not the templates, or the JSON API leaks live
-  quotes to free accounts.
-- The BRVM feed is already ~15 minutes delayed at source. Confirm what your scrape
-  actually carries before advertising "real-time" to paid users — the honest paid
-  claim may be "no additional delay" rather than "live".
+  account is auto-created per user at signup. Shipped in PR-X.

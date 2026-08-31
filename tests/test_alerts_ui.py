@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
+
 
 def test_alerts_page_empty_state(client):
     r = client.get("/alerts")
@@ -63,14 +65,14 @@ def test_toggle_rule_flips_enabled(client):
     from kodji.store import alerts as alerts_repo
 
     with connect(settings.db_path) as conn:
-        rules = alerts_repo.list_rules(conn)
+        rules = alerts_repo.list_rules(conn, DEFAULT_ACCOUNT_ID)
     assert len(rules) == 1
     rid = rules[0].id
 
     r2 = client.post(f"/_frag/alerts/rules/{rid}/toggle")
     assert r2.status_code == 200
     with connect(settings.db_path) as conn:
-        assert alerts_repo.get_rule(conn, rid).enabled is False
+        assert alerts_repo.get_rule(conn, DEFAULT_ACCOUNT_ID, rid).enabled is False
 
 
 def test_delete_rule_removes_it(client):
@@ -83,7 +85,7 @@ def test_delete_rule_removes_it(client):
     from kodji.store import alerts as alerts_repo
 
     with connect(settings.db_path) as conn:
-        rid = alerts_repo.list_rules(conn)[0].id
+        rid = alerts_repo.list_rules(conn, DEFAULT_ACCOUNT_ID)[0].id
 
     r2 = client.delete(f"/_frag/alerts/rules/{rid}")
     assert r2.status_code == 200

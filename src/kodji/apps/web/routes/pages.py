@@ -16,6 +16,7 @@ from kodji.apps.web._common import (
 from kodji.clock import is_market_open, utc_iso
 from kodji.config import settings
 from kodji.i18n import normalize
+from kodji.services import accounts as accounts_svc
 from kodji.services import (
     alerts as alerts_svc,
 )
@@ -294,14 +295,14 @@ def watchlists_index(request: Request):
     return templates.TemplateResponse(
         request,
         "watchlists.html",
-        {**base_ctx(request), "watchlists": watchlist.list_all()},
+        {**base_ctx(request), "watchlists": watchlist.list_all(accounts_svc.current_account_id(request))},
     )
 
 
 @router.get("/watchlists/{slug}", response_class=HTMLResponse)
 def watchlist_page(request: Request, slug: str):
     try:
-        wl = watchlist.get_with_quotes(slug)
+        wl = watchlist.get_with_quotes(accounts_svc.current_account_id(request), slug)
     except watchlist.WatchlistNotFound as e:
         raise HTTPException(status_code=404, detail=f"unknown watchlist: {slug}") from e
     return templates.TemplateResponse(
@@ -323,7 +324,7 @@ def alerts_page(request: Request):
         "alerts.html",
         {
             **base_ctx(request),
-            "rules": alerts_svc.list_rules(),
+            "rules": alerts_svc.list_rules(accounts_svc.current_account_id(request)),
             "events": alerts_svc.list_recent_events(limit=25),
             "has_discord": settings.has_discord,
         },

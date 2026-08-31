@@ -10,14 +10,15 @@ from fastapi.responses import HTMLResponse
 from kodji.apps.web._common import templates
 from kodji.clock import is_market_open, utc_iso
 from kodji.models import AlertRule
+from kodji.services import accounts as accounts_svc
 from kodji.services import alerts as alerts_svc
 from kodji.services import directory, market, search, watchlist
 from kodji.services import news as news_svc
 
 
-def _wl_ctx(slug: str) -> dict:
+def _wl_ctx(request: Request, slug: str) -> dict:
     return {
-        "wl": watchlist.get_with_quotes(slug),
+        "wl": watchlist.get_with_quotes(accounts_svc.current_account_id(request), slug),
         "market_open": is_market_open(),
         "generated_utc": utc_iso(),
     }
@@ -37,20 +38,20 @@ def overview_frag(request: Request):
 @router.post("/watchlists", response_class=HTMLResponse)
 def create_watchlist(request: Request, name: str = Form(...)):
     try:
-        watchlist.create(name.strip())
+        watchlist.create(accounts_svc.current_account_id(request), name.strip())
     except Exception as e:  # sqlite IntegrityError etc.
         raise HTTPException(status_code=400, detail=str(e)) from e
     return templates.TemplateResponse(
         request,
         "_frag/watchlists_index.html",
-        {"watchlists": watchlist.list_all()},
+        {"watchlists": watchlist.list_all(accounts_svc.current_account_id(request))},
     )
 
 
 @router.get("/watchlists/{slug}", response_class=HTMLResponse)
 def watchlist_body_frag(request: Request, slug: str):
     try:
-        return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(slug))
+        return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(request, slug))
     except watchlist.WatchlistNotFound as e:
         raise HTTPException(status_code=404, detail=f"unknown watchlist: {slug}") from e
 
@@ -58,23 +59,23 @@ def watchlist_body_frag(request: Request, slug: str):
 @router.post("/watchlists/{slug}/items", response_class=HTMLResponse)
 def add_watchlist_item(request: Request, slug: str, ticker: str = Form(...)):
     try:
-        watchlist.add_item(slug, ticker)
+        watchlist.add_item(accounts_svc.current_account_id(request), slug, ticker)
     except watchlist.WatchlistNotFound as e:
         raise HTTPException(status_code=404, detail=f"unknown watchlist: {slug}") from e
     except watchlist.TickerUnknown as e:
         raise HTTPException(
             status_code=400, detail=f"unknown ticker: {ticker.upper()}"
         ) from e
-    return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(slug))
+    return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(request, slug))
 
 
 @router.delete("/watchlists/{slug}/items/{ticker}", response_class=HTMLResponse)
 def remove_watchlist_item(request: Request, slug: str, ticker: str):
     try:
-        watchlist.remove_item(slug, ticker)
+        watchlist.remove_item(accounts_svc.current_account_id(request), slug, ticker)
     except watchlist.WatchlistNotFound as e:
         raise HTTPException(status_code=404, detail=f"unknown watchlist: {slug}") from e
-    return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(slug))
+    return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(request, slug))
 
 
 @router.get("/search", response_class=HTMLResponse)
@@ -160,8 +161,8 @@ def news_frag(
     return response
 
 
-def _rules_ctx() -> dict:
-    return {"rules": alerts_svc.list_rules()}
+def _rules_ctx(request: Request) -> dict:
+    return {"rules": alerts_svc.list_rules(accounts_svc.current_account_id(request))}
 
 
 def _events_ctx() -> dict:
@@ -214,6 +215,7 @@ def create_alert_rule(
             ) from e
     try:
         alerts_svc.create_rule(
+            accounts_svc.current_account_id(request),
             AlertRule(
                 kind=kind, ticker=t, label=lbl,
                 threshold_pct=thr, doc_types=docs, min_relevance=rel,
@@ -221,7 +223,7 @@ def create_alert_rule(
         )
     except Exception as e:  # sqlite IntegrityError (FK on ticker) etc.
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx(request))
 
 
 @router.post("/alerts/rules/{rule_id}/toggle", response_class=HTMLResponse)
@@ -230,20 +232,23 @@ def toggle_alert_rule(request: Request, rule_id: int):
     from kodji.db import connect
     from kodji.store import alerts as _alerts_repo
 
+    account_id = accounts_svc.current_account_id(request)
     with connect(_s.db_path) as conn:
-        rule = _alerts_repo.get_rule(conn, rule_id)
+        # Scoped read: a rule_id from another account's URL must 404 here,
+        # not toggle someone else's alert.
+        rule = _alerts_repo.get_rule(conn, account_id, rule_id)
         if rule is None:
             raise HTTPException(status_code=404, detail=f"unknown rule: {rule_id}")
-        _alerts_repo.set_enabled(conn, rule_id, not rule.enabled)
-    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
+        _alerts_repo.set_enabled(conn, account_id, rule_id, not rule.enabled)
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx(request))
 
 
 @router.delete("/alerts/rules/{rule_id}", response_class=HTMLResponse)
 def delete_alert_rule(request: Request, rule_id: int):
-    n = alerts_svc.delete_rule(rule_id)
+    n = alerts_svc.delete_rule(accounts_svc.current_account_id(request), rule_id)
     if n == 0:
         raise HTTPException(status_code=404, detail=f"unknown rule: {rule_id}")
-    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx())
+    return templates.TemplateResponse(request, "_frag/alerts_rules.html", _rules_ctx(request))
 
 
 @router.get("/directory", response_class=HTMLResponse)

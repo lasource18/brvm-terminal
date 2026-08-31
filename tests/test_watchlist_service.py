@@ -14,6 +14,7 @@ from pathlib import Path
 from kodji.config import reset_settings_cache
 from kodji.db import connect
 from kodji.models import DailyBar, Quote, Security
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 from kodji.store import quotes as quotes_repo
 from kodji.store import securities as sec_repo
 
@@ -51,11 +52,11 @@ def test_bond_ticker_in_watchlist_renders_daily_bar_close(monkeypatch, tmp_path)
                      source="brvm_org"),
         ])
 
-    wl = svc.create("Fixed income")
-    svc.add_item(wl.slug, "SNTS")
-    svc.add_item(wl.slug, "BIDCO4")
+    wl = svc.create(DEFAULT_ACCOUNT_ID, "Fixed income")
+    svc.add_item(DEFAULT_ACCOUNT_ID, wl.slug, "SNTS")
+    svc.add_item(DEFAULT_ACCOUNT_ID, wl.slug, "BIDCO4")
 
-    view = svc.get_with_quotes(wl.slug)
+    view = svc.get_with_quotes(DEFAULT_ACCOUNT_ID, wl.slug)
     by = {q.ticker: q for q in view.items}
     assert by["SNTS"].last == 32_500.0
     assert by["SNTS"].change_pct == 1.88
@@ -74,9 +75,9 @@ def test_bond_without_daily_bar_still_renders_em_dash(monkeypatch, tmp_path):
     never traded) should degrade to None cleanly — not raise, not
     fabricate a value."""
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    wl = svc.create("New listings")
-    svc.add_item(wl.slug, "BIDCO4")
-    view = svc.get_with_quotes(wl.slug)
+    wl = svc.create(DEFAULT_ACCOUNT_ID, "New listings")
+    svc.add_item(DEFAULT_ACCOUNT_ID, wl.slug, "BIDCO4")
+    view = svc.get_with_quotes(DEFAULT_ACCOUNT_ID, wl.slug)
     assert len(view.items) == 1
     assert view.items[0].last is None
     assert view.items[0].change_pct is None

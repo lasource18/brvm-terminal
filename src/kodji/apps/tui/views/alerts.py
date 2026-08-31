@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Input, Label, Select, SelectionList
 
 from kodji.models import AlertRule, FilingDocType
 from kodji.services import alerts as alerts_svc
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 
 _KIND_OPTIONS = [
     ("price_move", "price_move"),
@@ -100,7 +101,7 @@ class AlertsView(Vertical):
         rt = self.query_one("#alerts-rules", DataTable)
         r_cursor = rt.cursor_row
         rt.clear()
-        rules = alerts_svc.list_rules()
+        rules = alerts_svc.list_rules(DEFAULT_ACCOUNT_ID)
         for rule in rules:
             rt.add_row(
                 str(rule.id),
@@ -121,18 +122,18 @@ class AlertsView(Vertical):
         rid = self._selected_rule_id()
         if rid is None:
             return
-        rules = {r.id: r for r in alerts_svc.list_rules()}
+        rules = {r.id: r for r in alerts_svc.list_rules(DEFAULT_ACCOUNT_ID)}
         rule = rules.get(rid)
         if rule is None:
             return
-        alerts_svc.set_enabled(rid, not rule.enabled)
+        alerts_svc.set_enabled(DEFAULT_ACCOUNT_ID, rid, not rule.enabled)
         self.refresh_data()
 
     def action_delete_rule(self) -> None:
         rid = self._selected_rule_id()
         if rid is None:
             return
-        alerts_svc.delete_rule(rid)
+        alerts_svc.delete_rule(DEFAULT_ACCOUNT_ID, rid)
         self.refresh_data()
 
     def action_focus_new(self) -> None:
@@ -193,7 +194,7 @@ class AlertsView(Vertical):
             doc_types=doctypes if kind == "new_filing" else None,
             enabled=True,
         )
-        alerts_svc.create_rule(rule)
+        alerts_svc.create_rule(DEFAULT_ACCOUNT_ID, rule)
         for input_id in ("new-ticker", "new-arg"):
             self.query_one(f"#{input_id}", Input).value = ""
         self.query_one("#new-doctypes", SelectionList).deselect_all()

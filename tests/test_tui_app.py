@@ -22,6 +22,7 @@ from kodji.apps.tui.views.directory import DirectoryView
 from kodji.apps.tui.views.news import NewsView
 from kodji.apps.tui.views.ticker import TickerView
 from kodji.apps.tui.views.watchlists import WatchlistsView
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 from tests.conftest import apply_migrations, reset_module_state
 
 
@@ -377,13 +378,13 @@ async def test_watchlist_remove_uses_x_not_r(tui_db):
         await pilot.press("r")
         await pilot.pause()
         assert items.row_count == 1
-        assert wl_svc.get_with_quotes("core").items[0].ticker == "SNTS"
+        assert wl_svc.get_with_quotes(DEFAULT_ACCOUNT_ID, "core").items[0].ticker == "SNTS"
 
         # `x` is the new remove binding.
         await pilot.press("x")
         await pilot.pause()
         assert items.row_count == 0
-        assert wl_svc.get_with_quotes("core").items == []
+        assert wl_svc.get_with_quotes(DEFAULT_ACCOUNT_ID, "core").items == []
 
 
 async def test_escape_blurs_watchlist_input(tui_db):
@@ -828,7 +829,7 @@ async def test_sidebar_capital_w_cycles_watchlists(tui_db):
     from kodji.services import watchlist as wl_svc
 
     # Seed a second watchlist so the cycle has somewhere to go.
-    wl_svc.create("Core")
+    wl_svc.create(DEFAULT_ACCOUNT_ID, "Core")
 
     app = KodjiTerminalApp()
     async with app.run_test() as pilot:
@@ -1582,7 +1583,7 @@ async def test_alerts_new_filing_rule_persists_selected_doctypes(
     created: list = []
     monkeypatch.setattr(
         alerts_svc, "create_rule",
-        lambda r: created.append(r) or 1,
+        lambda _account_id, r: created.append(r) or 1,
     )
 
     app = KodjiTerminalApp()
@@ -1621,7 +1622,7 @@ async def test_alerts_new_filing_needs_at_least_one_doctype(tui_db, monkeypatch)
     created: list = []
     monkeypatch.setattr(
         alerts_svc, "create_rule",
-        lambda r: created.append(r) or 1,
+        lambda _account_id, r: created.append(r) or 1,
     )
     notifications: list = []
     from kodji.apps.tui.views.alerts import AlertsView as AV

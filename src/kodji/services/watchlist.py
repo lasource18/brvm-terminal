@@ -34,9 +34,9 @@ def _db_path() -> Path:
     return Path(settings.db_path)
 
 
-def list_all() -> list[WatchlistView]:
+def list_all(account_id: int) -> list[WatchlistView]:
     with connect(_db_path()) as conn:
-        rows = repo.list_all(conn)
+        rows = repo.list_all(conn, account_id)
         return [
             WatchlistView(
                 id=r["id"],
@@ -48,17 +48,17 @@ def list_all() -> list[WatchlistView]:
         ]
 
 
-def create(name: str) -> WatchlistView:
+def create(account_id: int, name: str) -> WatchlistView:
     slug = repo.slugify(name)
     with connect(_db_path()) as conn:
         # Pre-check the slug: cheap, race-free enough for a single-user
         # tool, and lets us raise a typed error instead of catching an
         # IntegrityError string. A truly concurrent creation still hits
         # the IntegrityError branch below.
-        if repo.get_by_slug(conn, slug) is not None:
+        if repo.get_by_slug(conn, account_id, slug) is not None:
             raise WatchlistExists(slug)
         try:
-            wl_id = repo.create(conn, name, slug=slug)
+            wl_id = repo.create(conn, account_id, name, slug=slug)
         except sqlite3.IntegrityError as e:
             raise WatchlistExists(slug) from e
         row = conn.execute("SELECT * FROM watchlists WHERE id = ?", (wl_id,)).fetchone()
@@ -67,9 +67,9 @@ def create(name: str) -> WatchlistView:
     )
 
 
-def get_with_quotes(slug: str) -> WatchlistView:
+def get_with_quotes(account_id: int, slug: str) -> WatchlistView:
     with connect(_db_path()) as conn:
-        wl = repo.get_by_slug(conn, slug)
+        wl = repo.get_by_slug(conn, account_id, slug)
         if wl is None:
             raise WatchlistNotFound(slug)
         # F-38: bond tickers have no `quote_snapshots` row — their
@@ -152,10 +152,10 @@ def get_with_quotes(slug: str) -> WatchlistView:
     )
 
 
-def add_item(slug: str, ticker: str) -> None:
+def add_item(account_id: int, slug: str, ticker: str) -> None:
     ticker = ticker.upper().strip()
     with connect(_db_path()) as conn:
-        wl = repo.get_by_slug(conn, slug)
+        wl = repo.get_by_slug(conn, account_id, slug)
         if wl is None:
             raise WatchlistNotFound(slug)
         known = conn.execute(
@@ -163,20 +163,20 @@ def add_item(slug: str, ticker: str) -> None:
         ).fetchone()
         if not known:
             raise TickerUnknown(ticker)
-        repo.add_item(conn, wl["id"], ticker)
+        repo.add_item(conn, account_id, wl["id"], ticker)
 
 
-def remove_item(slug: str, ticker: str) -> None:
+def remove_item(account_id: int, slug: str, ticker: str) -> None:
     ticker = ticker.upper().strip()
     with connect(_db_path()) as conn:
-        wl = repo.get_by_slug(conn, slug)
+        wl = repo.get_by_slug(conn, account_id, slug)
         if wl is None:
             raise WatchlistNotFound(slug)
-        repo.remove_item(conn, wl["id"], ticker)
+        repo.remove_item(conn, account_id, wl["id"], ticker)
 
 
-def delete(slug: str) -> None:
+def delete(account_id: int, slug: str) -> None:
     with connect(_db_path()) as conn:
-        n = repo.delete(conn, slug)
+        n = repo.delete(conn, account_id, slug)
     if n == 0:
         raise WatchlistNotFound(slug)
