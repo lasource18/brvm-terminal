@@ -609,6 +609,189 @@ async def test_ticker_tabs_switch_kind_reflows_visibility(tui_db):
         assert tabs.active == "tab-bond"
 
 
+async def test_ticker_tabs_land_on_kind_default_from_any_starting_tab(tui_db):
+    """Regression for the #59 flake: the landing tab must not depend on
+    which tab the user was parked on (nor on the interpreter's hash seed).
+
+    The old reflow hid tabs before showing the new kind's, so hiding the
+    *active* tab made Textual pick a successor itself and post a queued
+    `Tabs.TabActivated`. That message arrived after the explicit
+    `tabs.active = default` and overwrote it — with a different tab
+    depending on set iteration order, which is why it only failed on some
+    runs.
+    """
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    equity_tabs = (
+        "tab-overview", "tab-chart", "tab-news", "tab-financials",
+        "tab-peers", "tab-actions", "tab-analyst",
+    )
+    # (target ticker, tabs the target kind keeps, the kind's default). A
+    # tab that survives the kind change keeps the selection; only an
+    # invalidated one falls back to the default.
+    cases = (
+        ("BIDCO4", {"tab-overview", "tab-chart", "tab-news"}, "tab-bond"),
+        ("BRVMC", {"tab-chart", "tab-news"}, "tab-chart"),
+    )
+    # One app for the whole matrix: each case parks on an equity tab,
+    # switches kind, asserts, then returns to the equity to reset. Spinning
+    # up an app per case is 14x the startup cost for no extra coverage.
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        tabs = tv.query_one(TabbedContent)
+
+        for target, survives, default in cases:
+            for start in equity_tabs:
+                expected = start if start in survives else default
+                tv.set_ticker("SNTS")
+                await pilot.pause()
+                tabs.active = start
+                await pilot.pause()
+                assert tabs.active == start
+
+                tv.set_ticker(target)
+                await pilot.pause()
+                assert tabs.active == expected, (
+                    f"{target}: started on {start}, expected to land on "
+                    f"{expected}, got {tabs.active}"
+                )
+                assert tv._active_tab == expected
+                assert tabs.get_tab(expected).display is True
+
+
+async def test_ticker_tab_reflow_never_hides_the_active_tab(tui_db):
+    """The invariant behind the fix, asserted directly.
+
+    `Tabs.hide()` will not leave a hidden tab active: it picks a successor
+    and posts a `TabActivated` for it. Since that message is processed
+    after `_apply_tab_visibility` returns, it clobbers the tab we chose.
+    So the reflow must re-point `active` at the new kind's default
+    *before* it hides anything.
+    """
+    from textual.widgets import TabbedContent
+
+    from brvm.db import connect
+    from brvm.models import Security
+    from brvm.store import securities as sec_repo
+
+    with connect(tui_db) as conn:
+        sec_repo.upsert(conn, [
+            Security(
+                ticker="BIDCO4", name="BIDC.O4 SUPRA 6.10% 2027",
+                kind="bond", country="CI", coupon_rate=6.10,
+                maturity_year=2027, issuer_name="BIDC",
+            ),
+        ])
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+        tabs = tv.query_one(TabbedContent)
+        tabs.active = "tab-peers"
+        await pilot.pause()
+
+        hidden_while_active: list[str] = []
+        real_hide_tab = tabs.hide_tab
+
+        def spy_hide_tab(tab_id: str) -> None:
+            if tab_id == tabs.active:
+                hidden_while_active.append(tab_id)
+            real_hide_tab(tab_id)
+
+        tabs.hide_tab = spy_hide_tab  # type: ignore[method-assign]
+        try:
+            tv.set_ticker("BIDCO4")
+            await pilot.pause()
+        finally:
+            del tabs.hide_tab  # type: ignore[attr-defined]
+
+        assert hidden_while_active == [], (
+            f"reflow hid the active tab(s) {hidden_while_active}; Textual "
+            "will re-point `active` itself and post a queued TabActivated "
+            "that overrides the kind default"
+        )
+        assert tabs.active == "tab-bond"
+
+
+async def test_paint_chrome_survives_a_missing_widget_tree(tui_db):
+    """`_paint_chrome` runs on a 1s interval, so it can fire after the
+    chrome is gone (app exit, screen swap). It used to `query_one("#clock")`
+    unguarded, and the escaping `NoMatches` surfaced as a worker crash that
+    failed whichever test happened to be running — a whole-file flake that
+    only showed up under app churn. A missing tree is a cosmetic no-op.
+    """
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Sanity: the guard isn't masking a chrome that never painted.
+        assert "Abidjan" in str(app.query_one("#clock", Static).render())
+
+        # Reproduce the teardown shape: screen alive, chrome widgets gone.
+        await app.query_one("#clock", Static).remove()
+        await pilot.pause()
+        app._paint_chrome()  # must not raise
+
+    # And after the app has fully exited (no screens on the stack).
+    app._paint_chrome()  # must not raise
+
+
+async def test_worker_paints_survive_a_torn_down_view(tui_db):
+    """The `_paint_*` callbacks are handed back to the main thread after a
+    network fetch, so the view can be gone by the time they land (app exit,
+    screen swap). They guarded a stale *ticker* but not a missing widget
+    tree, so an in-flight profile/chart/peers fetch at teardown raised
+    NoMatches inside the worker — which Textual re-raises as WorkerFailed
+    against whichever test was running next, not the one that leaked it.
+    """
+    from textual.widgets import DataTable
+    from textual_plotext import PlotextPlot
+
+    app = BRVMTerminalApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tv = app.query_one(TickerView)
+        tv.set_ticker("SNTS")
+        await pilot.pause()
+
+        # Drop the widgets the paint callbacks target, then deliver the
+        # callbacks as a late worker would. None of them may raise.
+        for selector, kind in (
+            ("#overview-body", Static),
+            ("#chart-plot", PlotextPlot),
+            ("#peers-table", DataTable),
+        ):
+            await tv.query_one(selector, kind).remove()
+        await pilot.pause()
+
+        tv._paint_overview("SNTS", None, None)
+        tv._paint_overview("SNTS", "boom", None)
+        tv._paint_chart("SNTS", "boom", None)
+        tv._paint_peers("SNTS", "boom", None)
+
+        # And the helper reports the absence rather than raising.
+        assert tv._live("#overview-body", Static) is None
+
+
 async def test_clicking_empty_ticker_header_opens_palette(tui_db):
     """A pointer-only user landing on the empty Ticker view can click
     the "Select a ticker…" prompt to open the picker — no need to

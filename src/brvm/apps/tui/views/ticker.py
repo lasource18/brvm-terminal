@@ -27,6 +27,7 @@ from textual import events as textual_events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
 from textual.worker import Worker  # noqa: F401 — re-export type for future callers
@@ -53,10 +54,15 @@ from brvm.services import (
 # render "not applicable" or expose zero-signal DB rows). Mirrors the web
 # tab registry in `apps/web/tabs.py` — see the `hidden_for_kinds` field
 # there. Any tab id added to compose() must also appear here.
-_ALL_TAB_IDS: frozenset[str] = frozenset({
+#
+# Ordered (and kept in compose() order) on purpose: `_apply_tab_visibility`
+# iterates it, and a set's iteration order varies per interpreter run under
+# PYTHONHASHSEED randomization. That made the show/hide sequence — and with
+# it the tab Textual lands on — differ between otherwise identical runs.
+_ALL_TAB_IDS: tuple[str, ...] = (
     "tab-overview", "tab-chart", "tab-news", "tab-financials",
     "tab-peers", "tab-actions", "tab-analyst", "tab-bond",
-})
+)
 _VISIBLE_TABS_BY_KIND: dict[str, frozenset[str]] = {
     "equity": frozenset({
         "tab-overview", "tab-chart", "tab-news", "tab-financials",
@@ -183,32 +189,49 @@ class TickerView(Vertical):
         (Chart + News) that carry index-shaped data. Mirrors the web
         tabs.py registry.
         """
-        visible = _VISIBLE_TABS_BY_KIND.get(kind, _ALL_TAB_IDS)
+        visible = _VISIBLE_TABS_BY_KIND.get(kind, frozenset(_ALL_TAB_IDS))
         try:
             tabs = self.query_one(TabbedContent)
         except Exception:  # pragma: no cover - defensive during compose
             return
+
+        # Order matters: show → re-point active → hide. Textual's
+        # `Tabs.hide()` refuses to leave a hidden tab active, so hiding the
+        # active one makes it pick a successor itself and *post* a
+        # `Tabs.TabActivated`. That message is queued, so it lands after the
+        # `tabs.active = default` below and `TabbedContent` faithfully
+        # writes `active` back from it — silently overriding our choice with
+        # whatever `_next_active` happened to reach. Retiring the active tab
+        # before any hide runs keeps that message from ever being posted.
         for tab_id in _ALL_TAB_IDS:
-            try:
-                if tab_id in visible:
+            if tab_id in visible:
+                try:
                     tabs.show_tab(tab_id)
-                else:
-                    tabs.hide_tab(tab_id)
-            except Exception:  # pragma: no cover - Textual may raise on unmounted
-                continue
-        # If the currently-active tab was just hidden, jump to the kind's
-        # default (bonds land on Bond details, indexes on Chart, equities
-        # on Overview). Otherwise leave the selection alone so a user
-        # opening a same-kind ticker stays on the tab they had.
+                except Exception:  # pragma: no cover - Textual may raise on unmounted
+                    continue
+
+        # If the active tab is about to be hidden, jump to the kind's default
+        # (bonds land on Bond details, indexes on Chart, equities on
+        # Overview). Otherwise leave the selection alone so a user opening a
+        # same-kind ticker stays on the tab they had.
         if self._active_tab not in visible:
-            default = _DEFAULT_TAB_BY_KIND.get(
-                kind, next(iter(visible), "tab-overview")
-            )
+            default = _DEFAULT_TAB_BY_KIND.get(kind, "")
+            if default not in visible:
+                default = next(
+                    (t for t in _ALL_TAB_IDS if t in visible), "tab-overview"
+                )
             try:
                 tabs.active = default
                 self._active_tab = default
             except Exception:  # pragma: no cover - defensive
                 pass
+
+        for tab_id in _ALL_TAB_IDS:
+            if tab_id not in visible:
+                try:
+                    tabs.hide_tab(tab_id)
+                except Exception:  # pragma: no cover - Textual may raise on unmounted
+                    continue
 
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
@@ -312,12 +335,29 @@ class TickerView(Vertical):
             return
         self.app.call_from_thread(self._paint_overview, ticker, None, profile)
 
+    def _live(self, selector: str, kind: type) -> Any:
+        """Look up a child widget, or None if it is no longer mounted.
+
+        The `_paint_*` callbacks below are handed back to the main thread by
+        `call_from_thread` after an arbitrary fetch delay, so the view can be
+        torn down (app exit, screen swap) while a worker is still in flight.
+        They already skip a *stale ticker*; this covers the *gone tree*, which
+        otherwise raises NoMatches inside the worker and surfaces as a crash
+        far from the code that caused it.
+        """
+        try:
+            return self.query_one(selector, kind)
+        except NoMatches:
+            return None
+
     def _paint_overview(self, ticker: str, error: str | None, profile: Any) -> None:
         """Runs on the main thread. Guards against a stale worker
         finishing after the user has already opened a different ticker."""
         if ticker != self._ticker:
             return
-        body = self.query_one("#overview-body", Static)
+        body = self._live("#overview-body", Static)
+        if body is None:
+            return
         if error is not None:
             body.update(f"[{DIM}]description unavailable ({error})[/]")
             return
@@ -377,7 +417,9 @@ class TickerView(Vertical):
     def _paint_chart(self, ticker: str, error: str | None, bars: Any) -> None:
         if ticker != self._ticker:
             return
-        plot = self.query_one("#chart-plot", PlotextPlot)
+        plot = self._live("#chart-plot", PlotextPlot)
+        if plot is None:
+            return
         if error is not None:
             # Fall back to a title-only chart with the error inline so the
             # tab still renders instead of raising through the refresh loop.
@@ -508,7 +550,9 @@ class TickerView(Vertical):
         if error is not None:
             self.notify(f"peers fetch failed: {error}", severity="warning")
             return
-        table = self.query_one("#peers-table", DataTable)
+        table = self._live("#peers-table", DataTable)
+        if table is None:
+            return
         cursor = table.cursor_row
         table.clear()
         for p in view.peers:
