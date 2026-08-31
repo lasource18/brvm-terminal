@@ -1,4 +1,4 @@
-/* Bloomberg-ish dark terminal aesthetic. */
+/* Dark, dense terminal aesthetic. */
 
 Screen {
     background: $background;

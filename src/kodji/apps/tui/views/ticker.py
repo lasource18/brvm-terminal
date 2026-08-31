@@ -568,7 +568,7 @@ class TickerView(Vertical):
                 key=p.ticker,
             )
         # Phase 8g: median + mean summary rows underneath the peer list so
-        # the TUI matches the web tab's Bloomberg-style cross-compare.
+        # the TUI matches the web tab's peer cross-compare.
         # DataTable's `key` must be unique — use a synthetic key so a
         # subsequent refresh doesn't collide with a real ticker.
         stats = getattr(view, "stats", {}) or {}

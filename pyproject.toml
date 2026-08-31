@@ -1,7 +1,7 @@
 [project]
 name = "kodji-terminal"
 version = "0.1.0"
-description = "Lightweight Bloomberg-style terminal for the BRVM (Bourse Régionale des Valeurs Mobilières, WAEMU)."
+description = "Lightweight market terminal for the BRVM (Bourse Régionale des Valeurs Mobilières, WAEMU)."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "cmguinan", email = "cmguinan@yahoo.fr" }]
