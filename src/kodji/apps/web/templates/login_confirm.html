@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sign in"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  {# This page is what the emailed link opens. It signs nobody in on its
+     own: mail scanners fetch every URL in a message, and consuming the
+     challenge on GET would burn it before the user ever clicked. The POST
+     below is the step that actually signs in. #}
+  <div class="auth-card">
+    <h1 class="page-title">{{ "Sign in"|t }}</h1>
+    <p class="auth-lede">
+      {{ "Continue as"|t }} <strong>{{ email }}</strong>?
+    </p>
+    <form class="auth-form" method="post" action="/login/t/{{ token }}">
+      <button type="submit" autofocus>{{ "Sign in"|t }}</button>
+    </form>
+  </div>
+{% endblock %}

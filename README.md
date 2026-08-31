@@ -25,6 +25,8 @@ See [`docs/phases.md`](./docs/phases.md) for the running log.
 - [x] Phase 6b — daily brief (post-close, Haiku)
 - [x] Phase 6c — analyst-note synthesis (weekly per-ticker, Sonnet)
 - [x] Phase 7 — cash-flow extraction (P/FCF, FCF yield, EV/EBITDA) + filings-link references on the Financials tab
+- [x] PR-X — accounts, users and per-account ownership
+- [x] PR-X2 — magic-link sign-in (Resend) + session cookies
 
 ## Requirements
 
@@ -512,6 +514,73 @@ State bond issuer country is derived from `ETAT DU {country}` in the
 name (mapping covers all eight WAEMU members). Regional and private
 bonds stay `country=NULL` — they aren't tied to a single country and
 we prefer honest nulls over guesses.
+
+## Try it (PR-X2 demo — magic-link sign-in)
+
+No password anywhere. You submit an email address, we mail a link **and**
+a 6-digit code, and either one signs you in.
+
+With no `RESEND_API_KEY` set, the mailer logs the message instead of
+sending it — so you can complete a real sign-in locally without signing
+up for anything:
+
+```bash
+just migrate
+just dev                       # http://127.0.0.1:8765/login
+```
+
+Submit your address, then read the link (or the code) off the terminal:
+
+```
+WARNING kodji.services.mailer: email not sent (no RESEND_API_KEY) — to=you@example.ci subject=Votre lien de connexion Kodji
+Bonjour,
+
+Voici votre lien de connexion à Kodji Terminal :
+
+    http://127.0.0.1:8765/login/t/lS3k...
+
+Ou saisissez ce code dans l'onglet où vous avez demandé la connexion :
+
+    418207
+```
+
+Paste the link, or type the code into the form that's already on screen.
+The topbar then shows your address and a **Sign out** button, and the
+watchlists and alert rules you create belong to your account and nobody
+else's.
+
+### Sending real email
+
+Resend is the provider (chosen 31 Aug 2026 — see
+[`docs/kodji-plan.md`](./docs/kodji-plan.md)). Two settings turn it on:
+
+```bash
+# .env
+RESEND_API_KEY=re_...
+EMAIL_FROM=Kodji <connexion@mail.kodji.ci>
+PUBLIC_BASE_URL=https://kodji.ci      # required in production, see below
+```
+
+Three things matter more than the vendor choice:
+
+- **Authenticate a sending subdomain**, not the apex: SPF, DKIM and
+  DMARC on `mail.kodji.ci`. Gmail and Yahoo have required alignment
+  from bulk senders since 2024, and a good chunk of BRVM's audience is
+  on one or the other.
+- **Keep the daily brief off this sender.** A brief blast is bulk-shaped
+  and attracts complaints; sign-in mail must not share its reputation.
+- **Set `PUBLIC_BASE_URL` in production.** Behind Cloudflare and Caddy
+  the request's own host is whatever the last proxy claimed, and a link
+  built from a spoofed `Host` header is a live credential pointed at
+  someone else's domain.
+
+### Turning sign-in from optional into required
+
+`AUTH_REQUIRED` is `false` today, which keeps the existing single-user
+box working exactly as it does: a request with no session resolves to
+the account migration 0017 seeded. **Set it to `true` before the app is
+reachable by anyone but you** — with it off, an anonymous visitor reads
+that account's data. PR-Y flips it alongside plan gating.
 
 ## Try it (Phase 1 demo)
 

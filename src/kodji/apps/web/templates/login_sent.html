@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ "Check your email"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    <h1 class="page-title">{{ "Check your email"|t }}</h1>
+    <p class="auth-lede">
+      {{ "We sent a sign-in link and a code to"|t }} <strong>{{ email }}</strong>.
+    </p>
+    <p class="dim auth-lede">
+      {# The code exists for the case the link can't serve: a mail app that
+         opens links in its own browser, or reading mail on a second device. #}
+      {{ "Open the link on this device, or type the code below if you're reading your mail somewhere else."|t }}
+    </p>
+
+    {% if error %}
+      <p class="auth-error">{{ "That code isn't right, or it has expired. Ask for a new one."|t }}</p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/login/code">
+      <input type="hidden" name="email" value="{{ email }}">
+      <label for="code">{{ "6-digit code"|t }}</label>
+      <input id="code" type="text" name="code" required autofocus
+             inputmode="numeric" pattern="[0-9]*" maxlength="6"
+             autocomplete="one-time-code" spellcheck="false"
+             class="auth-code" placeholder="000000">
+      <button type="submit">{{ "Sign in"|t }}</button>
+    </form>
+
+    <p class="dim auth-foot">
+      <a href="/login">{{ "Send another link"|t }}</a>
+    </p>
+  </div>
+{% endblock %}

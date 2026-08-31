@@ -121,6 +121,12 @@ def client(monkeypatch, tmp_path):
     # page's "no webhook" badge disappears if DISCORD_WEBHOOK_URL is set).
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    # Same reason, with teeth: a developer with a real RESEND_API_KEY in
+    # .env would otherwise have the test suite send live email.
+    monkeypatch.setenv("RESEND_API_KEY", "")
+    monkeypatch.setenv("EMAIL_FROM", "")
+    monkeypatch.setenv("PUBLIC_BASE_URL", "")
+    monkeypatch.setenv("AUTH_REQUIRED", "false")
     reset_module_state()
     _seed(db_path)
 

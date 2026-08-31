@@ -44,6 +44,19 @@
       <a href="/lang/en?next={{ current_path or '/' }}"
          class="{% if locale == 'en' %}lang-active{% endif %}">EN</a>
     </span>
+    {# Signed-in identity, or the way in. `identity` comes from base_ctx,
+       so it's present on every full-page render and absent on fragments. #}
+    <span class="account">
+      {% if identity %}
+        <span class="account-email" title="{{ identity.email }}">{{ identity.email }}</span>
+        {# POST so a link prefetch or an <img> tag can't sign anyone out. #}
+        <form method="post" action="/logout" class="logout-form">
+          <button type="submit">{{ "Sign out"|t }}</button>
+        </form>
+      {% else %}
+        <a href="/login">{{ "Sign in"|t }}</a>
+      {% endif %}
+    </span>
     <span class="clock">{{ abidjan_now }}</span>
     {% if market_open %}
       <span class="badge open">{{ "MARKET OPEN"|t }}</span>

@@ -12,6 +12,7 @@ from jinja2.runtime import Context
 from kodji import __version__
 from kodji.clock import is_market_open, now_abidjan
 from kodji.i18n import DEFAULT_LOCALE, Locale, normalize, translate
+from kodji.services import accounts as accounts_svc
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -76,4 +77,8 @@ def base_ctx(request: Request) -> dict:
         # Powers the FR|EN toggle links so clicking a language returns
         # the reader to the same page they're on.
         "current_path": request.url.path,
+        # None when signed out. One indexed lookup on the session cookie
+        # per full-page render; fragments don't call base_ctx, so HTMX
+        # traffic doesn't pay for it.
+        "identity": accounts_svc.identity_for(request),
     }

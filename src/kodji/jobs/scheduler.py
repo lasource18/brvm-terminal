@@ -15,6 +15,7 @@ from kodji.logging import get
 from kodji.services.alerts import deliver_pending as deliver_alerts
 from kodji.services.alerts import evaluate_all as evaluate_alerts
 from kodji.services.analyst_notes import generate_for_all as generate_analyst_notes
+from kodji.services.auth import purge_expired as purge_expired_sessions
 from kodji.services.brief import generate_for as generate_brief
 from kodji.services.company_facts import refresh_all as refresh_company_facts
 from kodji.services.enrichment import enrich_sectors
@@ -217,6 +218,22 @@ def _analyst_notes_job() -> None:
         log.exception("scheduled analyst notes failed: %s", e)
 
 
+def _sessions_purge_job() -> None:
+    """Drop expired sessions and spent sign-in challenges.
+
+    Pure housekeeping — an expired session is already unusable, because
+    the read path filters on `expires_utc` in SQL. This just stops the
+    two tables growing forever on a long-lived install.
+    """
+    try:
+        sessions, tokens = purge_expired_sessions()
+        if sessions or tokens:
+            log.info("scheduled session purge ok: sessions=%d login_tokens=%d",
+                     sessions, tokens)
+    except Exception as e:  # pragma: no cover - defensive; job must not kill scheduler
+        log.exception("scheduled session purge failed: %s", e)
+
+
 def build_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone=str(ABIDJAN))
     # Every 10 minutes during market hours.
@@ -382,6 +399,14 @@ def build_scheduler() -> BackgroundScheduler:
         _analyst_notes_job,
         CronTrigger(day_of_week="sat", hour="20", minute="0", timezone=str(ABIDJAN)),
         id="analyst_notes_weekly",
+        replace_existing=True,
+    )
+    # Session/challenge purge: daily at 03:30 Abidjan, deep in the quiet
+    # window between the hourly snapshot and the morning jobs.
+    sched.add_job(
+        _sessions_purge_job,
+        CronTrigger(hour="3", minute="30", timezone=str(ABIDJAN)),
+        id="sessions_purge_daily",
         replace_existing=True,
     )
     return sched

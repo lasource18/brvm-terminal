@@ -125,6 +125,38 @@ class Settings(BaseSettings):
     # pass doesn't hammer the API in a burst.
     notes_delay_between_s: float = 0.5
 
+    # --- Authentication + outbound email (PR-X2) ---
+    # Resend. Blank key → the mailer logs the message instead of sending
+    # it, so a fresh clone can still complete a sign-in from the log.
+    resend_api_key: str = ""
+    # Must be an address on a domain verified in Resend, e.g.
+    # "Kodji <connexion@mail.kodji.ci>". Sign-in mail gets its own
+    # subdomain so a future daily-brief blast cannot spend its reputation.
+    email_from: str = ""
+    # Absolute origin used to build magic links. Set it in production:
+    # behind Cloudflare + Caddy the request's own host/scheme is whatever
+    # the last proxy claimed, and a link built from a spoofed Host header
+    # is a credential sent to someone else's domain. Blank → derive from
+    # the request, which is right for local dev only.
+    public_base_url: str = ""
+    # Link and code lifetime. Twenty minutes is deliberately generous:
+    # on a mobile connection that drops, a five-minute link expires
+    # between "send" and "open" often enough to matter.
+    login_token_ttl_minutes: int = 20
+    # Wrong 6-digit guesses before a challenge is burned. The code has a
+    # 1-in-a-million space, which is only safe with a cap this tight.
+    login_code_max_attempts: int = 5
+    # Sign-in requests accepted per address per hour. Bounds both mailbox
+    # flooding of a third party and our own send volume.
+    login_max_per_hour: int = 5
+    session_ttl_days: int = 30
+    # OFF until PR-Y puts plan gating on every route. With it off, a
+    # request without a session still resolves to the migration's default
+    # account, which keeps the single-user deployment working exactly as
+    # it does today. Turn it on before the app is reachable by anyone but
+    # you — see `services/accounts.current_account_id`.
+    auth_required: bool = False
+
     http_user_agent: str = Field(default="kodji-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 
@@ -139,6 +171,18 @@ class Settings(BaseSettings):
     @property
     def has_discord(self) -> bool:
         return bool(self.discord_webhook_url)
+
+    @property
+    def has_email(self) -> bool:
+        """Both halves are needed: a key without a verified sender address
+        produces a 422 from Resend on every message."""
+        return bool(self.resend_api_key and self.email_from)
+
+    @property
+    def cookie_secure(self) -> bool:
+        """`Secure` on the session cookie everywhere but local dev, where
+        the app is served over plain http on 127.0.0.1."""
+        return self.app_env != "dev"
 
     @property
     def brief_daily_cap_micros(self) -> int:

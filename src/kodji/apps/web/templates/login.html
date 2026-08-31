@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ "Sign in"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    <h1 class="page-title">{{ "Sign in"|t }}</h1>
+    <p class="dim auth-lede">
+      {{ "No password. We email you a link and a 6-digit code — either one signs you in."|t }}
+    </p>
+
+    {% if error %}
+      <p class="auth-error">
+        {% if error == "invalid_email" %}
+          {{ "That doesn't look like an email address."|t }}
+        {% elif error == "send_failed" %}
+          {{ "We couldn't send that email just now. Try again in a moment."|t }}
+        {% else %}
+          {{ "That link has expired or has already been used. Ask for a new one."|t }}
+        {% endif %}
+      </p>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="/login">
+      <label for="email">{{ "Email address"|t }}</label>
+      <input id="email" type="email" name="email" required autofocus
+             autocomplete="email" spellcheck="false"
+             value="{{ email or '' }}" placeholder="vous@exemple.ci">
+      <button type="submit">{{ "Send me a link"|t }}</button>
+    </form>
+  </div>
+{% endblock %}
