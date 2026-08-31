@@ -18,9 +18,10 @@ import contextlib
 from pathlib import Path
 from typing import ClassVar
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
 from textual.widgets import ContentSwitcher, Footer, Header, Static
 
 from brvm.apps.tui.news_ticker import NewsTicker
@@ -110,7 +111,15 @@ class BRVMTerminalApp(App):
     # -- chrome ------------------------------------------------------------
 
     def _paint_chrome(self) -> None:
-        clock = self.query_one("#clock", Static)
+        # Runs on a 1s interval, so it can fire before the chrome has
+        # finished mounting or after it has been torn down (app exit,
+        # screen swap). There is nothing to paint in either case, and an
+        # escaping NoMatches surfaces as a worker crash rather than a
+        # cosmetic miss — so treat a missing tree as a no-op.
+        try:
+            clock = self.query_one("#clock", Static)
+        except (NoMatches, ScreenStackError):
+            return
         clock.update(f"{now_abidjan().strftime('%Y-%m-%d %H:%M:%S')} Abidjan")
 
         status = self.query_one("#market-status", Static)
