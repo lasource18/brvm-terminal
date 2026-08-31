@@ -531,7 +531,7 @@ def _list_prospectus_news(
 ) -> list[ProspectusNews]:
     """Match `news_items` where issuer_name equals or the title mentions
     the issuer + 'obligation' / 'cotation' / 'admission' — a low-effort
-    Bloomberg-style prospectus link surface. Ordered newest-first."""
+    prospectus link surface. Ordered newest-first."""
     if not issuer_name:
         return []
     like_issuer = f"%{issuer_name}%"

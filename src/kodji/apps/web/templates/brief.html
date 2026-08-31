@@ -10,9 +10,6 @@
           <h1 class="page-title">{{ "Brief"|t }} · {{ brief.day }}</h1>
           <span class="dim">
             {{ "generated"|t }} {{ (brief.generated_utc or '')[:16].replace('T', ' ') }}
-            · {{ brief.model }}
-            · {{ brief.input_tokens }} in / {{ brief.output_tokens }} out
-            (${{ '%.4f'|format(brief.usd_micros / 1_000_000) }})
           </span>
           <span class="badge machine">{{ "machine-generated"|t }}</span>
           {% if translation_pending %}

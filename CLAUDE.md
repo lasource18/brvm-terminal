@@ -1,6 +1,6 @@
-# BRVM Terminal
+# Kodji Terminal
 
-A lightweight "Bloomberg terminal" for securities listed on the BRVM
+A lightweight market terminal for securities listed on the BRVM
 (Bourse Régionale des Valeurs Mobilières, Abidjan — regional exchange for
 the 8 WAEMU countries). Runs on an 8GB MacBook and a small Hetzner VPS
 (CX22, 4GB RAM). Single user. Optimize for low memory, low complexity,

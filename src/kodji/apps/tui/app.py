@@ -44,7 +44,6 @@ class KodjiTerminalApp(App):
 
     CSS_PATH = Path(__file__).with_name("style.tcss")
     TITLE = "kodji-terminal"
-    SUB_TITLE = "Bloomberg-ish"
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("h", "show('home')", "home"),

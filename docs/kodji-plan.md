@@ -107,22 +107,29 @@ New migrations:
 
 - `users` — id, email, created_utc, locale, tz (FR/EN + Abidjan/Montreal already exist
   as settings to hang off this)
+- `accounts` — id, name, created_utc. A personal account is auto-created per user at
+  signup; `account_members(account_id, user_id, role)` carries the join. **Decided
+  2026-08-30:** teams are plausible, so ownership keys on `account_id` from day one
+  rather than being retrofitted across every scoped table later.
 - `sessions` — token hash, user_id, expires_utc
-- `subscriptions` — user_id, plan, provider, provider_ref, status, current_period_end_utc
-- `push_subscriptions` — user_id, endpoint, keys (for P5)
-- `owner_id` on `watchlists` and `alert_rules`; drop the global slug constraint for
-  `UNIQUE(owner_id, slug)`
-- Backfill: existing rows become user #1
+- `subscriptions` — **account_id**, plan, provider, provider_ref, status,
+  current_period_end_utc (a plan is bought by an account, not a person)
+- `push_subscriptions` — user_id, endpoint, keys (for P5) — push is per *device*, so
+  this one stays keyed on the user
+- `account_id` on `watchlists` and `alert_rules`; drop the global slug constraint for
+  `UNIQUE(account_id, slug)`
+- Backfill: existing rows become the personal account of user #1
 
 Then scope every query in `store/watchlists.py` and `store/alerts.py`. This is the bulk
-of the work — mechanical, but where a single missed `WHERE owner_id` becomes one
+of the work — mechanical, but where a single missed `WHERE account_id` becomes one
 customer reading another's data.
 
-**Technique:** make repo functions *require* an owner argument rather than defaulting it.
+**Technique:** make repo functions *require* an `account_id` argument rather than
+defaulting it.
 A required positional turns "did I miss a call site?" into a type-checker and
 test-collection error, and you have 754 tests to surface them.
 
-**Stays shared — do NOT add `owner_id`:** `securities`, `quotes`, `daily_bars`, `news`,
+**Stays shared — do NOT add `account_id`:** `securities`, `quotes`, `daily_bars`, `news`,
 `filings`, `financials`, `briefs`, `analyst_notes`. That decision is the entire economic
 story — see P3.
 
@@ -159,7 +166,9 @@ Raw facts free, your work paid.
 
 | Free | Paid |
 | --- | --- |
-| Quotes and index levels | Chart (history + plotting) |
+| Quotes **delayed 15 min**, index levels | Quotes at full scrape freshness |
+| Watchlist capped at **10 securities** | Unlimited watchlists |
+| — | Chart (history + plotting) |
 | News feed (untagged listing) | Daily brief |
 | Security directory and description | Analyst view |
 | Bond reference — Overview tab | Ratios and Peers |
@@ -242,22 +251,38 @@ Continuing the PR-letter convention from where PR-U left off.
 | | Ships | Note |
 | --- | --- | --- |
 | **P0** | Verify, don't build | Stripe country list · Flutterwave CI onboarding · kodji domain + OAPI trademark. All three can change what you build. |
-| **PR-V** | Rename to kodji | 785 import sites, zero behaviour change, green suite. Alone and first. |
-| **PR-W** | Users, sessions, ownership | Migrations 0017+, owner scoping, magic-link auth. The big one. |
-| **PR-X** | Plan gating | `TabSpec.min_plan` + route-level enforcement on pages/fragments/API, with the leak test. |
-| **PR-Y** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
-| **PR-Z** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
-| **PR-AA** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. |
-| **PR-AB** | TUI sync client | Post-launch. `kodji sync` plus packaging. |
+| **PR-V** | Rename to kodji | 785 import sites, zero behaviour change, green suite. Alone and first. **Shipped (#70).** |
+| **PR-W** | Production surface polish | Drop the "Bloomberg-ish" subtitle and hide model id + token counts + generation cost from the brief and analyst bylines. |
+| **PR-X** | Users, sessions, ownership | Migrations 0017+, owner scoping, magic-link auth. The big one. |
+| **PR-Y** | Plan gating | `TabSpec.min_plan`, the 15-min quote delay, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. |
+| **PR-Z** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
+| **PR-AA** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
+| **PR-AB** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. |
+| **PR-AC** | TUI sync client | Post-launch. `kodji sync` plus packaging. |
 
-## Open questions
+## Answered (2026-08-30)
 
-- **Price point in XOF?** Anchor against what a Sikafinance or Richbourse subscription
-  costs locally, rather than converting a dollar price that won't land in the market
-  you're selling to.
-- **What limits the free tier?** Delayed quotes, a watchlist cap, or purely which tabs
-  are visible. Tab-only is simplest to build and easiest to explain.
-- **Teams, ever?** If organizations are even plausible, make the ownership column
-  `account_id` rather than `user_id` in PR-W, with a personal account auto-created per
-  user. Costs nothing now; retrofitting after you have paying customers is a migration
-  across every scoped table.
+- **Price point.** Anchor on what a Sikafinance or Richbourse subscription costs
+  locally, then price *above* it to reflect the added features and the downloadable
+  TUI. The exact XOF figure still needs a check of both competitors' current rates —
+  it is the one input this plan does not carry.
+- **Free tier.** Three limits, on top of tab visibility:
+  - quotes delayed **15 minutes**
+  - watchlist capped at **10 securities**
+  - paid tabs hidden (Chart, Brief, Analyst view, Ratios, Peers, Yield & Duration,
+    Cash flow, Alerts)
+- **Teams: plausible.** Ownership keys on **`account_id`, not `user_id`** — a personal
+  account is auto-created per user at signup. This is settled and PR-X depends on it.
+
+### What the free-tier limits cost to build
+
+The 15-minute delay is the only one with real design weight. `quotes` rows carry their
+own `fetched_utc`, so the delay is a read-side filter — serve a free user the newest
+snapshot older than 15 minutes rather than the newest snapshot. Two consequences worth
+planning for:
+
+- It must be enforced in `services/`, not the templates, or the JSON API leaks live
+  quotes to free accounts.
+- The BRVM feed is already ~15 minutes delayed at source. Confirm what your scrape
+  actually carries before advertising "real-time" to paid users — the honest paid
+  claim may be "no additional delay" rather than "live".

@@ -360,7 +360,7 @@ readers don't mistake the synthesis for editorial commentary.
 ## Try it (Phase 5 demo — Textual TUI)
 
 The TUI reads the same SQLite as the web app and calls the same
-services layer. A Bloomberg-ish shell with a persistent watchlist
+services layer. A dense terminal shell with a persistent watchlist
 sidebar and a right pane that swaps between screens.
 
 ```bash
@@ -368,7 +368,7 @@ just tui              # or: uv run python -m kodji.apps.tui
 # also available as `kodji-tui` on the PATH after `just sync`
 ```
 
-Layout (Bloomberg-ish):
+Layout:
 
 ```
 ┌ header ─────────────────────────────────────────────────────────┐
