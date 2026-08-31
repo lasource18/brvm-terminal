@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Security
-from brvm.sources import sikafinance
-from brvm.store import news as news_repo
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Security
+from kodji.sources import sikafinance
+from kodji.store import news as news_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
@@ -62,10 +62,10 @@ def _patch_fetchers(monkeypatch, fixtures_dir: Path) -> None:
 
 
 def test_poll_all_ingests_and_dedupes(monkeypatch, tmp_path, fixtures_dir):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import news as svc
+    from kodji.services import news as svc
 
     _seed_db(db_path)
     _patch_fetchers(monkeypatch, fixtures_dir)
@@ -111,10 +111,10 @@ def test_poll_all_ingests_and_dedupes(monkeypatch, tmp_path, fixtures_dir):
 def test_poll_all_survives_ticker_miss(monkeypatch, tmp_path, fixtures_dir):
     """If a communiqué issuer doesn't match any known security, the ingest
     still succeeds — ticker_hint is just NULL for that row."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import news as svc
+    from kodji.services import news as svc
 
     # Seed no securities at all -> nothing to match against.
     with connect(db_path) as conn:

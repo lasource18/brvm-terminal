@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from brvm.sources._dedupe import news_hash
+from kodji.sources._dedupe import news_hash
 
 
 def test_hash_is_deterministic():

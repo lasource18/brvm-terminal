@@ -1,0 +1,18 @@
+[Unit]
+Description=kodji-terminal (FastAPI + APScheduler)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brvm
+Group=brvm
+WorkingDirectory=/opt/kodji-terminal
+EnvironmentFile=/opt/kodji-terminal/.env
+ExecStart=/opt/kodji-terminal/.venv/bin/uvicorn kodji.apps.web.main:app --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+MemoryMax=384M
+
+[Install]
+WantedBy=multi-user.target

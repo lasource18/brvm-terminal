@@ -1,0 +1,818 @@
+"""Per-ticker view: quote header + tabbed content.
+
+Tabs mirror the web `/s/{ticker}` page. Per-kind visibility follows
+`apps/web/tabs.py`:
+
+* **equity**: Overview, Chart, News, Financials, Peers, Corp actions,
+  Analyst view
+* **index**: Chart, News (indexes have no fundamentals, no peers, no
+  dividends — every other tab used to render zero-signal N/A copy)
+* **bond**: Overview (DES reference), Chart, News, Bond details
+  (CSHF + YAS + REL composite)
+
+The Daily brief lives on Home — it's a global summary, not a per-
+ticker artefact — so no Brief tab here.
+
+Every non-table tab wraps its body in `VerticalScroll` so long content
+(long descriptions, wide financials tables, multi-paragraph markdown
+notes) scrolls with the mouse wheel / PgUp / PgDn instead of getting
+clipped at the tab area's height.
+"""
+
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+from textual import events as textual_events
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.message import Message
+from textual.widgets import DataTable, Markdown, Static, TabbedContent, TabPane
+from textual.worker import Worker  # noqa: F401 — re-export type for future callers
+from textual_plotext import PlotextPlot
+
+from kodji.apps.tui.format import ACCENT, DIM, coloured_pct, link_cell, num
+from kodji.services import (
+    analyst_notes,
+    company,
+    fundamentals,
+    history,
+    market,
+)
+from kodji.services import (
+    bonds as bonds_svc,
+)
+from kodji.services import (
+    news as news_svc,
+)
+
+# Per-kind visible tab set. Bonds don't get equity concerns (Peers,
+# Financials, Corp actions, Analyst); equities don't get the Bond details
+# composite; indexes drop everything but Chart and News (the rest either
+# render "not applicable" or expose zero-signal DB rows). Mirrors the web
+# tab registry in `apps/web/tabs.py` — see the `hidden_for_kinds` field
+# there. Any tab id added to compose() must also appear here.
+#
+# Ordered (and kept in compose() order) on purpose: `_apply_tab_visibility`
+# iterates it, and a set's iteration order varies per interpreter run under
+# PYTHONHASHSEED randomization. That made the show/hide sequence — and with
+# it the tab Textual lands on — differ between otherwise identical runs.
+_ALL_TAB_IDS: tuple[str, ...] = (
+    "tab-overview", "tab-chart", "tab-news", "tab-financials",
+    "tab-peers", "tab-actions", "tab-analyst", "tab-bond",
+)
+_VISIBLE_TABS_BY_KIND: dict[str, frozenset[str]] = {
+    "equity": frozenset({
+        "tab-overview", "tab-chart", "tab-news", "tab-financials",
+        "tab-peers", "tab-actions", "tab-analyst",
+    }),
+    "index": frozenset({"tab-chart", "tab-news"}),
+    "bond": frozenset({"tab-overview", "tab-chart", "tab-news", "tab-bond"}),
+}
+_DEFAULT_TAB_BY_KIND: dict[str, str] = {
+    "bond": "tab-bond",
+    "index": "tab-chart",
+    "equity": "tab-overview",
+}
+
+
+class TickerView(Vertical):
+    """Renders one security at a time. `set_ticker` swaps the target."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("o", "open_news_url", "open story", show=True),
+    ]
+
+    class HeaderClicked(Message):
+        """Fired when the quote-header is clicked. The app handles this
+        by pushing the search palette so a click on 'Select a ticker…'
+        opens the picker without the user having to remember ctrl+k."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._ticker: str | None = None
+        self._sec: object | None = None
+        # Row-id → URL for the currently-rendered News tab feed. Populated
+        # in `_render_news` so `o` opens the highlighted story.
+        self._news_urls: dict[str, str] = {}
+        # Phase 8j lazy tabs: which tab is currently on screen. Chart's
+        # `_render_chart` hits `services.history.get_history` which for a
+        # cold cache walks the DB + can trigger a sikafinance fetch — a
+        # non-trivial cost on every 30s scheduled refresh. Skip it unless
+        # the Chart tab is active. Same treatment for the Bond details
+        # tab (the only kind='bond' consumer of `services.bonds.get_bond_view`).
+        self._active_tab: str = "tab-overview"
+        # Signature of the last successful Chart render so switching to
+        # Chart mid-refresh replays the cached figure instead of
+        # re-fetching when nothing has changed underneath.
+        self._chart_last_ticker: str | None = None
+
+    @property
+    def has_ticker(self) -> bool:
+        """`True` once a ticker has been loaded. Callers (the app-level
+        `t` binding) use this to decide whether pressing the shortcut
+        should open the search palette or just re-show the last view."""
+        return self._ticker is not None
+
+    def compose(self) -> ComposeResult:
+        # Header is a clickable prompt when empty — the app listens to
+        # HeaderClicked to push the SearchPalette without needing the
+        # user to guess `ctrl+k`.
+        yield Static(
+            "[dim]Select a ticker…  (click here or press ctrl+k to search)[/]",
+            id="quote-header",
+        )
+        with TabbedContent(id="ticker-tabs"):
+            # VerticalScroll gives mouse-wheel + PgUp/PgDn scrolling for
+            # tab bodies that grow past the tab area's height. DataTable
+            # is already scrollable so its tabs skip the wrapper — nesting
+            # DataTable inside another scroll container hijacks the arrow
+            # keys used to move cells.
+            with TabPane("Overview", id="tab-overview"), VerticalScroll():
+                yield Static(id="overview-body")
+            with TabPane("Chart", id="tab-chart"):
+                # Use textual-plotext's PlotextPlot widget rather than
+                # `Static.update(plt.build())` — the latter dumps raw
+                # ANSI escape sequences into a Static which renders them
+                # as garbage (the "mix of description + pixels" symptom).
+                yield PlotextPlot(id="chart-plot")
+            with TabPane("News", id="tab-news"):
+                news_table = DataTable(id="ticker-news", cursor_type="row", zebra_stripes=True)
+                news_table.add_columns("When", "Rel", "Category", "Title", "Link")
+                yield news_table
+            with TabPane("Financials", id="tab-financials"), VerticalScroll():
+                yield Static(id="financials-body")
+            with TabPane("Peers", id="tab-peers"):
+                peers = DataTable(id="peers-table", cursor_type="row", zebra_stripes=True)
+                peers.add_columns("Ticker", "Name", "Last", "YTD%", "P/E", "ROE%", "NetMg%")
+                yield peers
+            with TabPane("Corp actions", id="tab-actions"):
+                actions = DataTable(id="actions-table", cursor_type="row", zebra_stripes=True)
+                actions.add_columns("Kind", "Ex date", "Pay date", "Amount", "Yield%", "Note")
+                yield actions
+            with TabPane("Analyst view", id="tab-analyst"), VerticalScroll():
+                yield Markdown("", id="analyst-md")
+            # Phase 8c: composite bond DES + CSHF + YAS + REL screen.
+            # Only meaningful when kind='bond'; renders "N/A" otherwise
+            # so the tab bar stays stable across kinds.
+            with TabPane("Bond details", id="tab-bond"), VerticalScroll():
+                yield Static(id="bond-body")
+
+    def on_click(self, event: textual_events.Click) -> None:
+        """Open the search palette when the user clicks the empty view.
+
+        Once a ticker is loaded the view is full of interactive widgets
+        (tabs, DataTables) and clicks should fall through to them, so
+        we only intercept when the view is still on the "Select a
+        ticker…" placeholder. This is what pointer-only users reach for
+        when they land here without knowing ctrl+k.
+        """
+        del event  # unused; presence of any click is enough
+        if not self.has_ticker:
+            self.post_message(self.HeaderClicked())
+
+    def set_ticker(self, ticker: str) -> None:
+        self._ticker = ticker.upper()
+        self._sec = market.get_security(self._ticker)
+        # Fresh ticker → the lazy Chart cache is stale.
+        self._chart_last_ticker = None
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        self._apply_tab_visibility(kind)
+        self.refresh_data()
+
+    def _apply_tab_visibility(self, kind: str) -> None:
+        """Show/hide tabs so a bond page doesn't advertise Peers /
+        Financials / Analyst (all N/A), an equity page doesn't dangle a
+        Bond details tab, and an index page only exposes the two tabs
+        (Chart + News) that carry index-shaped data. Mirrors the web
+        tabs.py registry.
+        """
+        visible = _VISIBLE_TABS_BY_KIND.get(kind, frozenset(_ALL_TAB_IDS))
+        try:
+            tabs = self.query_one(TabbedContent)
+        except Exception:  # pragma: no cover - defensive during compose
+            return
+
+        # Order matters: show → re-point active → hide. Textual's
+        # `Tabs.hide()` refuses to leave a hidden tab active, so hiding the
+        # active one makes it pick a successor itself and *post* a
+        # `Tabs.TabActivated`. That message is queued, so it lands after the
+        # `tabs.active = default` below and `TabbedContent` faithfully
+        # writes `active` back from it — silently overriding our choice with
+        # whatever `_next_active` happened to reach. Retiring the active tab
+        # before any hide runs keeps that message from ever being posted.
+        for tab_id in _ALL_TAB_IDS:
+            if tab_id in visible:
+                try:
+                    tabs.show_tab(tab_id)
+                except Exception:  # pragma: no cover - Textual may raise on unmounted
+                    continue
+
+        # If the active tab is about to be hidden, jump to the kind's default
+        # (bonds land on Bond details, indexes on Chart, equities on
+        # Overview). Otherwise leave the selection alone so a user opening a
+        # same-kind ticker stays on the tab they had.
+        if self._active_tab not in visible:
+            default = _DEFAULT_TAB_BY_KIND.get(kind, "")
+            if default not in visible:
+                default = next(
+                    (t for t in _ALL_TAB_IDS if t in visible), "tab-overview"
+                )
+            try:
+                tabs.active = default
+                self._active_tab = default
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+        for tab_id in _ALL_TAB_IDS:
+            if tab_id not in visible:
+                try:
+                    tabs.hide_tab(tab_id)
+                except Exception:  # pragma: no cover - Textual may raise on unmounted
+                    continue
+
+    def on_tabbed_content_tab_activated(
+        self, event: TabbedContent.TabActivated
+    ) -> None:
+        """Rerender the newly-activated tab when it holds a lazy body.
+
+        Chart's `get_history` fetch was firing every 30s regardless of
+        which tab the user was actually looking at. Now the render is
+        triggered on-activation and cached until the ticker changes."""
+        tab_id = event.pane.id if event.pane else None
+        if not tab_id:
+            return
+        self._active_tab = tab_id
+        if self._ticker is None:
+            return
+        if tab_id == "tab-chart" and self._chart_last_ticker != self._ticker:
+            self._render_chart()
+        elif tab_id == "tab-bond":
+            self._render_bond()
+
+    def refresh_data(self) -> None:
+        if self._ticker is None:
+            return
+        # Re-fetch the SecurityView so the header shows the latest quote.
+        self._sec = market.get_security(self._ticker)
+
+        self._render_header()
+        self._render_overview()
+        # Phase 8j: gate the expensive tabs on tab activation. Chart's
+        # history fetch and Bond details' composed view are the only two
+        # that touch the network / heavy SQL joins; Financials / Peers /
+        # News / Actions / Analyst read from cheap local queries and
+        # stay eager so tab-switch feels instant.
+        if self._active_tab == "tab-chart":
+            self._render_chart()
+        self._render_news()
+        self._render_financials()
+        self._render_peers()
+        self._render_actions()
+        self._render_analyst()
+        if self._active_tab == "tab-bond":
+            self._render_bond()
+
+    # -- individual sections ----------------------------------------------
+
+    def _render_header(self) -> None:
+        header = self.query_one("#quote-header", Static)
+        if self._sec is None:
+            header.update(f"[b]{self._ticker}[/]  not found")
+            return
+        sec = self._sec
+        q = getattr(sec, "quote", None)
+        name = getattr(sec, "name", "")
+        kind = getattr(sec, "kind", "")
+        country = getattr(sec, "country", None) or "—"
+        if q is None:
+            header.update(
+                f"[b {ACCENT}]{sec.ticker}[/]  {name}\n"
+                f"[{DIM}]{kind} · {country}  ·  no quote yet[/]"
+            )
+            return
+        header.update(
+            f"[b {ACCENT}]{sec.ticker}[/]  {name}\n"
+            f"[{DIM}]{kind} · {country}[/]  "
+            f"last [b]{num(q.last, decimals=0)}[/]  "
+            f"chg {coloured_pct(q.change_pct)}  "
+            f"vol {num(q.volume, decimals=0)}  "
+            f"turnover {num(q.turnover, decimals=0)} XOF"
+        )
+
+    def _render_overview(self) -> None:
+        body = self.query_one("#overview-body", Static)
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            # Bonds share the Overview tab with equities but the payload is
+            # the DES reference block. The full CSHF + YAS + REL screen
+            # lives on the dedicated Bond details tab.
+            self._render_bond_overview(body)
+            return
+        ticker = self._ticker
+        if not ticker:
+            return
+        # F-34: `company.get_description` does HTTP against sikafinance /
+        # afx_kwayisi on a cache miss — up to two 15-second requests. Run
+        # it on a worker thread so a slow source doesn't freeze the whole
+        # TUI (clock, input, and rendering). Placeholder text lands
+        # immediately so the user sees the fetch in progress.
+        body.update(f"[{DIM}]loading description…[/]")
+        self.run_worker(
+            lambda t=ticker: self._fetch_overview(t),
+            thread=True, exclusive=True, group="ticker-overview",
+        )
+
+    def _fetch_overview(self, ticker: str) -> None:
+        """Worker-thread body. Never touches widgets directly — hands the
+        payload to `_paint_overview` on the main thread."""
+        try:
+            profile = company.get_description(ticker)
+        except Exception as e:
+            self.app.call_from_thread(self._paint_overview, ticker, str(e), None)
+            return
+        self.app.call_from_thread(self._paint_overview, ticker, None, profile)
+
+    def _live(self, selector: str, kind: type) -> Any:
+        """Look up a child widget, or None if it is no longer mounted.
+
+        The `_paint_*` callbacks below are handed back to the main thread by
+        `call_from_thread` after an arbitrary fetch delay, so the view can be
+        torn down (app exit, screen swap) while a worker is still in flight.
+        They already skip a *stale ticker*; this covers the *gone tree*, which
+        otherwise raises NoMatches inside the worker and surfaces as a crash
+        far from the code that caused it.
+        """
+        try:
+            return self.query_one(selector, kind)
+        except NoMatches:
+            return None
+
+    def _paint_overview(self, ticker: str, error: str | None, profile: Any) -> None:
+        """Runs on the main thread. Guards against a stale worker
+        finishing after the user has already opened a different ticker."""
+        if ticker != self._ticker:
+            return
+        body = self._live("#overview-body", Static)
+        if body is None:
+            return
+        if error is not None:
+            body.update(f"[{DIM}]description unavailable ({error})[/]")
+            return
+        if profile is None:
+            body.update(f"[{DIM}]no description on file[/]")
+            return
+        pieces: list[str] = []
+        if profile.description:
+            pieces.append(profile.description)
+        meta: list[str] = []
+        if profile.sector:
+            meta.append(f"Sector: {profile.sector}")
+        if profile.industry:
+            meta.append(f"Industry: {profile.industry}")
+        if profile.address:
+            meta.append(f"Address: {profile.address}")
+        if profile.phone:
+            meta.append(f"Phone: {profile.phone}")
+        if profile.website:
+            meta.append(f"Web: {profile.website}")
+        if profile.leadership:
+            meta.append(f"Leadership: {profile.leadership}")
+        if profile.shares_outstanding:
+            meta.append(f"Shares: {profile.shares_outstanding}")
+        if profile.market_cap:
+            meta.append(f"Mkt cap: {profile.market_cap}")
+        if meta:
+            pieces.append("\n".join(meta))
+        if profile.shareholders:
+            pieces.append("Shareholders:")
+            for sh in profile.shareholders[:12]:
+                pieces.append(f"  {sh.name}  {sh.pct:.2f}%")
+        body.update("\n\n".join(pieces) if pieces else f"[{DIM}]no details on file[/]")
+
+    def _render_chart(self) -> None:
+        assert self._ticker
+        ticker = self._ticker
+        country = getattr(self._sec, "country", None) if self._sec else None
+        # F-34: `history.get_history` refetches from sikafinance on a
+        # cold/stale cache — up to 15 s of blocked event loop. Do the
+        # fetch on a worker thread; the paint step still runs on the
+        # main thread so plotext writes to the widget from the right
+        # context.
+        self.run_worker(
+            lambda t=ticker, c=country: self._fetch_chart(t, c),
+            thread=True, exclusive=True, group="ticker-chart",
+        )
+
+    def _fetch_chart(self, ticker: str, country: str | None) -> None:
+        try:
+            bars = history.get_history(ticker, country)
+        except Exception as e:
+            self.app.call_from_thread(self._paint_chart, ticker, str(e), None)
+            return
+        self.app.call_from_thread(self._paint_chart, ticker, None, bars)
+
+    def _paint_chart(self, ticker: str, error: str | None, bars: Any) -> None:
+        if ticker != self._ticker:
+            return
+        plot = self._live("#chart-plot", PlotextPlot)
+        if plot is None:
+            return
+        if error is not None:
+            # Fall back to a title-only chart with the error inline so the
+            # tab still renders instead of raising through the refresh loop.
+            plot.plt.clear_figure()
+            plot.plt.title(f"{ticker} — chart unavailable: {error}")
+            plot.refresh()
+            return
+        # `get_history` returns newest-first; plotext wants oldest→newest.
+        trimmed = list(reversed(bars[:90])) if bars else []
+        closes = [b.close for b in trimmed if b.close is not None]
+        dates = [b.session_date.isoformat() for b in trimmed if b.close is not None]
+        plt = plot.plt
+        plt.clear_figure()
+        if not closes:
+            plt.title(f"{ticker} — no history")
+            plot.refresh()
+            return
+        plt.date_form("Y-m-d")
+        plt.theme("dark")
+        plt.plot(dates, closes, marker="braille")
+        plt.title(f"{ticker} — last {len(closes)} sessions")
+        # PlotextPlot sizes itself to the widget's rect on the next paint;
+        # explicit plot_size would fight the layout.
+        plot.refresh()
+        # Mark the cache slot so a subsequent scheduled refresh on a
+        # non-Chart tab doesn't re-fetch. Cleared by `set_ticker` when
+        # the user opens a new company.
+        self._chart_last_ticker = ticker
+
+    def _render_news(self) -> None:
+        table = self.query_one("#ticker-news", DataTable)
+        cursor = table.cursor_row
+        table.clear()
+        # Bonds don't get equity-ticker tags from the news tagger; the
+        # issuer-name substring fallback in `services.bonds` bridges the
+        # gap so the tab isn't empty.
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            rows = bonds_svc.list_issuer_news(self._ticker or "", limit=50)
+            feed = news_svc.list_feed_from_rows(rows)
+        else:
+            feed = news_svc.list_feed(ticker=self._ticker, limit=50)
+        self._news_urls = {}
+        for row in feed.items:
+            when = (row.published_at or row.fetched_utc or "")[:16].replace("T", " ")
+            row_key = str(row.id)
+            if row.url:
+                self._news_urls[row_key] = row.url
+            table.add_row(
+                when,
+                str(row.relevance) if row.relevance is not None else "—",
+                row.category or "—",
+                (row.title or "").strip()[:80],
+                link_cell(row.url),
+                key=row_key,
+            )
+        if feed.items:
+            table.move_cursor(row=min(cursor, len(feed.items) - 1), animate=False)
+
+    def _render_financials(self) -> None:
+        body = self.query_one("#financials-body", Static)
+        assert self._ticker
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "index":
+            body.update(f"[{DIM}]not applicable for indices[/]")
+            return
+        if kind == "bond":
+            body.update(f"[{DIM}]not applicable for bonds — see the Bond details tab[/]")
+            return
+        fs = fundamentals.get_financials_series(self._ticker)
+        interim = fundamentals.get_latest_interim(self._ticker)
+        refs = fundamentals.get_financials_source_filings(self._ticker)
+        lines: list[str] = []
+        if fs.has_data:
+            # Header row: metric name, one column per period (newest→oldest).
+            years = fs.periods
+            hdr = f"{'metric':<20} " + "  ".join(f"{y:>12}" for y in years)
+            lines.append(hdr)
+            lines.append("-" * len(hdr))
+            for key, series in fs.metrics.items():
+                vals = "  ".join(f"{num(v, decimals=0):>12}" for v in series)
+                lines.append(f"{key:<20} {vals}")
+            lines.append(f"\ncurrency: {fs.currency}")
+        else:
+            lines.append(f"[{DIM}]no annual financials extracted[/]")
+        if interim is not None and interim.has_data:
+            lines.append(f"\nInterim ({interim.period_kind} {interim.period_year}):")
+            for k, v in interim.metrics.items():
+                lines.append(f"  {k:<20} {num(v, decimals=0)}")
+        if refs:
+            lines.append("\nReferences (source filings):")
+            for r in refs:
+                pub = r.published_date or "—"
+                lines.append(
+                    f"  {r.period_kind:<6} {r.period_year}  "
+                    f"{r.doc_type:<20} {pub:<10}  {r.source_url}"
+                )
+        body.update("\n".join(lines))
+
+    def _render_peers(self) -> None:
+        table = self.query_one("#peers-table", DataTable)
+        assert self._ticker
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind in {"index", "bond"}:
+            table.clear()
+            return
+        ticker = self._ticker
+        # F-34: `company.get_peers_with_ratios` walks every sector peer,
+        # each pulling ratios + a latest snapshot — a cold cache can
+        # trigger multiple back-to-back sikafinance fetches. Off the
+        # event loop, same pattern as `_render_overview`.
+        self.run_worker(
+            lambda t=ticker: self._fetch_peers(t),
+            thread=True, exclusive=True, group="ticker-peers",
+        )
+
+    def _fetch_peers(self, ticker: str) -> None:
+        try:
+            view = company.get_peers_with_ratios(ticker)
+        except Exception as e:
+            self.app.call_from_thread(self._paint_peers, ticker, str(e), None)
+            return
+        self.app.call_from_thread(self._paint_peers, ticker, None, view)
+
+    def _paint_peers(self, ticker: str, error: str | None, view: Any) -> None:
+        if ticker != self._ticker:
+            return
+        if error is not None:
+            self.notify(f"peers fetch failed: {error}", severity="warning")
+            return
+        table = self._live("#peers-table", DataTable)
+        if table is None:
+            return
+        cursor = table.cursor_row
+        table.clear()
+        for p in view.peers:
+            marker = "▸ " if p.is_self else "  "
+            table.add_row(
+                marker + p.ticker,
+                (p.name or "")[:24],
+                num(p.last, decimals=0),
+                coloured_pct(p.change_ytd_pct),
+                num(p.pe, decimals=1) if p.pe is not None else "—",
+                num(p.roe, decimals=1) if p.roe is not None else "—",
+                num(p.net_margin, decimals=1) if p.net_margin is not None else "—",
+                key=p.ticker,
+            )
+        # Phase 8g: median + mean summary rows underneath the peer list so
+        # the TUI matches the web tab's Bloomberg-style cross-compare.
+        # DataTable's `key` must be unique — use a synthetic key so a
+        # subsequent refresh doesn't collide with a real ticker.
+        stats = getattr(view, "stats", {}) or {}
+        if stats:
+            pe_s = stats.get("pe")
+            roe_s = stats.get("roe")
+            nm_s = stats.get("net_margin")
+            ytd_s = stats.get("change_ytd_pct")
+            table.add_row(
+                "  ─ MEDIAN",
+                "(peers)",
+                "—",
+                coloured_pct(ytd_s.median) if ytd_s and ytd_s.median is not None else "—",
+                num(pe_s.median, decimals=1) if pe_s and pe_s.median is not None else "—",
+                num(roe_s.median, decimals=1) if roe_s and roe_s.median is not None else "—",
+                num(nm_s.median, decimals=1) if nm_s and nm_s.median is not None else "—",
+                key="__peer_median__",
+            )
+            table.add_row(
+                "  ─ MEAN",
+                "(peers)",
+                "—",
+                coloured_pct(ytd_s.mean) if ytd_s and ytd_s.mean is not None else "—",
+                num(pe_s.mean, decimals=1) if pe_s and pe_s.mean is not None else "—",
+                num(roe_s.mean, decimals=1) if roe_s and roe_s.mean is not None else "—",
+                num(nm_s.mean, decimals=1) if nm_s and nm_s.mean is not None else "—",
+                key="__peer_mean__",
+            )
+        if view.peers:
+            table.move_cursor(row=min(cursor, len(view.peers) - 1), animate=False)
+
+    def _render_actions(self) -> None:
+        table = self.query_one("#actions-table", DataTable)
+        assert self._ticker
+        # Bonds pay coupons, not dividends — the schedule lives on Bond
+        # details. Blank the equity Corporate actions table so it doesn't
+        # show a stale ex-div row from another ticker.
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "bond":
+            table.clear()
+            return
+        rows = news_svc.list_upcoming_actions(ticker=self._ticker, days=365)
+        cursor = table.cursor_row
+        table.clear()
+        for r in rows:
+            table.add_row(
+                r.kind,
+                r.ex_date.isoformat() if r.ex_date else "—",
+                r.pay_date.isoformat() if r.pay_date else "—",
+                f"{r.amount} {r.currency or ''}".strip() if r.amount else "—",
+                f"{r.yield_pct:.2f}" if r.yield_pct is not None else "—",
+                (r.note or "")[:40],
+                key=str(r.id),
+            )
+        if rows:
+            table.move_cursor(row=min(cursor, len(rows) - 1), animate=False)
+
+    def _render_analyst(self) -> None:
+        md = self.query_one("#analyst-md", Markdown)
+        assert self._ticker
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind == "index":
+            md.update("*Not applicable for indices.*")
+            return
+        if kind == "bond":
+            md.update("*Not applicable for bonds — analyst notes are per-equity.*")
+            return
+        note = analyst_notes.latest_note(self._ticker)
+        if note is None:
+            md.update(
+                f"*No analyst note on file for {self._ticker}. "
+                "Run `just analyst-notes-run --ticker "
+                f"{self._ticker}`.*"
+            )
+            return
+        md.update(note.markdown or "")
+
+    def _render_bond(self) -> None:
+        """Populate the Bond details tab.
+
+        The tab is now hidden entirely from equity / index tab strips
+        via `_apply_tab_visibility`, so a defensive "not applicable"
+        branch is no longer needed — but the kind guard stays as a
+        cheap belt-and-braces in case a caller invokes this render
+        directly (e.g. after a security's kind flipped mid-session).
+        """
+        body = self.query_one("#bond-body", Static)
+        assert self._ticker
+        kind = getattr(self._sec, "kind", "") if self._sec else ""
+        if kind != "bond":
+            body.update(f"[{DIM}]This tab is only meaningful for bonds.[/]")
+            return
+        view = bonds_svc.get_bond_view(self._ticker)
+        if view is None:
+            body.update(f"[{DIM}]bond details unavailable[/]")
+            return
+
+        lines: list[str] = []
+        # Yield / duration block first — it's the summary a scanner
+        # wants at the top.
+        if view.yield_:
+            y = view.yield_
+            lines.append(f"[b {ACCENT}]Yield & Duration[/]")
+            lines.append(
+                f"  YTM {num(y.ytm_pct, decimals=2)}%  "
+                f"CurYld {num(y.current_yield_pct, decimals=2)}%"
+            )
+            lines.append(
+                f"  ModDur {num(y.modified_duration_years, decimals=2)} yrs  "
+                f"MacDur {num(y.macaulay_duration_years, decimals=2)} yrs  "
+                f"Convex {num(y.convexity, decimals=2)}"
+            )
+            lines.append(
+                f"  Clean {num(y.clean_price, decimals=2)}  "
+                f"Accrued {num(y.accrued_coupon, decimals=2)}  "
+                f"Dirty {num(y.dirty_price, decimals=2)}"
+            )
+            lines.append("")
+
+        # Cash-flow schedule.
+        if view.schedule:
+            s = view.schedule
+            cadence = {1: "annual", 2: "semi-annual", 4: "quarterly"}.get(
+                s.payments_per_year, "annual"
+            )
+            lines.append(
+                f"[b {ACCENT}]Cash flow[/]  "
+                f"({s.coupons_remaining} left, nominal "
+                f"{num(s.nominal, decimals=0)} XOF, bullet + {cadence})"
+            )
+            hdr = f"  {'DATE':<12} {'COUPON':>12} {'PRINCIPAL':>12} {'TOTAL':>12}"
+            lines.append(hdr)
+            lines.append("  " + "-" * (len(hdr) - 2))
+            for r in s.rows:
+                principal = num(r.principal, decimals=0) if r.principal > 0 else "—"
+                lines.append(
+                    f"  {r.payment_date.isoformat():<12} "
+                    f"{num(r.coupon, decimals=2):>12} "
+                    f"{principal:>12} "
+                    f"{num(r.total, decimals=2):>12}"
+                )
+            lines.append("")
+        else:
+            lines.append(f"[{DIM}]Cash-flow schedule unavailable (missing coupon anchor).[/]")
+            lines.append("")
+
+        # Related bonds.
+        if view.related:
+            lines.append(f"[b {ACCENT}]Related bonds[/]  (same issuer)")
+            hdr = f"  {'TICKER':<10} {'COUPON':>7}  {'MATURITY':>9}  NAME"
+            lines.append(hdr)
+            lines.append("  " + "-" * (len(hdr) - 2))
+            for r in view.related:
+                coupon = f"{r.coupon_rate:.2f}%" if r.coupon_rate is not None else "—"
+                my = str(r.maturity_year) if r.maturity_year else "—"
+                matured = "  · matured" if r.is_matured else ""
+                lines.append(
+                    f"  {r.ticker:<10} {coupon:>7}  {my:>9}  {r.name[:60]}{matured}"
+                )
+            lines.append("")
+
+        # Nice-to-haves.
+        if view.issuer_equity_ticker:
+            lines.append(
+                f"[b]Issuer equity:[/] {view.issuer_equity_ticker}"
+            )
+        if view.prospectus_url:
+            lines.append(f"[b]Prospectus:[/] {view.prospectus_url}")
+        if view.prospectus_news:
+            lines.append(f"[b {ACCENT}]Prospectus / admission news[/]")
+            for n in view.prospectus_news:
+                when = (n.published_at or "")[:10] or "—"
+                lines.append(f"  {when}  {n.title[:80]}")
+
+        body.update("\n".join(lines) if lines else f"[{DIM}]no bond data on file[/]")
+
+    def _render_bond_overview(self, body: Static) -> None:
+        """Populate the Overview tab body for a bond ticker."""
+        view = bonds_svc.get_bond_view(self._ticker or "")
+        if view is None:
+            body.update(f"[{DIM}]bond details unavailable[/]")
+            return
+        coupon = f"{view.coupon_rate:.2f}%" if view.coupon_rate is not None else "—"
+        maturity = str(view.maturity_year) if view.maturity_year else "—"
+        issue = view.issue_date.isoformat() if view.issue_date else "—"
+        cadence = {1: "annual", 2: "semi-annual", 4: "quarterly"}.get(
+            view.schedule.payments_per_year if view.schedule else 1, "annual"
+        )
+        lines: list[str] = [
+            f"[b {ACCENT}]{view.ticker}[/]  {view.name}",
+            f"  Issuer:   {view.issuer_name or '—'}",
+            f"  Category: {view.sector or '—'}"
+            + (f"  ·  {view.country}" if view.country else ""),
+            f"  Coupon:   {coupon}  ({cadence})",
+            f"  Issue:    {issue}",
+            f"  Maturity: {maturity}",
+        ]
+        if view.last_snapshot:
+            lc = view.last_snapshot.last_coupon_date
+            la = view.last_snapshot.last_coupon_amount
+            lines.append(
+                f"  Accrued:  {num(view.last_snapshot.accrued_coupon, decimals=2)}"
+            )
+            if lc:
+                lines.append(
+                    f"  Last pmt: {lc.isoformat()}"
+                    + (f"  · {num(la, decimals=2)}" if la is not None else "")
+                )
+        if view.yield_:
+            lines.append("")
+            lines.append(
+                f"  Current yield: {num(view.yield_.current_yield_pct, decimals=2)}%  "
+                f"YTM: {num(view.yield_.ytm_pct, decimals=2)}%"
+            )
+        if view.schedule and view.schedule.next_coupon_date:
+            lines.append(
+                f"  Next coupon:   {view.schedule.next_coupon_date.isoformat()}  "
+                f"({view.schedule.coupons_remaining} left)"
+            )
+        if view.issuer_equity_ticker:
+            lines.append("")
+            lines.append(f"  Issuer equity: [b]{view.issuer_equity_ticker}[/]")
+        body.update("\n".join(lines))
+
+    # -- bindings ---------------------------------------------------------
+
+    def action_open_news_url(self) -> None:
+        """Open the currently-highlighted News tab row in the browser.
+
+        DataTable eats mouse clicks for row selection so an OSC-8 click on
+        the visible "open" link is unreliable across terminals — this
+        binding is the reliable path. No-op unless the News tab is active
+        and a URL is on file for the row."""
+        table = self.query_one("#ticker-news", DataTable)
+        if table.row_count == 0:
+            return
+        try:
+            row_key = table.coordinate_to_cell_key(
+                (table.cursor_row, 0)
+            ).row_key.value
+        except Exception:
+            return
+        url = self._news_urls.get(str(row_key)) if row_key else None
+        if not url:
+            self.notify("No source URL on file for this row.", severity="warning")
+            return
+        self.app.open_url(url)

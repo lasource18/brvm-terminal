@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from brvm.config import settings
-from brvm.db import connect
-from brvm.models import Brief
-from brvm.store import briefs as briefs_repo
+from kodji.config import settings
+from kodji.db import connect
+from kodji.models import Brief
+from kodji.store import briefs as briefs_repo
 
 
 def _seed(day: str = "2026-08-20", markdown: str = "# Session recap\nHello.") -> None:

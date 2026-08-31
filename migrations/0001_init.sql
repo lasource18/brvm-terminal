@@ -1,4 +1,4 @@
--- brvm-terminal initial schema.
+-- kodji-terminal initial schema.
 -- All timestamp columns store UTC ISO-8601 strings; session_date is the
 -- Africa/Abidjan calendar date of a trading session (YYYY-MM-DD).
 

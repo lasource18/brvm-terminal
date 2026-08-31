@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 
 
 def test_lifespan_starts_and_stops_scheduler():
-    from brvm.apps.web.main import app
+    from kodji.apps.web.main import app
 
-    with patch("brvm.apps.web.main.build_scheduler") as bs:
+    with patch("kodji.apps.web.main.build_scheduler") as bs:
         sched = MagicMock()
         sched.get_jobs.return_value = []
         bs.return_value = sched

@@ -15,7 +15,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 def apply_migrations(conn) -> None:
     """Apply every migration in order. Tests use this instead of naming
     files so a new migration doesn't need a sweep through the suite."""
-    from brvm.db import ensure_migrations_table
+    from kodji.db import ensure_migrations_table
 
     ensure_migrations_table(conn)
     for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
@@ -33,25 +33,25 @@ def reset_module_state() -> None:
     lazily-built LLM client) that a settings change or a fresh DB path
     should invalidate.
     """
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
     reset_settings_cache()
     # TTL-cached scraper responses — a new DB path should not surface
     # data from the previous test's cache.
     try:
-        from brvm.services import company as _company
+        from kodji.services import company as _company
         _company.clear_cache()
     except ImportError:
         pass
     try:
-        from brvm.services import history as _history
+        from kodji.services import history as _history
         _history.clear_cache()
     except ImportError:
         pass
     # Memoized Anthropic SDK client — built against whatever
     # ANTHROPIC_API_KEY was in effect at first call.
     try:
-        from brvm.services import llm as _llm
+        from kodji.services import llm as _llm
         _llm.reset_client()
     except ImportError:
         pass
@@ -64,14 +64,14 @@ def fixtures_dir() -> Path:
 
 @pytest.fixture
 def tmp_db_path(tmp_path: Path) -> Path:
-    return tmp_path / "brvm.sqlite"
+    return tmp_path / "kodji.sqlite"
 
 
 def _seed(db_path: Path) -> None:
-    from brvm.db import connect
-    from brvm.models import IndexLevel, Quote, Security
-    from brvm.store import quotes as quotes_repo
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import IndexLevel, Quote, Security
+    from kodji.store import quotes as quotes_repo
+    from kodji.store import securities as sec_repo
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -114,7 +114,7 @@ def client(monkeypatch, tmp_path):
     """TestClient over a fresh, seeded SQLite DB with the APScheduler mocked."""
     from fastapi.testclient import TestClient
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     # Pin optional secrets to empty so the .env on a real developer's
     # machine doesn't leak into a test's rendered HTML (e.g. the /alerts
@@ -124,9 +124,9 @@ def client(monkeypatch, tmp_path):
     reset_module_state()
     _seed(db_path)
 
-    from brvm.apps.web.main import app
+    from kodji.apps.web.main import app
 
-    with patch("brvm.apps.web.main.build_scheduler") as bs:
+    with patch("kodji.apps.web.main.build_scheduler") as bs:
         bs.return_value.get_jobs.return_value = []
         with TestClient(app) as c:
             yield c

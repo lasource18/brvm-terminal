@@ -24,10 +24,10 @@ def test_oversize_stream_cleans_up_part_file(monkeypatch, tmp_path):
     cleanup, a re-run leaves a growing pile of half-downloaded PDFs
     under `data/filings/`."""
     monkeypatch.setenv("EXTRACT_MAX_PDF_MB", "1")  # 1 MB cap
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "brvm.sqlite"))
-    from brvm.config import reset_settings_cache
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "kodji.sqlite"))
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
-    from brvm.services import filings as svc
+    from kodji.services import filings as svc
 
     dest = tmp_path / "SNTS" / "big.pdf"
     # 1.5 MB payload split into 128-KB chunks so the size check trips
@@ -46,10 +46,10 @@ def test_http_error_cleans_up_part_file(monkeypatch, tmp_path):
     """The HTTPError path already cleaned up. Pin the behaviour so a
     future refactor doesn't regress the existing case while fixing
     the oversize one."""
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "brvm.sqlite"))
-    from brvm.config import reset_settings_cache
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "kodji.sqlite"))
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
-    from brvm.services import filings as svc
+    from kodji.services import filings as svc
 
     def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
@@ -65,10 +65,10 @@ def test_http_error_cleans_up_part_file(monkeypatch, tmp_path):
 def test_happy_path_writes_final_destination(monkeypatch, tmp_path):
     """Sanity check that the cleanup logic doesn't wipe successful
     downloads by mistake."""
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "brvm.sqlite"))
-    from brvm.config import reset_settings_cache
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "kodji.sqlite"))
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
-    from brvm.services import filings as svc
+    from kodji.services import filings as svc
 
     payload = b"%PDF-1.7\n" + b"x" * 100
     def _handler(request: httpx.Request) -> httpx.Response:

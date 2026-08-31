@@ -7,13 +7,13 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Filing, Security
-from brvm.store import filings as filings_repo
-from brvm.store import financials as fin_repo
-from brvm.store import securities as sec_repo
-from brvm.store import spend as spend_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Filing, Security
+from kodji.store import filings as filings_repo
+from kodji.store import financials as fin_repo
+from kodji.store import securities as sec_repo
+from kodji.store import spend as spend_repo
 
 from ._fake_anthropic import FakeAnthropic, FakeResponse, reply
 from .conftest import apply_migrations
@@ -66,11 +66,11 @@ def _setup(monkeypatch, tmp_path: Path, *, n_filings: int = 1):
     """Fresh DB + one security + `n_filings` pending annual reports.
 
     Returns the reloaded (config-aware) worker module."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import extraction as ext_mod
-    from brvm.services import fundamentals as svc
+    from kodji.services import extraction as ext_mod
+    from kodji.services import fundamentals as svc
 
     with connect(db_path) as conn:
         apply_migrations(conn)

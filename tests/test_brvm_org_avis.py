@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.sources import brvm_org_avis as avis
+from kodji.sources import brvm_org_avis as avis
 
 FIXTURE = Path(__file__).parent / "fixtures" / "brvm_org" / "avis_landing.html"
 

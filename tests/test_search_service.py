@@ -1,20 +1,20 @@
 import pytest
 
-from brvm.db import connect, ensure_migrations_table
-from brvm.models import Security
-from brvm.store import securities as sec_repo
+from kodji.db import connect, ensure_migrations_table
+from kodji.models import Security
+from kodji.store import securities as sec_repo
 
 
 @pytest.fixture
 def search_env(monkeypatch, tmp_path):
     from pathlib import Path
 
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import search as search_mod
+    from kodji.services import search as search_mod
 
     root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from brvm.sources.afx_kwayisi import parse_competitors, parse_factsheet
+from kodji.sources.afx_kwayisi import parse_competitors, parse_factsheet
 
 
 def _read(fixtures_dir, rel: str) -> str:

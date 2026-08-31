@@ -8,8 +8,8 @@ render only.
 
 from __future__ import annotations
 
-from brvm import i18n
-from brvm.apps.web._common import LANG_COOKIE
+from kodji import i18n
+from kodji.apps.web._common import LANG_COOKIE
 
 
 class TestCatalogFallback:

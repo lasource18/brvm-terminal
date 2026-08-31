@@ -1,4 +1,4 @@
-# brvm-terminal
+# kodji-terminal
 
 A lightweight, terminal-aesthetic dashboard for the **BRVM** (Bourse
 Régionale des Valeurs Mobilières — the regional stock exchange for the 8
@@ -44,7 +44,7 @@ For OCR: `brew install ocrmypdf tesseract-lang`.
 ```bash
 cp env.example .env        # edit if you have any keys; defaults work
 just sync                  # create .venv, install deps
-just migrate               # create data/brvm.sqlite with initial schema
+just migrate               # create data/kodji.sqlite with initial schema
 just test                  # offline fixture-based tests
 just dev                   # http://127.0.0.1:8765
 ```
@@ -52,6 +52,35 @@ just dev                   # http://127.0.0.1:8765
 `ANTHROPIC_API_KEY` in `.env` is the only key that changes behaviour
 today — it turns on the Phase 3b news tagger. Leave it blank and
 everything else still works; news is simply stored untagged.
+
+### Upgrading from `brvm-terminal`
+
+The project was renamed to `kodji-terminal`. Your `.env` is not tracked by
+git, so the rename cannot reach it — update it by hand on every machine
+(including the VPS) before starting the app:
+
+```bash
+# .env
+DB_PATH=./data/kodji.sqlite                              # was ./data/brvm.sqlite
+HTTP_USER_AGENT=kodji-terminal/0.1 (+contact: you@example.com)
+```
+
+Then move the database to match:
+
+```bash
+sqlite3 data/brvm.sqlite 'PRAGMA wal_checkpoint(TRUNCATE);'
+mv data/brvm.sqlite data/kodji.sqlite
+rm -f data/brvm.sqlite-shm data/brvm.sqlite-wal
+```
+
+Do not skip this. SQLite **creates an empty database** rather than failing
+when `DB_PATH` points at a file that no longer exists, so a stale `.env`
+gives you a silently empty app — HTTP 200s with no securities — instead of
+a startup error. The schema itself is unaffected: `_schema_migrations`
+tracks migration ids only, so no re-migration is needed.
+
+The console script is now `kodji-tui` (was `brvm-tui`), and the installed
+package is `kodji` (was `brvm`); re-run `just sync` to refresh both.
 
 ## Try it (Phase 2)
 
@@ -335,8 +364,8 @@ services layer. A Bloomberg-ish shell with a persistent watchlist
 sidebar and a right pane that swaps between screens.
 
 ```bash
-just tui              # or: uv run python -m brvm.apps.tui
-# also available as `brvm-tui` on the PATH after `just sync`
+just tui              # or: uv run python -m kodji.apps.tui
+# also available as `kodji-tui` on the PATH after `just sync`
 ```
 
 Layout (Bloomberg-ish):
@@ -527,7 +556,7 @@ only outbound non-scraping call the app makes.
 ## Layout
 
 ```
-src/brvm/
+src/kodji/
   sources/    # fetchers + pure parsers, one module per source
   store/      # thin SQLite repositories (WAL mode)
   services/   # business logic; only layer the UI touches

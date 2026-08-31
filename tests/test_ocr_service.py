@@ -19,23 +19,23 @@ from pathlib import Path
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Filing, Security
-from brvm.store import filings as filings_repo
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Filing, Security
+from kodji.store import filings as filings_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
 
 def _fresh(monkeypatch, tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     filings_dir = tmp_path / "filings"
     filings_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("FILINGS_ROOT", str(filings_dir))
     reset_settings_cache()
-    from brvm.services import ocr as ocr_svc
+    from kodji.services import ocr as ocr_svc
     return ocr_svc, db_path, filings_dir
 
 
@@ -254,7 +254,7 @@ def test_repo_helpers_pending_ocr_query(tmp_db_path):
     [(2, "nonzero_exit:2"), (6, "already_ocr")],
 )
 def test_ocr_file_returns_reason_for_common_failures(tmp_path, returncode, expected_reason):
-    import brvm.services.ocr as ocr_mod
+    import kodji.services.ocr as ocr_mod
 
     src = tmp_path / "src.pdf"
     src.write_bytes(b"junk")

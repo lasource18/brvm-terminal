@@ -58,9 +58,9 @@ def test_toggle_rule_flips_enabled(client):
     assert r.status_code == 200
 
     # Rule id is the only one in the table.
-    from brvm.config import settings
-    from brvm.db import connect
-    from brvm.store import alerts as alerts_repo
+    from kodji.config import settings
+    from kodji.db import connect
+    from kodji.store import alerts as alerts_repo
 
     with connect(settings.db_path) as conn:
         rules = alerts_repo.list_rules(conn)
@@ -78,9 +78,9 @@ def test_delete_rule_removes_it(client):
         "/_frag/alerts/rules",
         data={"kind": "news", "min_relevance": "5"},
     )
-    from brvm.config import settings
-    from brvm.db import connect
-    from brvm.store import alerts as alerts_repo
+    from kodji.config import settings
+    from kodji.db import connect
+    from kodji.store import alerts as alerts_repo
 
     with connect(settings.db_path) as conn:
         rid = alerts_repo.list_rules(conn)[0].id

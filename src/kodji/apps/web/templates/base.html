@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="{{ locale or 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}kodji-terminal{% endblock %}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="/static/app.js" defer></script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand"><a href="/">kodji-terminal</a></span>
+    <nav>
+      <a href="/">{{ "Overview"|t }}</a>
+      <a href="/directory">{{ "Directory"|t }}</a>
+      <a href="/news">{{ "News"|t }}</a>
+      <a href="/watchlists">{{ "Watchlists"|t }}</a>
+      <a href="/alerts">{{ "Alerts"|t }}</a>
+      <a href="/brief">{{ "Brief"|t }}</a>
+    </nav>
+    <div class="search-wrap">
+      <input id="search-input"
+             type="text"
+             placeholder="{{ 'Search ticker or name…'|t }}"
+             autocomplete="off"
+             spellcheck="false"
+             hx-get="/_frag/search"
+             hx-trigger="keyup changed delay:150ms"
+             hx-target="#search-results"
+             hx-swap="innerHTML"
+             name="q">
+      <div id="search-results" class="search-results"></div>
+    </div>
+    <span class="spacer"></span>
+    {# FR | EN toggle — clicking sets a persistent cookie via /lang/{code}
+       and returns to the current URL. The active locale gets a bold class
+       so the current choice is visible without a trip to devtools. #}
+    <span class="lang-toggle" title="Language / Langue">
+      <a href="/lang/fr?next={{ current_path or '/' }}"
+         class="{% if locale == 'fr' %}lang-active{% endif %}">FR</a>
+      <span class="dim">|</span>
+      <a href="/lang/en?next={{ current_path or '/' }}"
+         class="{% if locale == 'en' %}lang-active{% endif %}">EN</a>
+    </span>
+    <span class="clock">{{ abidjan_now }}</span>
+    {% if market_open %}
+      <span class="badge open">{{ "MARKET OPEN"|t }}</span>
+    {% else %}
+      <span class="badge closed">{{ "MARKET CLOSED"|t }}</span>
+    {% endif %}
+  </div>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

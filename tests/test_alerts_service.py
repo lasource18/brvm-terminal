@@ -23,9 +23,9 @@ from pathlib import Path
 
 import httpx
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import (
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import (
     AlertEvent,
     AlertRule,
     Filing,
@@ -33,23 +33,23 @@ from brvm.models import (
     Quote,
     Security,
 )
-from brvm.sources._dedupe import news_hash
-from brvm.store import alerts as alerts_repo
-from brvm.store import filings as filings_repo
-from brvm.store import news as news_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.sources._dedupe import news_hash
+from kodji.store import alerts as alerts_repo
+from kodji.store import filings as filings_repo
+from kodji.store import news as news_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
 
 def _setup(monkeypatch, tmp_path: Path):
     """Fresh DB + a handful of securities. Returns (db_path, alerts_svc)."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")  # off unless a test flips it
     reset_settings_cache()
-    from brvm.services import alerts as svc
+    from kodji.services import alerts as svc
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -370,7 +370,7 @@ class _StubSender:
         self.closed = False
 
     def send(self, event: AlertEvent):
-        from brvm.services.alerts import SendResult
+        from kodji.services.alerts import SendResult
 
         self.sent.append(event)
         if self.ok:
@@ -580,7 +580,7 @@ def test_delivery_result_note_never_contains_webhook_url(
     """`str(httpx.HTTPError)` used to embed the full webhook URL —
     including the token — into the log line. The sender must never
     return the URL in the note."""
-    from brvm.services.alerts import SendResult, _DiscordSender
+    from kodji.services.alerts import SendResult, _DiscordSender
 
     _db_path, _svc = _setup(monkeypatch, tmp_path)
     secret_url = "https://discord.com/api/webhooks/12345/SUPER-SECRET-TOKEN"

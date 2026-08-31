@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.models import CorporateAction, NewsItem, Security
-from brvm.sources._dedupe import news_hash
-from brvm.store import news as news_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import CorporateAction, NewsItem, Security
+from kodji.sources._dedupe import news_hash
+from kodji.store import news as news_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 

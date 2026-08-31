@@ -12,11 +12,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Security
-from brvm.services import company_facts
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Security
+from kodji.services import company_facts
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
@@ -85,10 +85,10 @@ def test_parse_market_cap_xof(raw, expected):
 
 
 def _fresh(monkeypatch, tmp_path: Path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import company_facts as svc
+    from kodji.services import company_facts as svc
     return svc, db_path
 
 

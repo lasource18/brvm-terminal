@@ -15,21 +15,21 @@ import json
 from datetime import date
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import (
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import (
     Brief,
     IndexLevel,
     NewsItem,
     Quote,
     Security,
 )
-from brvm.sources._dedupe import news_hash
-from brvm.store import briefs as briefs_repo
-from brvm.store import news as news_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
-from brvm.store import spend as spend_repo
+from kodji.sources._dedupe import news_hash
+from kodji.store import briefs as briefs_repo
+from kodji.store import news as news_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
+from kodji.store import spend as spend_repo
 
 from ._fake_anthropic import FakeAnthropic, reply
 from .conftest import apply_migrations
@@ -43,11 +43,11 @@ def _setup(monkeypatch, tmp_path: Path):
     monkey-patch `_translate_or_none` to skip the second call so they
     keep working with one reply per generation. Dedicated translation
     tests below re-enable it and assert on both writes."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import brief as svc
-    from brvm.services import llm as llm_mod
+    from kodji.services import brief as svc
+    from kodji.services import llm as llm_mod
 
     llm_mod.reset_client()
     # Default: skip translation so pre-PR-I tests keep passing with
@@ -194,7 +194,7 @@ def test_generate_happy_path_persists_and_bills(monkeypatch, tmp_path):
     # Spend counter got the same billing, keyed on the real UTC day
     # (F-19) — not the covered day (which is 2026-08-20 here).
     _db_path_arg = _db_path
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today_iso = utcnow().date().isoformat()
     with connect(_db_path_arg) as conn:
         spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -241,7 +241,7 @@ def test_generate_stops_when_budget_is_exhausted(monkeypatch, tmp_path):
     the pre-check trips regardless of which covered day we're
     generating for."""
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
         # Burn the whole $0.50 (50 * 10_000 = 500_000 micros) against
@@ -270,7 +270,7 @@ def test_generate_bills_real_utc_day_not_covered_day(monkeypatch, tmp_path):
     result = svc.generate_for(covered, client=client)
     assert result.brief is not None
 
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
         spent_today = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -290,7 +290,7 @@ def test_generate_empty_reply_bills_but_marks_failed(monkeypatch, tmp_path):
     result = svc.generate_for(date(2026, 8, 20), client=client)
     assert result.failed is True
     assert result.brief is None
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
         spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -314,7 +314,7 @@ def test_generate_transport_error_is_reported_not_billed(monkeypatch, tmp_path):
     # F-22 update: transport errors on attempt 1 leave usage empty
     # (nothing to record); either the covered or real day should
     # read zero.
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today_iso = utcnow().date().isoformat()
     with connect(_db_path) as conn:
         spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")

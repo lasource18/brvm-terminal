@@ -11,8 +11,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.models import BondSnapshot, DailyBar, Security
+from kodji.db import connect
+from kodji.models import BondSnapshot, DailyBar, Security
 
 
 def _fake_bonds() -> tuple[list[Security], list[DailyBar], list[BondSnapshot]]:
@@ -63,7 +63,7 @@ def _fake_bonds() -> tuple[list[Security], list[DailyBar], list[BondSnapshot]]:
 
 
 def _apply_migrations(db_path: Path) -> None:
-    from brvm.db import ensure_migrations_table
+    from kodji.db import ensure_migrations_table
 
     migrations = Path(__file__).resolve().parents[1] / "migrations"
     with connect(db_path) as conn:
@@ -74,19 +74,19 @@ def _apply_migrations(db_path: Path) -> None:
 
 
 def test_snapshot_bonds_once_writes_rows(monkeypatch, tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
     reset_settings_cache()
     _apply_migrations(db_path)
 
     monkeypatch.setattr(
-        "brvm.services.quotes.brvm_org_bonds.fetch_all_bonds",
+        "kodji.services.quotes.brvm_org_bonds.fetch_all_bonds",
         lambda client=None, today=None: _fake_bonds(),
     )
 
-    from brvm.services.quotes import snapshot_bonds_once
+    from kodji.services.quotes import snapshot_bonds_once
 
     counts = snapshot_bonds_once()
     assert counts == {"securities": 2, "bars": 2, "snapshots": 2}

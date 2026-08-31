@@ -28,8 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from brvm.config import settings  # noqa: E402
-from brvm.db import connect  # noqa: E402
+from kodji.config import settings  # noqa: E402
+from kodji.db import connect  # noqa: E402
 
 
 def run(*, apply: bool) -> int:

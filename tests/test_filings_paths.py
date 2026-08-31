@@ -6,9 +6,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.services import filings as svc
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.services import filings as svc
 
 from .conftest import apply_migrations
 
@@ -36,7 +36,7 @@ def test_resolve_path_round_trip_from_relativize():
     """A path written by `_relativize` reads back to the same
     absolute location via `_resolve_path` (the helper used by the
     ocr / fundamentals extract paths)."""
-    from brvm.services.fundamentals import _resolve_path
+    from kodji.services.fundamentals import _resolve_path
     root = svc._project_root()
     dest = root / "data" / "filings" / "SNTS" / "annual.pdf"
     relative = svc._relativize(dest)
@@ -51,12 +51,12 @@ def test_rewrite_filings_paths_script_migrates_absolute_rows(
     absolute `filings.file_path` rows to their project-relative
     form. Idempotent: rows already relative are left alone, and
     absolute paths outside the project stay absolute."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.models import Filing, Security
-    from brvm.store import filings as filings_repo
-    from brvm.store import securities as sec_repo
+    from kodji.models import Filing, Security
+    from kodji.store import filings as filings_repo
+    from kodji.store import securities as sec_repo
 
     project_root = svc._project_root()
 

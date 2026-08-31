@@ -1,10 +1,10 @@
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect, ensure_migrations_table
-from brvm.models import DailyBar, IndexLevel, Quote, Security
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect, ensure_migrations_table
+from kodji.models import DailyBar, IndexLevel, Quote, Security
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 
 def _init(tmp_db_path: Path) -> None:

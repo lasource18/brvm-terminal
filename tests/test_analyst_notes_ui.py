@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from brvm.config import settings
-from brvm.db import connect
-from brvm.models import AnalystNote
-from brvm.store import analyst_notes as notes_repo
+from kodji.config import settings
+from kodji.db import connect
+from kodji.models import AnalystNote
+from kodji.store import analyst_notes as notes_repo
 
 
 def _seed(ticker: str = "SNTS", week: str = "2026-08-24",
@@ -83,10 +83,10 @@ def test_analyst_archive_bonds_404(client, monkeypatch):
     hides analyst for bonds too. Bring them into alignment so a bond
     note (should one ever be seeded) doesn't leak through the
     archive URL."""
-    from brvm.config import settings
-    from brvm.db import connect
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.config import settings
+    from kodji.db import connect
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
     with connect(settings.db_path) as conn:
         sec_repo.upsert(conn, [
             Security(ticker="BOND1", name="TEST BOND",

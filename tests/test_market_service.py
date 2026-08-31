@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from brvm.db import connect
-from brvm.models import IndexLevel, Quote, Security
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import IndexLevel, Quote, Security
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
@@ -57,11 +57,11 @@ def _seed(db_path: Path) -> None:
 @pytest.fixture
 def db(monkeypatch, tmp_path):
     """Point services at a fresh tmp DB via env + settings-cache reset.
-    The lazy proxy in `brvm.config` re-reads env on the next attribute
+    The lazy proxy in `kodji.config` re-reads env on the next attribute
     access, so no module reload is needed."""
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
     _seed(db_path)
@@ -70,14 +70,14 @@ def db(monkeypatch, tmp_path):
 
 
 def test_top_by_turnover(db):
-    from brvm.services import market
+    from kodji.services import market
 
     rows = market.top_by_turnover(3)
     assert [r.ticker for r in rows] == ["SPHC", "SNTS", "ORAC"]
 
 
 def test_gainers_orders_by_change_desc_and_filters_positive(db):
-    from brvm.services import market
+    from kodji.services import market
 
     rows = market.gainers(5)
     assert [r.ticker for r in rows] == ["SPHC", "SNTS"]
@@ -85,7 +85,7 @@ def test_gainers_orders_by_change_desc_and_filters_positive(db):
 
 
 def test_losers_orders_by_change_asc_and_filters_negative(db):
-    from brvm.services import market
+    from kodji.services import market
 
     rows = market.losers(5)
     assert [r.ticker for r in rows] == ["CFAC", "ORAC"]
@@ -93,7 +93,7 @@ def test_losers_orders_by_change_asc_and_filters_negative(db):
 
 
 def test_indices_tiles(db):
-    from brvm.services import market
+    from kodji.services import market
 
     tiles = market.indices_tiles()
     assert [t.ticker for t in tiles] == ["BRVMC", "BRVM30", "BRVMPR"]
@@ -105,7 +105,7 @@ def test_indices_tiles(db):
 
 
 def test_overview_bundles_everything(db):
-    from brvm.services import market
+    from kodji.services import market
 
     ov = market.overview(limit=3)
     assert len(ov.indices) == 3
@@ -116,7 +116,7 @@ def test_overview_bundles_everything(db):
 
 
 def test_get_security(db):
-    from brvm.services import market
+    from kodji.services import market
 
     sv = market.get_security("SNTS")
     assert sv is not None

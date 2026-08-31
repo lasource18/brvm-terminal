@@ -7,14 +7,14 @@ from datetime import date
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Filing, NewsItem, Security
-from brvm.sources._dedupe import news_hash
-from brvm.sources._dedupe import url_hash as compute_url_hash
-from brvm.store import filings as filings_repo
-from brvm.store import news as news_repo
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Filing, NewsItem, Security
+from kodji.sources._dedupe import news_hash
+from kodji.sources._dedupe import url_hash as compute_url_hash
+from kodji.store import filings as filings_repo
+from kodji.store import news as news_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
@@ -24,7 +24,7 @@ from .conftest import apply_migrations
 
 
 def _classify(title: str):
-    from brvm.services.filings import classify_communique_title
+    from kodji.services.filings import classify_communique_title
 
     return classify_communique_title(title)
 
@@ -106,7 +106,7 @@ def test_safe_file_name_truncates_long_period_labels():
     """The SAPH 2024 CAC row on brvm.org carries a full sentence in the
     period-label slot. Uncapped, the resulting path blows past macOS's
     255-byte cap and `dest.exists()` raises OSError 63."""
-    from brvm.services.filings import _MAX_STEM_CHARS, _safe_file_name
+    from kodji.services.filings import _MAX_STEM_CHARS, _safe_file_name
 
     long_label = (
         "rapport des commissaires aux comptes sur l'existence et la tenue "
@@ -134,7 +134,7 @@ def test_safe_file_name_truncates_long_period_labels():
 
 
 def test_sikafinance_file_stem_truncates_long_period_labels():
-    from brvm.services.filings import _MAX_STEM_CHARS, _sikafinance_file_stem
+    from kodji.services.filings import _MAX_STEM_CHARS, _sikafinance_file_stem
 
     long_label = "x" * 500
     stem = _sikafinance_file_stem(
@@ -160,12 +160,12 @@ def test_bare_year_annual_report():
 
 
 def _fresh_svc(tmp_path, monkeypatch):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     filings_dir = tmp_path / "filings"
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("FILINGS_ROOT", str(filings_dir))
     reset_settings_cache()
-    from brvm.services import filings as svc
+    from kodji.services import filings as svc
     return svc, db_path, filings_dir
 
 

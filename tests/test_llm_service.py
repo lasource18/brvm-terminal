@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from brvm.services import llm
+from kodji.services import llm
 
 from ._fake_anthropic import FakeAnthropic, FakeResponse, json_reply, reply, tag_for
 
@@ -192,7 +192,7 @@ def test_tag_batch_on_empty_input_makes_no_call():
 
 
 def test_get_client_without_key_raises_llm_unavailable(monkeypatch):
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
     llm.reset_client()
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")

@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 from freezegun import freeze_time
 
-from brvm.clock import (
+from kodji.clock import (
     is_market_holiday,
     is_market_open,
     last_completed_session_date,

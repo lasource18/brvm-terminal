@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from brvm.sources.brvm_org import (
+from kodji.sources.brvm_org import (
     parse_boc_pdf_date,
     parse_boc_rows,
     resolve_boc_pdf_url,

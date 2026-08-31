@@ -1,6 +1,6 @@
 import pytest
 
-from brvm.sources._num import parse_en_number, parse_fr_number, parse_number
+from kodji.sources._num import parse_en_number, parse_fr_number, parse_number
 
 NBSP = "\u00a0"
 
