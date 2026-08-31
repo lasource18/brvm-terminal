@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from brvm.sources.sikafinance import parse_secteur, parse_societe
+from kodji.sources.sikafinance import parse_secteur, parse_societe
 
 
 def _read(fixtures_dir, rel: str) -> str:

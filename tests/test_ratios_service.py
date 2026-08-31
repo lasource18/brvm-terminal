@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Quote, Security
-from brvm.services.ratios import (
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Quote, Security
+from kodji.services.ratios import (
     FinancialsInput,
     MarketInput,
     Ratio,
@@ -24,8 +24,8 @@ from brvm.services.ratios import (
     profitability_ratios,
     valuation_ratios,
 )
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
@@ -337,11 +337,11 @@ def test_ratios_view_has_any_true_when_only_cashflow_ratio_populated():
 
 
 def _setup(monkeypatch, tmp_path: Path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import ratios as ratios_svc
-    from brvm.store import financials as fin_repo
+    from kodji.services import ratios as ratios_svc
+    from kodji.store import financials as fin_repo
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -364,8 +364,8 @@ def test_get_ratios_series_computes_yoy_across_two_annual_rows(monkeypatch, tmp_
     db_path, ratios_svc, fin_repo = _setup(monkeypatch, tmp_path)
     with connect(db_path) as conn:
         # Fake filing_id — we only need a valid FK for the compound key.
-        from brvm.models import Filing
-        from brvm.store import filings as filings_repo
+        from kodji.models import Filing
+        from kodji.store import filings as filings_repo
         filings_repo.upsert_filings(conn, [Filing(
             ticker="SNTS", issuer_name="SONATEL", doc_type="rapport_annuel",
             period_kind="annual", period_year=2024, source="brvm_org",
@@ -411,8 +411,8 @@ def test_get_ratios_series_computes_yoy_across_two_annual_rows(monkeypatch, tmp_
 def test_get_latest_ratios_returns_head_of_series(monkeypatch, tmp_path):
     db_path, ratios_svc, fin_repo = _setup(monkeypatch, tmp_path)
     with connect(db_path) as conn:
-        from brvm.models import Filing
-        from brvm.store import filings as filings_repo
+        from kodji.models import Filing
+        from kodji.store import filings as filings_repo
         filings_repo.upsert_filings(conn, [Filing(
             ticker="SNTS", issuer_name="SONATEL", doc_type="rapport_annuel",
             period_kind="annual", period_year=2024, source="brvm_org",
@@ -438,8 +438,8 @@ def test_get_latest_ratios_returns_none_when_no_financials(monkeypatch, tmp_path
 def test_get_ratios_for_interim_uses_most_recent_interim(monkeypatch, tmp_path):
     db_path, ratios_svc, fin_repo = _setup(monkeypatch, tmp_path)
     with connect(db_path) as conn:
-        from brvm.models import Filing
-        from brvm.store import filings as filings_repo
+        from kodji.models import Filing
+        from kodji.store import filings as filings_repo
         filings_repo.upsert_filings(conn, [Filing(
             ticker="SNTS", issuer_name="SONATEL", doc_type="rapport_activites",
             period_kind="H1", period_year=2025, source="brvm_org",

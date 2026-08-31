@@ -7,7 +7,7 @@ The page shows one variation at a time; this fixture is the default
 
 from __future__ import annotations
 
-from brvm.sources.sikafinance import PALMARES_VARIATIONS, parse_palmares
+from kodji.sources.sikafinance import PALMARES_VARIATIONS, parse_palmares
 
 
 def _read(fixtures_dir, rel: str) -> str:

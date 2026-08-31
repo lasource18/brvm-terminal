@@ -18,9 +18,9 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import (
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import (
     AnalystNote,
     CorporateAction,
     IndexLevel,
@@ -28,13 +28,13 @@ from brvm.models import (
     Quote,
     Security,
 )
-from brvm.services._view import PeersView
-from brvm.sources._dedupe import news_hash
-from brvm.store import analyst_notes as notes_repo
-from brvm.store import news as news_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
-from brvm.store import spend as spend_repo
+from kodji.services._view import PeersView
+from kodji.sources._dedupe import news_hash
+from kodji.store import analyst_notes as notes_repo
+from kodji.store import news as news_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
+from kodji.store import spend as spend_repo
 
 from ._fake_anthropic import FakeAnthropic, reply
 from .conftest import apply_migrations
@@ -48,12 +48,12 @@ def _setup(monkeypatch, tmp_path: Path):
     synthesis path skip translation via a module-level monkeypatch so
     their single-reply FakeAnthropic queues keep working. Dedicated
     translation tests re-enable translation explicitly."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import analyst_notes as svc
-    from brvm.services import history as history_mod
-    from brvm.services import llm as llm_mod
+    from kodji.services import analyst_notes as svc
+    from kodji.services import history as history_mod
+    from kodji.services import llm as llm_mod
 
     llm_mod.reset_client()
     history_mod.clear_cache()
@@ -86,12 +86,12 @@ def _setup(monkeypatch, tmp_path: Path):
                    relevance=8, category="earnings")
     # Stub the price-history fetcher so the service never touches the
     # network during a test.
-    from brvm.sources import sikafinance
+    from kodji.sources import sikafinance
     monkeypatch.setattr(sikafinance, "fetch_historique",
                         lambda ticker, country, client=None: [])
     # Stub the peer fetch (Phase 6d competitive analysis). Individual
     # tests can override this by re-patching `company_svc.get_peers_with_ratios`.
-    from brvm.services import company as company_svc
+    from kodji.services import company as company_svc
     monkeypatch.setattr(
         company_svc, "get_peers_with_ratios",
         lambda ticker: PeersView(sector=None, source="none", peers=[]),
@@ -125,7 +125,7 @@ def _seed_news(conn, *, title, published_at, tickers, relevance, category):
 
 
 def test_iso_week_monday_maps_any_day_to_its_monday():
-    from brvm.services.analyst_notes import iso_week_monday
+    from kodji.services.analyst_notes import iso_week_monday
     # 2026-08-24 is a Monday, and 08-30 is the following Sunday of the
     # same ISO week.
     assert iso_week_monday(date(2026, 8, 24)) == date(2026, 8, 24)
@@ -251,7 +251,7 @@ def test_generate_happy_path_persists_and_bills(monkeypatch, tmp_path):
 
     # Spend counter got the same billing on today's row (utcnow-based —
     # billing follows real time, not the week the note covers).
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today = utcnow().date().isoformat()
     with connect(db_path) as conn:
         spent = spend_repo.spent_micros(conn, today, table="note_spend")
@@ -297,7 +297,7 @@ def test_generate_no_api_key_is_a_warning_not_a_crash(monkeypatch, tmp_path):
 
 def test_generate_stops_when_budget_is_exhausted(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today = utcnow().date()
     with connect(db_path) as conn:
         # Burn the whole $3.00 (300 * 10_000 = 3_000_000 micros) before we
@@ -324,7 +324,7 @@ def test_generate_empty_reply_bills_but_marks_failed(monkeypatch, tmp_path):
     )
     assert result.failed is True
     assert result.note is None
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today = utcnow().date().isoformat()
     with connect(db_path) as conn:
         spent = spend_repo.spent_micros(conn, today, table="note_spend")
@@ -346,7 +346,7 @@ def test_generate_transport_error_is_reported_not_billed(monkeypatch, tmp_path):
     )
     assert result.failed is True
     assert result.reason.startswith("transport_error")
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today = utcnow().date().isoformat()
     with connect(db_path) as conn:
         spent = spend_repo.spent_micros(conn, today, table="note_spend")
@@ -407,7 +407,7 @@ def test_generate_for_all_stops_on_budget_exhaustion(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
     # Burn most of the budget so the first ticker succeeds but the second
     # trips the cap.
-    from brvm.clock import utcnow
+    from kodji.clock import utcnow
     today = utcnow().date()
     with connect(db_path) as conn:
         spend_repo.add_usage(
@@ -427,7 +427,7 @@ def test_generate_for_all_stops_on_budget_exhaustion(monkeypatch, tmp_path):
 def test_gather_context_includes_peers_and_corporate_actions(monkeypatch, tmp_path):
     """Phase 6d: peer + corp-action data must land in the LLM snapshot."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    from brvm.services._view import PeerRow
+    from kodji.services._view import PeerRow
 
     def _peers(ticker):
         return PeersView(
@@ -579,11 +579,11 @@ class TestPeerMedians:
     """Pure helper — direct dict inputs, no DB."""
 
     def test_returns_empty_when_no_rows(self):
-        from brvm.services.analyst_notes import _peer_medians
+        from kodji.services.analyst_notes import _peer_medians
         assert _peer_medians([]) == {}
 
     def test_omits_fields_with_one_sample(self):
-        from brvm.services.analyst_notes import _peer_medians
+        from kodji.services.analyst_notes import _peer_medians
         rows = [
             {"pe": 10.0, "roe": None, "net_margin": None,
              "change_ytd_pct": 3.0, "market_cap": None},
@@ -595,7 +595,7 @@ class TestPeerMedians:
         assert med == {}
 
     def test_median_of_odd_and_even_samples(self):
-        from brvm.services.analyst_notes import _peer_medians
+        from kodji.services.analyst_notes import _peer_medians
         rows = [
             {"pe": 8.0, "roe": None, "net_margin": None,
              "change_ytd_pct": None, "market_cap": None},
@@ -613,7 +613,7 @@ class TestPeerMedians:
         assert med2 == {"pe": 11.0}
 
     def test_covers_all_expected_fields(self):
-        from brvm.services.analyst_notes import _peer_medians
+        from kodji.services.analyst_notes import _peer_medians
         rows = [
             {"pe": 8.0, "roe": 10.0, "net_margin": 5.0,
              "change_ytd_pct": 2.0, "market_cap": 1_000.0},
@@ -632,7 +632,7 @@ def test_gather_context_peers_block_includes_medians_and_self(monkeypatch, tmp_p
     `self` dict (the subject's own ratios) so Sonnet can do a concrete
     self-vs-median compare without inventing numbers."""
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    from brvm.services._view import PeerRow
+    from kodji.services._view import PeerRow
 
     def _peers(ticker):
         return PeersView(
@@ -675,7 +675,7 @@ def test_gather_context_peers_block_includes_medians_and_self(monkeypatch, tmp_p
 
 def test_gather_context_peers_medians_empty_when_all_null(monkeypatch, tmp_path):
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    from brvm.services._view import PeerRow
+    from kodji.services._view import PeerRow
 
     def _peers(ticker):
         # Every peer has null ratios → no field clears the ≥2-sample floor.
@@ -719,19 +719,19 @@ class TestMaxDrawdown:
     """Pure helper — no DB / fixtures."""
 
     def test_none_when_series_too_short(self):
-        from brvm.services.analyst_notes import _max_drawdown_pct
+        from kodji.services.analyst_notes import _max_drawdown_pct
         assert _max_drawdown_pct([]) is None
         assert _max_drawdown_pct([100.0]) is None
 
     def test_monotonic_series_is_zero(self):
-        from brvm.services.analyst_notes import _max_drawdown_pct
+        from kodji.services.analyst_notes import _max_drawdown_pct
         # Newest-first ascending (i.e. price only went up chronologically).
         assert _max_drawdown_pct([120.0, 110.0, 100.0]) == 0.0
 
     def test_measures_peak_to_trough(self):
         # Chronological: 100 → 90 → 110 → 80. Peak 110, trough 80 →
         # 27.27% drawdown. Series comes in newest-first.
-        from brvm.services.analyst_notes import _max_drawdown_pct
+        from kodji.services.analyst_notes import _max_drawdown_pct
         dd = _max_drawdown_pct([80.0, 110.0, 90.0, 100.0])
         assert dd is not None
         assert abs(dd - 27.2727272727) < 1e-6
@@ -739,7 +739,7 @@ class TestMaxDrawdown:
     def test_peak_only_ratchets_from_prior_prices(self):
         # A single early spike should still register — the walk is
         # chronological and the peak ratchet cannot look backwards.
-        from brvm.services.analyst_notes import _max_drawdown_pct
+        from kodji.services.analyst_notes import _max_drawdown_pct
         # Chronological: 100 → 200 → 150 → 180. Peak 200, trough 150 = 25%.
         dd = _max_drawdown_pct([180.0, 150.0, 200.0, 100.0])
         assert dd is not None
@@ -751,7 +751,7 @@ class TestBetaVsMarket:
 
     def _bars(self, closes: list[float], start_date: date):
         # Newest-first bars: closes[0] is the latest session.
-        from brvm.models import DailyBar
+        from kodji.models import DailyBar
         n = len(closes)
         return [
             DailyBar(
@@ -762,13 +762,13 @@ class TestBetaVsMarket:
         ]
 
     def test_none_when_market_missing(self):
-        from brvm.services.analyst_notes import _beta_vs_market
+        from kodji.services.analyst_notes import _beta_vs_market
         stock = self._bars([100.0, 99.0, 98.0], date(2026, 8, 27))
         assert _beta_vs_market(stock, None) is None
         assert _beta_vs_market(stock, []) is None
 
     def test_none_when_fewer_than_20_aligned_returns(self):
-        from brvm.services.analyst_notes import _beta_vs_market
+        from kodji.services.analyst_notes import _beta_vs_market
         stock = self._bars([100 + i for i in range(15)], date(2026, 8, 27))
         market = self._bars([50 + i for i in range(15)], date(2026, 8, 27))
         # 15 bars → 14 returns → below the 20-return floor.
@@ -779,7 +779,7 @@ class TestBetaVsMarket:
         # 25 sessions gives 24 aligned returns, over the floor.
         import math
 
-        from brvm.services.analyst_notes import _beta_vs_market
+        from kodji.services.analyst_notes import _beta_vs_market
         n = 25
         # Build a market with non-flat returns so var(market) > 0.
         # Use a simple random-ish sinusoid so the covariance is exact.
@@ -800,7 +800,7 @@ class TestBetaVsMarket:
         # Different-magnitude but correlated series → positive beta.
         import math
 
-        from brvm.services.analyst_notes import _beta_vs_market
+        from kodji.services.analyst_notes import _beta_vs_market
         n = 30
         market_closes = list(reversed(
             [100 * (1 + 0.01 * math.sin(i / 2)) for i in range(n)]
@@ -826,8 +826,8 @@ class TestBetaVsMarket:
         # stock closes with non-consecutive market closes.
         import math
 
-        from brvm.models import DailyBar
-        from brvm.services.analyst_notes import _beta_vs_market
+        from kodji.models import DailyBar
+        from kodji.services.analyst_notes import _beta_vs_market
         n = 30
         market_chrono = [100 * (1 + 0.01 * math.sin(i / 2)) for i in range(n)]
         stock_chrono = [c * 0.5 for c in market_chrono]
@@ -859,8 +859,8 @@ class TestBetaVsMarket:
 
 class TestPriceStatsPayload:
     def test_max_drawdown_populated_when_series_present(self):
-        from brvm.models import DailyBar
-        from brvm.services.analyst_notes import _price_stats
+        from kodji.models import DailyBar
+        from kodji.services.analyst_notes import _price_stats
         # Chronological: 100 → 200 → 150 (peak-to-trough = 25%).
         bars = [
             DailyBar(ticker="X", session_date=date(2026, 8, 27),
@@ -881,13 +881,13 @@ class TestPriceStatsPayload:
         # Seed 30 aligned close pairs so beta clears the 20-return floor.
         import math
 
-        from brvm.models import DailyBar
+        from kodji.models import DailyBar
         n = 30
         base = date(2026, 8, 20)
         market_chrono = [300 + 5 * math.sin(i / 2) for i in range(n)]
         stock_chrono = [30000 + 500 * math.sin(i / 2) for i in range(n)]
 
-        from brvm.models import IndexLevel
+        from kodji.models import IndexLevel
         with connect(db_path) as conn:
             quotes_repo.upsert_daily_bars(conn, [
                 DailyBar(
@@ -909,7 +909,7 @@ class TestPriceStatsPayload:
                 for i in range(n)
             ])
         # history.get_history caches — reset so we pick up the fresh rows.
-        from brvm.services import history as history_mod
+        from kodji.services import history as history_mod
         history_mod.clear_cache()
         ctx = svc.gather_context("SNTS", week_start=date(2026, 8, 24))
         assert ctx is not None

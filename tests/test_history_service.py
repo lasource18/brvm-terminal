@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from brvm.db import connect
-from brvm.models import DailyBar, IndexLevel, Quote, Security
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import DailyBar, IndexLevel, Quote, Security
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 
 def _init(db_path: Path) -> None:
@@ -25,12 +25,12 @@ def _init(db_path: Path) -> None:
 
 @pytest.fixture
 def history_env(monkeypatch, tmp_path):
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
-    db = tmp_path / "brvm.sqlite"
+    db = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db))
     reset_settings_cache()
-    from brvm.services import history as history_mod
+    from kodji.services import history as history_mod
 
     _init(db)
     history_mod.clear_cache()
@@ -66,7 +66,7 @@ def test_cache_populates_on_miss_and_hits_on_second_call(history_env, monkeypatc
         calls["n"] += 1
         return _fake_bars(5)
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique", fake_fetch)
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique", fake_fetch)
 
     bars1 = history_env.get_history("SNTS", "SN")
     assert len(bars1) == 5
@@ -89,7 +89,7 @@ def test_falls_back_to_db_when_fetch_fails_and_db_has_rows(history_env, monkeypa
     def boom(*a, **kw):
         raise httpx.HTTPError("network down")
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique", boom)
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique", boom)
     # Also make _newest_ingested_age return infinity to bypass the DB-fresh branch.
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 10**9)
 
@@ -143,7 +143,7 @@ def test_intraday_overlay_prepends_todays_bar_from_snapshots(history_env, monkey
         conn.commit()
 
     # Neuter the network + freshness path so the DB read wins.
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique",
                         lambda *a, **kw: [])
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
 
@@ -183,7 +183,7 @@ def test_intraday_overlay_skips_when_today_already_in_daily_bars(history_env, mo
         conn.execute("UPDATE quote_snapshots SET captured_utc = '2026-08-24T13:00:00Z'")
         conn.commit()
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique",
                         lambda *a, **kw: [])
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
 
@@ -236,7 +236,7 @@ def test_intraday_overlay_ignores_premarket_snapshots(history_env, monkeypatch):
         )
         conn.commit()
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique",
                         lambda *a, **kw: [])
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
 
@@ -277,7 +277,7 @@ def test_intraday_overlay_pre_market_only_returns_history_unchanged(history_env,
         conn.execute("UPDATE quote_snapshots SET captured_utc = '2026-08-24T03:17:00Z'")
         conn.commit()
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique",
                         lambda *a, **kw: [])
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
 
@@ -302,7 +302,7 @@ def test_intraday_overlay_no_snapshots_no_overlay(history_env, monkeypatch):
                      source="sikafinance"),
         ])
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique",
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique",
                         lambda *a, **kw: [])
     monkeypatch.setattr(history_env, "_newest_ingested_age", lambda t: 0)
 
@@ -337,7 +337,7 @@ def test_backfill_all_walks_every_active_equity(monkeypatch, history_env):
         ]
 
     monkeypatch.setattr(
-        "brvm.services.history.sikafinance.fetch_historique", fake_fetch
+        "kodji.services.history.sikafinance.fetch_historique", fake_fetch
     )
 
     class _NoOpClient:
@@ -371,7 +371,7 @@ def test_backfill_all_skips_recently_ingested(monkeypatch, history_env):
         return _fake_bars(3)
 
     monkeypatch.setattr(
-        "brvm.services.history.sikafinance.fetch_historique", fake_fetch
+        "kodji.services.history.sikafinance.fetch_historique", fake_fetch
     )
 
     class _NoOpClient:
@@ -400,7 +400,7 @@ def test_backfill_all_survives_http_errors(monkeypatch, history_env):
         return _fake_bars(2)
 
     monkeypatch.setattr(
-        "brvm.services.history.sikafinance.fetch_historique", flaky
+        "kodji.services.history.sikafinance.fetch_historique", flaky
     )
 
     class _NoOpClient:
@@ -418,7 +418,7 @@ def test_indices_load_from_index_levels_and_skip_network(history_env, monkeypatc
     def boom(*a, **kw):  # would fire if the code path attempted the fetch
         raise AssertionError("fetch_historique should not be called for indices")
 
-    monkeypatch.setattr("brvm.services.history.sikafinance.fetch_historique", boom)
+    monkeypatch.setattr("kodji.services.history.sikafinance.fetch_historique", boom)
 
     base = date(2026, 8, 18)
     levels = [

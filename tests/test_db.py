@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from brvm.db import connect, ensure_migrations_table
+from kodji.db import connect, ensure_migrations_table
 
 
 def test_migration_creates_all_tables(tmp_db_path: Path):

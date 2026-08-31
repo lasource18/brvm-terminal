@@ -8,15 +8,15 @@ from __future__ import annotations
 
 from datetime import date
 
-from brvm.db import connect
-from brvm.models import BondSnapshot, DailyBar, Security
-from brvm.store import bonds as bonds_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import BondSnapshot, DailyBar, Security
+from kodji.store import bonds as bonds_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 
 def _seed_bond(client) -> None:
-    from brvm.config import settings
+    from kodji.config import settings
     with connect(settings.db_path) as conn:
         sec_repo.upsert(conn, [
             Security(

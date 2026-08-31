@@ -1,5 +1,5 @@
 [project]
-name = "brvm-terminal"
+name = "kodji-terminal"
 version = "0.1.0"
 description = "Lightweight Bloomberg-style terminal for the BRVM (Bourse Régionale des Valeurs Mobilières, WAEMU)."
 readme = "README.md"
@@ -40,10 +40,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-brvm-tui = "brvm.apps.tui.__main__:main"
+kodji-tui = "kodji.apps.tui.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/brvm"]
+packages = ["src/kodji"]
 
 [tool.uv]
 package = true

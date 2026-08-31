@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.store import spend as spend_repo
+from kodji.db import connect
+from kodji.store import spend as spend_repo
 
 from .conftest import apply_migrations
 

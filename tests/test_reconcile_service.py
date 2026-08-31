@@ -5,15 +5,15 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.models import DailyBar, Security
-from brvm.services import reconcile
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import DailyBar, Security
+from kodji.services import reconcile
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 
 def _apply_migrations(db_path: Path) -> None:
-    from brvm.db import ensure_migrations_table
+    from kodji.db import ensure_migrations_table
 
     migrations = Path(__file__).resolve().parents[1] / "migrations"
     with connect(db_path) as conn:
@@ -46,9 +46,9 @@ def _seed(db_path: Path, session: date) -> None:
 
 
 def test_matches_within_tolerance(monkeypatch, tmp_path, fixtures_dir):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
     _apply_migrations(db_path)
     session = date(2026, 8, 18)
@@ -74,9 +74,9 @@ def test_matches_within_tolerance(monkeypatch, tmp_path, fixtures_dir):
 
 
 def test_missing_local_row_reported_as_no_delta(monkeypatch, tmp_path, fixtures_dir):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
     _apply_migrations(db_path)
     session = date(2026, 8, 18)
@@ -102,9 +102,9 @@ def test_missing_local_row_reported_as_no_delta(monkeypatch, tmp_path, fixtures_
 
 
 def test_empty_pdf_returns_empty_report(monkeypatch, tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
     _apply_migrations(db_path)
     # No pypdf-parseable content and no local bars.
@@ -126,9 +126,9 @@ def test_session_date_defaults_to_boc_pdf_date(
     `MAX(daily_bars.session_date)` — which for equity tickers is
     typically the most recent weekly-backfill row, days apart from
     the BOC's date."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
     _apply_migrations(db_path)
 
@@ -136,7 +136,7 @@ def test_session_date_defaults_to_boc_pdf_date(
     # isn't the source of the returned session_date.
     _seed(db_path, date(2026, 8, 11))
 
-    from brvm.sources import brvm_org as brvm_org_module
+    from kodji.sources import brvm_org as brvm_org_module
     pdf = (fixtures_dir / "brvm_org" / "boc_eng_20260818_2.pdf").read_bytes()
 
     def _fake_fetch(lang: str = "eng") -> brvm_org_module.BocFetch:
@@ -156,14 +156,14 @@ def test_session_date_falls_back_to_latest_when_boc_pdf_lacks_date(
     """Malformed BOC filename (no YYYYMMDD block) falls back to
     _latest_session() so the reconciliation still runs against
     something rather than silently returning session_date=None."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
     reset_settings_cache()
     _apply_migrations(db_path)
     _seed(db_path, date(2026, 8, 11))
 
-    from brvm.sources import brvm_org as brvm_org_module
+    from kodji.sources import brvm_org as brvm_org_module
     pdf = (fixtures_dir / "brvm_org" / "boc_eng_20260818_2.pdf").read_bytes()
 
     def _fake_fetch(lang: str = "eng") -> brvm_org_module.BocFetch:
@@ -175,7 +175,7 @@ def test_session_date_falls_back_to_latest_when_boc_pdf_lacks_date(
 
 
 def test_report_flags_has_drift():
-    from brvm.services.reconcile import CloseDrift, ReconcileReport
+    from kodji.services.reconcile import CloseDrift, ReconcileReport
     empty = ReconcileReport(session_date=None, boc_rows=0, matched=0, drift=[])
     assert not empty.has_drift
     populated = ReconcileReport(

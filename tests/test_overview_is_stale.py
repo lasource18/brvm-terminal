@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from brvm.services._view import Overview
+from kodji.services._view import Overview
 
 
 def _at(delta: timedelta) -> str:
@@ -71,7 +71,7 @@ def test_unparseable_timestamp_is_stale():
 
 
 def test_naive_timestamp_is_treated_as_utc():
-    """`utc_iso()` in `brvm.clock` produces timezone-aware strings, but
+    """`utc_iso()` in `kodji.clock` produces timezone-aware strings, but
     a legacy row could be stored naive. Treat naive as UTC so a fresh
     row still renders as fresh."""
     naive = (datetime.now(UTC) - timedelta(minutes=5)).replace(tzinfo=None).isoformat()

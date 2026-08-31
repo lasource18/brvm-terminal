@@ -1,18 +1,18 @@
 import pytest
 
-from brvm.db import connect
-from brvm.models import Security
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import Security
+from kodji.store import securities as sec_repo
 
 
 @pytest.fixture
 def company_env(monkeypatch, tmp_path):
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import company as company_mod
+    from kodji.services import company as company_mod
 
     with connect(db_path) as conn:
         # Apply the full migration set — new tabs (Phase 4d Peers-with-
@@ -48,7 +48,7 @@ def test_sikafinance_success_path(company_env, monkeypatch):
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_societe", fake_societe
+        "kodji.services.company.sikafinance.fetch_societe", fake_societe
     )
     p = company_env.get_description("SNTS")
     assert p is not None
@@ -91,13 +91,13 @@ def test_falls_back_to_afx_when_sikafinance_fails(company_env, monkeypatch):
             return FakeResp()
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_societe", broken_societe
+        "kodji.services.company.sikafinance.fetch_societe", broken_societe
     )
-    monkeypatch.setattr("brvm.sources._http.make_client", lambda: FakeClient())
+    monkeypatch.setattr("kodji.sources._http.make_client", lambda: FakeClient())
 
     # afx_kwayisi.fetch_ticker is also called; stub it out too.
     monkeypatch.setattr(
-        "brvm.services.company.afx_kwayisi.fetch_ticker",
+        "kodji.services.company.afx_kwayisi.fetch_ticker",
         lambda t, client=None: (None, []),
     )
 
@@ -126,7 +126,7 @@ def test_peers_success_path(company_env, monkeypatch):
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
     view = company_env.get_peers("SNTS")
     assert view.source == "sikafinance"
@@ -139,10 +139,10 @@ def test_peers_with_ratios_annotates_from_ratios_service(company_env, monkeypatc
     """Phase 4d: the Peers tab route calls `get_peers_with_ratios`, which
     should walk each peer through `services.ratios.get_latest_ratios`
     and populate `pe`, `roe`, `net_margin` on the returned PeerRow."""
-    from brvm.models import Filing, Quote
-    from brvm.store import filings as filings_repo
-    from brvm.store import financials as fin_repo
-    from brvm.store import quotes as quotes_repo
+    from kodji.models import Filing, Quote
+    from kodji.store import filings as filings_repo
+    from kodji.store import financials as fin_repo
+    from kodji.store import quotes as quotes_repo
 
     def fake_secteur(ticker, country, client=None):
         return {
@@ -158,11 +158,11 @@ def test_peers_with_ratios_annotates_from_ratios_service(company_env, monkeypatc
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
 
     # Seed ORAC with financials + shares + a quote so it produces ratios.
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     with connect(db_path) as conn:
         sec_repo.upsert(conn, [
             Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
@@ -214,10 +214,10 @@ def test_peers_with_ratios_annotates_cash_flow_ratios(
     """PR-F: the Peers tab now surfaces P/FCF, FCF yield, and EV/EBITDA
     in addition to P/E / ROE / net margin. Verify a peer with a positive
     free_cash_flow and operating_income row picks up all three."""
-    from brvm.models import Filing, Quote
-    from brvm.store import filings as filings_repo
-    from brvm.store import financials as fin_repo
-    from brvm.store import quotes as quotes_repo
+    from kodji.models import Filing, Quote
+    from kodji.store import filings as filings_repo
+    from kodji.store import financials as fin_repo
+    from kodji.store import quotes as quotes_repo
 
     def fake_secteur(ticker, country, client=None):
         return {
@@ -233,10 +233,10 @@ def test_peers_with_ratios_annotates_cash_flow_ratios(
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     with connect(db_path) as conn:
         sec_repo.upsert(conn, [
             Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
@@ -282,8 +282,8 @@ def test_peers_with_ratios_appends_self_row_at_the_bottom(company_env, monkeypat
     """The currently-viewed company shows up as an `is_self=True` row at
     the end of the peers list so the ratios table doubles as a
     self-vs-peers comparison view."""
-    from brvm.models import Quote
-    from brvm.store import quotes as quotes_repo
+    from kodji.models import Quote
+    from kodji.store import quotes as quotes_repo
 
     def fake_secteur(ticker, country, client=None):
         return {
@@ -299,11 +299,11 @@ def test_peers_with_ratios_appends_self_row_at_the_bottom(company_env, monkeypat
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
 
     # Seed a live SNTS quote so the self row picks up last/day%/volume.
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     with connect(db_path) as conn:
         quotes_repo.insert_snapshots(conn, [
             Quote(ticker="SNTS", source="sikafinance",
@@ -335,11 +335,11 @@ def test_peers_with_ratios_self_row_shows_when_no_peers_available(
 ):
     """Even when sikafinance returns no peers, the self row still
     populates so the tab isn't empty for issuers in an orphan sector."""
-    from brvm.models import Quote
-    from brvm.store import quotes as quotes_repo
+    from kodji.models import Quote
+    from kodji.store import quotes as quotes_repo
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur",
+        "kodji.services.company.sikafinance.fetch_secteur",
         lambda ticker, country, client=None: {"sector": None, "peers": []},
     )
     # Stub the afx fallback client to return an empty competitors block
@@ -359,9 +359,9 @@ def test_peers_with_ratios_self_row_shows_when_no_peers_available(
         def get(self, url):
             return _EmptyResp()
 
-    monkeypatch.setattr("brvm.sources._http.make_client", lambda: _EmptyClient())
+    monkeypatch.setattr("kodji.sources._http.make_client", lambda: _EmptyClient())
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     with connect(db_path) as conn:
         quotes_repo.insert_snapshots(conn, [
             Quote(ticker="SNTS", source="sikafinance",
@@ -381,7 +381,7 @@ class TestPeerStats:
     """Pure helper — uses PeerRow instances directly, no DB."""
 
     def _rows(self):
-        from brvm.services._view import PeerRow
+        from kodji.services._view import PeerRow
         return [
             PeerRow(ticker="A", name="A", last=100.0, change_ytd_pct=2.0,
                     pe=8.0, roe=10.0, net_margin=5.0),
@@ -394,7 +394,7 @@ class TestPeerStats:
         ]
 
     def test_excludes_self_row(self):
-        from brvm.services.company import _peer_stats
+        from kodji.services.company import _peer_stats
         stats = _peer_stats(self._rows())
         # If self were included, pe median would be ~11 (10+12/2) and
         # mean would be shifted upward. Excluding it: {8, 10, 12} →
@@ -404,8 +404,8 @@ class TestPeerStats:
         assert stats["pe"].n == 3
 
     def test_omits_median_mean_when_only_one_sample(self):
-        from brvm.services._view import PeerRow
-        from brvm.services.company import _peer_stats
+        from kodji.services._view import PeerRow
+        from kodji.services.company import _peer_stats
         # Only one peer reports ROE (10.0); B has None, C has 20.0.
         # Wait — my helper's rows() has ROE None on B and 20 on C plus
         # 10 on A → 2 samples. Build a fresh rows list where only one
@@ -421,8 +421,8 @@ class TestPeerStats:
         assert stats["roe"].mean is None
 
     def test_omits_field_entirely_when_no_samples(self):
-        from brvm.services._view import PeerRow
-        from brvm.services.company import _peer_stats
+        from kodji.services._view import PeerRow
+        from kodji.services.company import _peer_stats
         rows = [
             PeerRow(ticker="A", name="A"),
             PeerRow(ticker="B", name="B"),
@@ -432,7 +432,7 @@ class TestPeerStats:
         assert "roe" not in stats
 
     def test_covers_all_five_fields_when_populated(self):
-        from brvm.services.company import _peer_stats
+        from kodji.services.company import _peer_stats
         stats = _peer_stats(self._rows())
         # net_margin has 2 samples (5.0 + 15.0), roe has 2 (10 + 20).
         assert stats["net_margin"].median == 10.0
@@ -446,8 +446,8 @@ class TestPeerStats:
 def test_get_peers_with_ratios_includes_stats_block(company_env, monkeypatch, tmp_path):
     """Wiring test: `stats` should be populated in the returned view so
     the web + TUI Peers tabs can render MEDIAN / MEAN rows."""
-    from brvm.models import Quote
-    from brvm.store import quotes as quotes_repo
+    from kodji.models import Quote
+    from kodji.store import quotes as quotes_repo
 
     def fake_secteur(ticker, country, client=None):
         return {
@@ -466,9 +466,9 @@ def test_get_peers_with_ratios_includes_stats_block(company_env, monkeypatch, tm
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     with connect(db_path) as conn:
         quotes_repo.insert_snapshots(conn, [
             Quote(ticker="SNTS", source="sikafinance",

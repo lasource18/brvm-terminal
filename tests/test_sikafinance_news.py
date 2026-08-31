@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from brvm.sources.sikafinance import (
+from kodji.sources.sikafinance import (
     parse_communiques,
     parse_dividendes,
     parse_news_feed,

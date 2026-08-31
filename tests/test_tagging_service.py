@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import NewsItem, Security
-from brvm.sources._dedupe import news_hash
-from brvm.store import news as news_repo
-from brvm.store import securities as sec_repo
-from brvm.store import spend as spend_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import NewsItem, Security
+from kodji.sources._dedupe import news_hash
+from kodji.store import news as news_repo
+from kodji.store import securities as sec_repo
+from kodji.store import spend as spend_repo
 
 from ._fake_anthropic import FakeAnthropic, echoing_client, json_reply, reply, tag_for
 from .conftest import apply_migrations
@@ -31,11 +31,11 @@ def _mk(title: str, **extra) -> NewsItem:
 
 def _setup(monkeypatch, tmp_path: Path, n_items: int = 5):
     """Fresh DB + seeded securities + `n_items` untagged news rows."""
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import llm as llm_mod
-    from brvm.services import tagging as svc
+    from kodji.services import llm as llm_mod
+    from kodji.services import tagging as svc
 
     llm_mod.reset_client()
 

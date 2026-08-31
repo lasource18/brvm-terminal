@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from brvm.services import extraction
+from kodji.services import extraction
 
 from ._fake_anthropic import FakeAnthropic, FakeResponse, reply
 

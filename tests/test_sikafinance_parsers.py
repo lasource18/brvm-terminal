@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from brvm.sources.sikafinance import (
+from kodji.sources.sikafinance import (
     parse_aaz,
     parse_cotation,
     parse_cotation_meta,
@@ -76,7 +76,7 @@ class TestParseAAZ:
         the previous weekday on weekends and pre-open weekday
         mornings. Guards against a regression that silently
         reintroduces `date.today()` for the default path."""
-        from brvm.clock import last_completed_session_date
+        from kodji.clock import last_completed_session_date
         html = _read(fixtures_dir, "sikafinance/aaz.html")
         _, _, indices = parse_aaz(html)
         expected = last_completed_session_date()

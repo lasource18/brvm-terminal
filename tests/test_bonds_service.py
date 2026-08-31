@@ -6,16 +6,16 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.models import BondSnapshot, DailyBar, Security
-from brvm.services import bonds as bonds_svc
-from brvm.store import bonds as bonds_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import BondSnapshot, DailyBar, Security
+from kodji.services import bonds as bonds_svc
+from kodji.store import bonds as bonds_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 
 def _apply_migrations(db_path: Path) -> None:
-    from brvm.db import ensure_migrations_table
+    from kodji.db import ensure_migrations_table
 
     migrations = Path(__file__).resolve().parents[1] / "migrations"
     with connect(db_path) as conn:
@@ -446,17 +446,17 @@ def _seed_mali(conn) -> None:
 
 class TestGetBondView:
     def test_returns_none_for_missing_ticker(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         assert bonds_svc.get_bond_view("NOPE") is None
 
     def test_returns_none_for_equity(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -464,9 +464,9 @@ class TestGetBondView:
         assert bonds_svc.get_bond_view("SNTS") is None
 
     def test_composes_reference_snapshot_schedule_yield(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -488,9 +488,9 @@ class TestGetBondView:
         assert view.yield_.current_yield_pct == 6.20
 
     def test_related_excludes_self_and_sorts_by_maturity(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -506,9 +506,9 @@ class TestGetBondView:
         assert matured["EOM.O11"] is False    # 2030 > 2026
 
     def test_issuer_equity_cross_link(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -538,9 +538,9 @@ class TestGetBondView:
         naive `%BOA%` LIKE against `securities.name` returned zero
         rows. The synonym expansion maps `BOA` → `BANK OF AFRICA` so
         the sibling equity resolves."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -574,9 +574,9 @@ class TestGetBondView:
         2017-2027, quoted 1 250 XOF) must not render 48.80 % current
         yield. The last-coupon amount recovers the residual, which
         threads into both the schedule and the current-yield formula."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -625,9 +625,9 @@ class TestGetBondView:
         - terminal principal row of 10 000 (not 5 000, which is what
           the user reported seeing as "half the current price")
         """
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -674,9 +674,9 @@ class TestGetBondView:
         assert abs(view.yield_.current_yield_pct - 6.00) < 0.05
 
     def test_state_bond_has_no_equity_cross_link(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -688,9 +688,9 @@ class TestGetBondView:
     def test_prospectus_url_defaults_to_none(self, monkeypatch, tmp_path):
         """No prospectus link seeded → view exposes the field as None so
         the template can hide the row rather than render a broken link."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:
@@ -707,12 +707,12 @@ class TestGetBondView:
         an existing manual pin (idempotent — later runs don't overwrite
         by default). Also verifies the newest-wins ordering when the
         same ticker turns up twice in the input iterable."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
-        from brvm.sources.brvm_org_avis import Avis
+        from kodji.sources.brvm_org_avis import Avis
 
         with connect(db_path) as conn:
             _seed_mali(conn)  # seeds EOM.O10, EOM.O11, EOM.O2
@@ -782,12 +782,12 @@ class TestGetBondView:
         the ticker (e.g. TPCI's 2014 admission avis) resolve via the
         `(issuer_brand, coupon, iy, my)` spec against `securities`.
         Blocker case in the audit report."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
-        from brvm.sources.brvm_org_avis import Avis, BondSpec
+        from kodji.sources.brvm_org_avis import Avis, BondSpec
 
         with connect(db_path) as conn:
             # Seed a matured TPCI bond with the shape of TPCI.O18.
@@ -831,12 +831,12 @@ class TestGetBondView:
         different issue years are ambiguous. `_resolve_bond_spec`
         breaks ties on `issue_date` year; when even that doesn't
         disambiguate, refuse to guess and leave both rows untouched."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
-        from brvm.sources.brvm_org_avis import Avis, BondSpec
+        from kodji.sources.brvm_org_avis import Avis, BondSpec
 
         with connect(db_path) as conn:
             sec_repo.upsert(conn, [
@@ -876,12 +876,12 @@ class TestGetBondView:
     ):
         """`overwrite=True` is the escape hatch for a URL that we know
         moved — it replaces the manual pin instead of respecting it."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
-        from brvm.sources.brvm_org_avis import Avis
+        from kodji.sources.brvm_org_avis import Avis
 
         with connect(db_path) as conn:
             _seed_mali(conn)
@@ -909,9 +909,9 @@ class TestGetBondView:
         """A pinned prospectus URL on `securities` threads all the way
         through to the view — the Bloomberg-style "Prospectus: <link>"
         row on the bond overview reads this field."""
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
-        from brvm.config import reset_settings_cache
+        from kodji.config import reset_settings_cache
         reset_settings_cache()
         _apply_migrations(db_path)
         with connect(db_path) as conn:

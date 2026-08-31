@@ -49,7 +49,7 @@ def test_history_api_returns_ascending_bars(client, monkeypatch):
     """
     from datetime import date, timedelta
 
-    from brvm.models import DailyBar
+    from kodji.models import DailyBar
 
     def fake_fetch(ticker, country, client=None):
         base = date(2026, 8, 18)
@@ -69,9 +69,9 @@ def test_history_api_returns_ascending_bars(client, monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "brvm.services.history.sikafinance.fetch_historique", fake_fetch
+        "kodji.services.history.sikafinance.fetch_historique", fake_fetch
     )
-    from brvm.services import history as h
+    from kodji.services import history as h
     h.clear_cache()
 
     r = client.get("/api/history/SNTS")

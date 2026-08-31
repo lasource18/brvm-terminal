@@ -1,4 +1,4 @@
-# brvm-terminal — phase log
+# kodji-terminal — phase log
 
 Living record of what's been shipped, what was cut/deferred, and what
 comes next. Updated at the end of each phase. See `CLAUDE.md` for the
@@ -90,7 +90,7 @@ when we pick it up):
 - `Justfile` with `sync`, `dev`, `migrate`, `test`, `lint`, `fmt`,
   `refresh-fixtures`, `snapshot` targets. Web dev port `8765` (avoids a
   local project on 8000).
-- Skeleton `docker-compose.yml`, `deploy/brvm-terminal.service`,
+- Skeleton `docker-compose.yml`, `deploy/kodji-terminal.service`,
   `deploy/Caddyfile.example` — not run yet, kept for shape review.
 - FastAPI stub at `/` (dark terminal aesthetic) and `/health`.
 - `env.example` (renamed from `.env.example` to satisfy local `.env*`
@@ -98,7 +98,7 @@ when we pick it up):
 
 **Definition of Done — met**
 - `just sync` → `.venv` populated.
-- `just migrate` → `data/brvm.sqlite` with all tables.
+- `just migrate` → `data/kodji.sqlite` with all tables.
 - `just test` → all green (12 tests at phase end).
 - `just dev` → `curl http://127.0.0.1:8765/health` returns JSON `ok`.
 - `ruff check .` clean.
@@ -255,7 +255,7 @@ when we pick it up):
     to the afx.kwayisi `<table data-comp>` peers block.
   - **News / Corporate actions / Financials / Ownership / Segments** —
     placeholder tabs that render "Coming in Phase 3/4" so links stay
-    live. Registry in `src/brvm/apps/web/tabs.py`.
+    live. Registry in `src/kodji/apps/web/tabs.py`.
 - New services: `services/company.py` (60-min in-memory TTL for
   description + peers, sikafinance→afx fallback), `services/search.py`,
   `services/directory.py`.
@@ -545,7 +545,7 @@ when we pick it up):
 - `services/market.overview()` imports `services/news` lazily to keep
   the import graph shallow (news → sikafinance → httpx — no need to
   drag those into every market call).
-- `_RELOADABLE` in `tests/conftest.py` gained `brvm.services.news`
+- `_RELOADABLE` in `tests/conftest.py` gained `kodji.services.news`
   because `market` now imports it. Still trending toward the
   15-module refactor threshold flagged in 2.5's notes.
 
@@ -574,7 +574,7 @@ corpus. **No UI change, no LLM call, no extraction.**
   - `filings_spend` — separate daily counter for the 4b extractor,
     same micros-precision shape as `llm_spend` after 0004. Ready for
     the $2/day cap without a further migration.
-- **`Filing` model** in `brvm.models`, with typed `FilingDocType`
+- **`Filing` model** in `kodji.models`, with typed `FilingDocType`
   (etats_financiers · rapport_annuel · rapport_activites · resultats ·
   rse · assemblee · autre) and `FilingPeriodKind`
   (annual · H1 · Q1 · Q3 · other).
@@ -1028,15 +1028,15 @@ action.
 
 **Delivered**
 
-- **`src/brvm/apps/tui/`** — new package: `app.py` (`BRVMTerminalApp`
+- **`src/kodji/apps/tui/`** — new package: `app.py` (`KodjiTerminalApp`
   shell + `ContentSwitcher`), `sidebar.py` (watchlist column), one
   `views/*.py` per screen (`home`, `ticker`, `directory`, `news`,
   `watchlists`, `alerts`), `palette.py` (Ctrl-K search modal),
   `format.py` (shared number/pct/age formatters), `style.tcss`
   (dark-terminal aesthetic).
-- **Entrypoints** — `just tui` runs `python -m brvm.apps.tui`;
-  `brvm-tui` console_scripts entry via `[project.scripts]`. Both share
-  the same `BRVMTerminalApp().run()` path.
+- **Entrypoints** — `just tui` runs `python -m kodji.apps.tui`;
+  `kodji-tui` console_scripts entry via `[project.scripts]`. Both share
+  the same `KodjiTerminalApp().run()` path.
 - **Persistent chrome** — header row with market-status pill
   (● OPEN / ○ CLOSED), Abidjan clock, and a "last snapshot: Xs ago"
   clock that pulls from `services.market.last_snapshot_utc`. Repainted
@@ -1082,7 +1082,7 @@ action.
   system-wide.
 - **Refresh model** — App-level `set_interval(30, _tick_refresh)`
   during market hours; off-hours the tick returns early via
-  `brvm.clock.is_market_open()`. `r` always forces a manual pass.
+  `kodji.clock.is_market_open()`. `r` always forces a manual pass.
   Repaints preserve `DataTable.cursor_coordinate` and
   `scroll_y` — the fresh snapshot slides in under the user's cursor
   without yanking it around.
@@ -1100,8 +1100,8 @@ action.
 
 **Definition of Done — met**
 
-- `just tui` boots the app against the current `data/brvm.sqlite`.
-- `uv run brvm-tui` boots the same app via the console_scripts entry.
+- `just tui` boots the app against the current `data/kodji.sqlite`.
+- `uv run kodji-tui` boots the same app via the console_scripts entry.
 - `just test` → **448 tests green** (14 new via Textual `Pilot`: boot,
   indices render, sidebar populates, each screen switch (directory /
   news / alerts / watchlists), open ticker from sidebar, refresh
@@ -1325,7 +1325,7 @@ have run.
   `usage_from_response()` promoted from `_` names (Phase 6c will reuse
   them for analyst-note synthesis).
 - **`jobs/brief_run.py`** + `just brief-run` / `just brief-run-dry` /
-  `just brief-run --date YYYY-MM-DD` (via `python -m brvm.jobs.brief_run`).
+  `just brief-run --date YYYY-MM-DD` (via `python -m kodji.jobs.brief_run`).
   Scheduler: `brief_daily` at 15:30 Africa/Abidjan Mon-Fri (BRVM closes
   ~15:00; the news tagger has finished stamping relevance by then).
 - **`/brief`** page — latest brief with a "machine-generated" badge, an
@@ -1967,7 +1967,7 @@ the charter (`CLAUDE.md`) is anti-hardcoding.
   stopword handling, 8 for the bond page routes covering redirect /
   four tab bodies / hidden-tab 404s / regression on equity flow).
   Ruff clean.
-- Smoke test against a seeded `data/brvm.sqlite`:
+- Smoke test against a seeded `data/kodji.sqlite`:
   `just dev` → `/s/EOM.O10` redirects to `/overview`, Cash flow
   shows the 620 XOF coupon rows + terminal 10 000 payment, Related
   lists sibling bonds, all with the correct bullet-and-annual

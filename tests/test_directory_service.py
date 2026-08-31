@@ -2,22 +2,22 @@ from datetime import date
 
 import pytest
 
-from brvm.db import connect
-from brvm.models import DailyBar, IndexLevel, Quote, Security
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import DailyBar, IndexLevel, Quote, Security
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
 
 @pytest.fixture
 def dir_env(monkeypatch, tmp_path):
-    from brvm.config import reset_settings_cache
+    from kodji.config import reset_settings_cache
 
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import directory as dir_mod
+    from kodji.services import directory as dir_mod
 
     with connect(db_path) as conn:
         apply_migrations(conn)

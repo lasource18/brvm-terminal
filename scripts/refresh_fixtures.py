@@ -20,7 +20,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from brvm.config import settings  # noqa: E402
+from kodji.config import settings  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
 

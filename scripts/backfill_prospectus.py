@@ -18,11 +18,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from brvm.config import settings  # noqa: E402
-from brvm.db import connect  # noqa: E402
-from brvm.services import bonds as bonds_svc  # noqa: E402
-from brvm.sources import brvm_org_avis as avis_src  # noqa: E402
-from brvm.sources._http import make_client  # noqa: E402
+from kodji.config import settings  # noqa: E402
+from kodji.db import connect  # noqa: E402
+from kodji.services import bonds as bonds_svc  # noqa: E402
+from kodji.sources import brvm_org_avis as avis_src  # noqa: E402
+from kodji.sources._http import make_client  # noqa: E402
 
 
 def _bond_tickers_needing_url(conn, overwrite: bool) -> set[str]:

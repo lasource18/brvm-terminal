@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect, ensure_migrations_table
-from brvm.models import Security
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect, ensure_migrations_table
+from kodji.models import Security
+from kodji.store import securities as sec_repo
 
 
 @pytest.fixture
 def enrich_env(monkeypatch, tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import enrichment as enrich_mod
+    from kodji.services import enrichment as enrich_mod
 
     root = Path(__file__).resolve().parents[1]
     with connect(db_path) as conn:
@@ -62,7 +62,7 @@ def test_enrich_sectors_updates_from_sikafinance(enrich_env, monkeypatch):
         }[ticker]
 
     monkeypatch.setattr(
-        "brvm.services.enrichment.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.enrichment.sikafinance.fetch_secteur", fake_secteur
     )
     counts = enrich_mod.enrich_sectors(sleep_s=0)
     assert counts == {"candidates": 2, "updated": 2, "still_missing": 0}
@@ -100,7 +100,7 @@ def test_enrich_sectors_falls_back_to_afx(enrich_env, monkeypatch):
         return FakeResponse("<html></html>")
 
     monkeypatch.setattr(
-        "brvm.services.enrichment.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.enrichment.sikafinance.fetch_secteur", fake_secteur
     )
 
     class FakeClient:
@@ -113,7 +113,7 @@ def test_enrich_sectors_falls_back_to_afx(enrich_env, monkeypatch):
         def get(self, url):
             return fake_get(url)
 
-    monkeypatch.setattr("brvm.services.enrichment.make_client", lambda: FakeClient())
+    monkeypatch.setattr("kodji.services.enrichment.make_client", lambda: FakeClient())
 
     counts = enrich_mod.enrich_sectors(sleep_s=0)
     assert counts["candidates"] == 2

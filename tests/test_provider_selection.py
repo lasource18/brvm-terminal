@@ -1,7 +1,7 @@
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.services import providers
+from kodji.config import reset_settings_cache
+from kodji.services import providers
 
 
 def _reset(monkeypatch, *, base: str = "", key: str = "") -> None:

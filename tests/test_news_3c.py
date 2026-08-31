@@ -5,11 +5,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import CorporateAction, NewsItem
-from brvm.sources._dedupe import news_hash
-from brvm.store import news as news_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import CorporateAction, NewsItem
+from kodji.sources._dedupe import news_hash
+from kodji.store import news as news_repo
 
 from .conftest import apply_migrations
 
@@ -28,10 +28,10 @@ def _mk_news(url: str, title: str, **extra) -> NewsItem:
 # ------------------------------------------------------------------ services --
 
 def _fresh_svc(tmp_path, monkeypatch):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import news as svc
+    from kodji.services import news as svc
     return svc, db_path
 
 
@@ -86,8 +86,8 @@ def test_list_feed_filters_and_pagination(monkeypatch, tmp_path):
 
 def test_list_upcoming_actions_joins_security_name(monkeypatch, tmp_path):
     svc, db_path = _fresh_svc(tmp_path, monkeypatch)
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
 
     today = date(2026, 8, 21)
     with connect(db_path) as conn:
@@ -129,7 +129,7 @@ def _seed_feed(client, *, n=5):
     that makes `News {n-1}` newest and `News 0` oldest — so `limit`-based
     pagination is deterministic.
     """
-    from brvm.config import settings
+    from kodji.config import settings
 
     db_path = Path(settings.db_path)
     items = [

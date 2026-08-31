@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from brvm.sources.brvm_org_bonds import (
+from kodji.sources.brvm_org_bonds import (
     BOND_CATEGORIES,
     BondCategory,
     parse_bonds,

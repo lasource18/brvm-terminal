@@ -5,14 +5,14 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.db import connect
-from brvm.models import BondSnapshot, Security
-from brvm.store import bonds as bonds_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import BondSnapshot, Security
+from kodji.store import bonds as bonds_repo
+from kodji.store import securities as sec_repo
 
 
 def _apply_migrations(db_path: Path) -> None:
-    from brvm.db import ensure_migrations_table
+    from kodji.db import ensure_migrations_table
 
     migrations = Path(__file__).resolve().parents[1] / "migrations"
     with connect(db_path) as conn:
@@ -39,7 +39,7 @@ def _mali_bonds() -> list[Security]:
 
 
 def test_list_by_issuer_sorts_by_maturity(tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     _apply_migrations(db_path)
     with connect(db_path) as conn:
         sec_repo.upsert(conn, _mali_bonds())
@@ -49,7 +49,7 @@ def test_list_by_issuer_sorts_by_maturity(tmp_path):
 
 
 def test_list_by_issuer_excludes_self(tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     _apply_migrations(db_path)
     with connect(db_path) as conn:
         sec_repo.upsert(conn, _mali_bonds())
@@ -58,7 +58,7 @@ def test_list_by_issuer_excludes_self(tmp_path):
 
 
 def test_upsert_snapshots_and_latest(tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     _apply_migrations(db_path)
     with connect(db_path) as conn:
         sec_repo.upsert(conn, _mali_bonds()[:1])
@@ -85,7 +85,7 @@ def test_upsert_snapshots_and_latest(tmp_path):
 
 
 def test_upsert_snapshots_upserts_same_session(tmp_path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     _apply_migrations(db_path)
     with connect(db_path) as conn:
         sec_repo.upsert(conn, _mali_bonds()[:1])

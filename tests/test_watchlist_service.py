@@ -11,20 +11,20 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import DailyBar, Quote, Security
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import DailyBar, Quote, Security
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 
 
 def _setup(monkeypatch, tmp_path: Path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import watchlist as svc
+    from kodji.services import watchlist as svc
     with connect(db_path) as conn:
         apply_migrations(conn)
         sec_repo.upsert(conn, [

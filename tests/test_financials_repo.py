@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import date
 
-from brvm.db import connect
-from brvm.models import Filing, Security
-from brvm.store import filings as filings_repo
-from brvm.store import financials as fin_repo
-from brvm.store import securities as sec_repo
+from kodji.db import connect
+from kodji.models import Filing, Security
+from kodji.store import filings as filings_repo
+from kodji.store import financials as fin_repo
+from kodji.store import securities as sec_repo
 
 from .conftest import apply_migrations
 

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Watchlists · kodji-terminal{% endblock %}
+{% block content %}
+  <h2 style="color: var(--accent); font-size: 14px; margin: 0 0 12px; text-transform: uppercase;">{{ "Watchlists"|t }}</h2>
+
+  <div id="wl-index-wrap">
+    {% include "_frag/watchlists_index.html" %}
+  </div>
+
+  <form class="wl-actions" style="margin-top: 16px;"
+        hx-post="/_frag/watchlists"
+        hx-target="#wl-index-wrap"
+        hx-swap="innerHTML">
+    <input name="name" placeholder="{{ 'New list name'|t }}" required>
+    <button type="submit">{{ "Create list"|t }}</button>
+  </form>
+{% endblock %}

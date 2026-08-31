@@ -1,6 +1,6 @@
 from freezegun import freeze_time
 
-from brvm.clock import is_market_open
+from kodji.clock import is_market_open
 
 
 @freeze_time("2026-08-19 12:00:00", tz_offset=0)  # Wed midday
@@ -25,7 +25,7 @@ def test_closed_on_saturday():
 
 def test_scheduler_builds():
     # Import late so freezegun doesn't apply to module import (not needed here).
-    from brvm.jobs.scheduler import build_scheduler
+    from kodji.jobs.scheduler import build_scheduler
 
     sched = build_scheduler()
     ids = {j.id for j in sched.get_jobs()}
@@ -62,7 +62,7 @@ def test_brief_job_skips_on_holiday(monkeypatch):
     """F-18: even on Mon-Fri, `_brief_job` must skip when
     `is_market_holiday(today)` — a "session recap" of the prior day's
     close on a public holiday is stale data, not a brief."""
-    from brvm.jobs import scheduler
+    from kodji.jobs import scheduler
     called: list[bool] = []
     monkeypatch.setattr(scheduler, "generate_brief",
                         lambda *a, **kw: called.append(True))
@@ -74,7 +74,7 @@ def test_brief_job_skips_on_holiday(monkeypatch):
 def test_brief_job_runs_on_ordinary_weekday(monkeypatch):
     """Sanity check: `_brief_job` still calls generate_brief when not a
     holiday. Guards against a regression that gates the entire cron."""
-    from brvm.jobs import scheduler
+    from kodji.jobs import scheduler
 
     class _Result:
         def as_dict(self):

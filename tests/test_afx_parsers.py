@@ -1,6 +1,6 @@
 from datetime import date
 
-from brvm.sources.afx_kwayisi import (
+from kodji.sources.afx_kwayisi import (
     _parse_short_money,
     parse_home,
     parse_ticker_page,

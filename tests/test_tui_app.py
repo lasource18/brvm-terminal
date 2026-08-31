@@ -15,22 +15,22 @@ from pathlib import Path
 import pytest
 from textual.widgets import ContentSwitcher, DataTable, Static
 
-from brvm.apps.tui.app import BRVMTerminalApp
-from brvm.apps.tui.sidebar import Sidebar
-from brvm.apps.tui.views.alerts import AlertsView
-from brvm.apps.tui.views.directory import DirectoryView
-from brvm.apps.tui.views.news import NewsView
-from brvm.apps.tui.views.ticker import TickerView
-from brvm.apps.tui.views.watchlists import WatchlistsView
+from kodji.apps.tui.app import KodjiTerminalApp
+from kodji.apps.tui.sidebar import Sidebar
+from kodji.apps.tui.views.alerts import AlertsView
+from kodji.apps.tui.views.directory import DirectoryView
+from kodji.apps.tui.views.news import NewsView
+from kodji.apps.tui.views.ticker import TickerView
+from kodji.apps.tui.views.watchlists import WatchlistsView
 from tests.conftest import apply_migrations, reset_module_state
 
 
 def _seed(db_path: Path) -> None:
     """Minimal DB seed for TUI tests — securities, snapshots, one index."""
-    from brvm.db import connect
-    from brvm.models import IndexLevel, Quote, Security
-    from brvm.store import quotes as quotes_repo
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import IndexLevel, Quote, Security
+    from kodji.store import quotes as quotes_repo
+    from kodji.store import securities as sec_repo
 
     with connect(db_path) as conn:
         apply_migrations(conn)
@@ -68,7 +68,7 @@ def _seed(db_path: Path) -> None:
 
 @pytest.fixture
 def tui_db(tmp_path, monkeypatch):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")
@@ -80,7 +80,7 @@ def tui_db(tmp_path, monkeypatch):
 
 async def test_app_boots_on_home(tui_db):
     """Fresh boot lands on the Home view with the ContentSwitcher pointing at it."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         cs = app.query_one("#right-pane", ContentSwitcher)
@@ -89,7 +89,7 @@ async def test_app_boots_on_home(tui_db):
 
 async def test_indices_render_on_home(tui_db):
     """The home indices strip picks up BRVMC from the seeded `index_levels`."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         strip = app.query_one("#home-indices", Static)
@@ -99,7 +99,7 @@ async def test_indices_render_on_home(tui_db):
 async def test_sidebar_populates_turnover_leaders_by_default(tui_db):
     """No user watchlists ⇒ sidebar shows the virtual `Turnover leaders`
     with SPHC at the top (highest turnover in the seed)."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -112,7 +112,7 @@ async def test_sidebar_populates_turnover_leaders_by_default(tui_db):
 
 async def test_switch_to_directory_view(tui_db):
     """Pressing `d` swaps the ContentSwitcher to the directory view and it fills."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("d")
@@ -130,7 +130,7 @@ async def test_alerts_events_cursor_survives_refresh(tui_db, monkeypatch):
     refresh because the clamp ran against a stray `limit=1` query
     (`min(cursor, 0)` is always 0). Position the cursor on row 3, hit
     the refresh path, and confirm the cursor stayed put."""
-    from brvm.services import alerts as alerts_svc
+    from kodji.services import alerts as alerts_svc
 
     class _E:
         def __init__(self, eid: int) -> None:
@@ -146,7 +146,7 @@ async def test_alerts_events_cursor_survives_refresh(tui_db, monkeypatch):
         alerts_svc, "list_recent_events", lambda *, limit=25: events[:limit]
     )
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")
@@ -166,7 +166,7 @@ async def test_alerts_events_cursor_survives_refresh(tui_db, monkeypatch):
 
 async def test_switch_to_alerts_view(tui_db):
     """Pressing `a` swaps to the alerts view; empty seed => 0 events, 0 rules."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")
@@ -183,7 +183,7 @@ async def test_switch_to_alerts_view(tui_db):
 async def test_switch_to_watchlists_view(tui_db):
     """Pressing `w` swaps to the watchlists view; a fresh DB has one
     seeded 'Default' watchlist (see migration 0002)."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("w")
@@ -198,7 +198,7 @@ async def test_switch_to_watchlists_view(tui_db):
 
 async def test_switch_to_news_view(tui_db):
     """Pressing `F5` opens the news view with 0 rows (empty seed)."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("f5")
@@ -212,7 +212,7 @@ async def test_switch_to_news_view(tui_db):
 
 async def test_open_ticker_from_sidebar(tui_db):
     """Selecting a sidebar row switches to the Ticker view and fills the header."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -232,7 +232,7 @@ async def test_open_ticker_from_sidebar(tui_db):
 
 async def test_refresh_preserves_sidebar_cursor(tui_db):
     """Move the cursor down, force a refresh — cursor should stay put."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -250,7 +250,7 @@ async def test_refresh_preserves_sidebar_cursor(tui_db):
 
 async def test_directory_sort_cycle(tui_db):
     """Pressing `s` cycles the sort column and repaints the table."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("d")
@@ -278,7 +278,7 @@ async def test_directory_sort_cycle(tui_db):
 async def test_watchlist_create_and_add_ticker(tui_db):
     """Create a watchlist from the watchlists view, add SNTS to it,
     verify it appears in the sidebar's watchlist rotation."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("w")
@@ -321,7 +321,7 @@ async def test_duplicate_watchlist_name_is_a_validation_error_not_a_crash(tui_db
     """F-06: a second `Core` used to raise `sqlite3.IntegrityError` up
     through the input handler and take the whole app down. It must
     surface as a validation notify while the app stays running."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("w")
@@ -347,9 +347,9 @@ async def test_watchlist_remove_uses_x_not_r(tui_db):
     """F-06: `r` was bound to remove-member, shadowing the app-level
     `r` = refresh. A habitual refresh press deleted rows silently. Now
     `x` removes and `r` refreshes."""
-    from brvm.services import watchlist as wl_svc
+    from kodji.services import watchlist as wl_svc
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("w")
@@ -392,7 +392,7 @@ async def test_escape_blurs_watchlist_input(tui_db):
     again. Escape now blurs back to the watchlist list."""
     from textual.widgets import Input
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("w")
@@ -415,9 +415,9 @@ async def test_escape_blurs_alerts_input(tui_db):
     clicked elsewhere."""
     from textual.widgets import Input
 
-    from brvm.apps.tui.views.alerts import AlertsView as _AV
+    from kodji.apps.tui.views.alerts import AlertsView as _AV
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")
@@ -438,9 +438,9 @@ async def test_pressing_t_with_no_ticker_opens_the_palette(tui_db):
     view and strand the user on a "Select a ticker…" placeholder. It
     now opens the search palette on top so the user picks one instead
     of having to remember ctrl+k."""
-    from brvm.apps.tui.palette import SearchPalette
+    from kodji.apps.tui.palette import SearchPalette
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         # No ticker loaded yet.
@@ -459,9 +459,9 @@ async def test_pressing_t_with_loaded_ticker_skips_the_palette(tui_db):
     """If a ticker is already loaded, `t` should just re-show the view
     without pushing the palette — otherwise a habitual "back to my
     ticker" press becomes a modal interruption."""
-    from brvm.apps.tui.palette import SearchPalette
+    from kodji.apps.tui.palette import SearchPalette
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -484,9 +484,9 @@ async def test_ticker_tabs_hide_equity_concerns_for_bonds(tui_db):
     REL composite) is where a bond user actually lands."""
     from textual.widgets import TabbedContent
 
-    from brvm.db import connect
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
 
     with connect(tui_db) as conn:
         sec_repo.upsert(conn, [
@@ -497,7 +497,7 @@ async def test_ticker_tabs_hide_equity_concerns_for_bonds(tui_db):
             ),
         ])
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -526,7 +526,7 @@ async def test_ticker_tabs_hide_bond_details_for_equities(tui_db):
     for bonds.'"""
     from textual.widgets import TabbedContent
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -551,7 +551,7 @@ async def test_ticker_tabs_index_shows_only_chart_and_news(tui_db):
     rendering N/A copy that just added noise to the tab strip."""
     from textual.widgets import TabbedContent
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -577,9 +577,9 @@ async def test_ticker_tabs_switch_kind_reflows_visibility(tui_db):
     kind's default (bonds land on Bond details)."""
     from textual.widgets import TabbedContent
 
-    from brvm.db import connect
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
 
     with connect(tui_db) as conn:
         sec_repo.upsert(conn, [
@@ -590,7 +590,7 @@ async def test_ticker_tabs_switch_kind_reflows_visibility(tui_db):
             ),
         ])
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -622,9 +622,9 @@ async def test_ticker_tabs_land_on_kind_default_from_any_starting_tab(tui_db):
     """
     from textual.widgets import TabbedContent
 
-    from brvm.db import connect
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
 
     with connect(tui_db) as conn:
         sec_repo.upsert(conn, [
@@ -649,7 +649,7 @@ async def test_ticker_tabs_land_on_kind_default_from_any_starting_tab(tui_db):
     # One app for the whole matrix: each case parks on an equity tab,
     # switches kind, asserts, then returns to the equity to reset. Spinning
     # up an app per case is 14x the startup cost for no extra coverage.
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -687,9 +687,9 @@ async def test_ticker_tab_reflow_never_hides_the_active_tab(tui_db):
     """
     from textual.widgets import TabbedContent
 
-    from brvm.db import connect
-    from brvm.models import Security
-    from brvm.store import securities as sec_repo
+    from kodji.db import connect
+    from kodji.models import Security
+    from kodji.store import securities as sec_repo
 
     with connect(tui_db) as conn:
         sec_repo.upsert(conn, [
@@ -700,7 +700,7 @@ async def test_ticker_tab_reflow_never_hides_the_active_tab(tui_db):
             ),
         ])
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -740,7 +740,7 @@ async def test_paint_chrome_survives_a_missing_widget_tree(tui_db):
     failed whichever test happened to be running — a whole-file flake that
     only showed up under app churn. A missing tree is a cosmetic no-op.
     """
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         # Sanity: the guard isn't masking a chrome that never painted.
@@ -766,7 +766,7 @@ async def test_worker_paints_survive_a_torn_down_view(tui_db):
     from textual.widgets import DataTable
     from textual_plotext import PlotextPlot
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -796,9 +796,9 @@ async def test_clicking_empty_ticker_header_opens_palette(tui_db):
     """A pointer-only user landing on the empty Ticker view can click
     the "Select a ticker…" prompt to open the picker — no need to
     remember ctrl+k."""
-    from brvm.apps.tui.palette import SearchPalette
+    from kodji.apps.tui.palette import SearchPalette
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         # Show the Ticker view (empty).
@@ -825,12 +825,12 @@ async def test_sidebar_capital_w_cycles_watchlists(tui_db):
     terminal (terminals send the character `"W"`; Textual doesn't map
     that onto a `shift+w` binding). Binding the raw uppercase key makes
     the advertised behaviour actually work."""
-    from brvm.services import watchlist as wl_svc
+    from kodji.services import watchlist as wl_svc
 
     # Seed a second watchlist so the cycle has somewhere to go.
     wl_svc.create("Core")
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -846,12 +846,12 @@ async def test_sidebar_capital_w_cycles_watchlists(tui_db):
 
 async def test_market_closed_pauses_tick_refresh(tui_db, monkeypatch):
     """When `is_market_open` is False, `_tick_refresh` no-ops (no view refresh)."""
-    from brvm.apps.tui import app as tui_app
+    from kodji.apps.tui import app as tui_app
 
     monkeypatch.setattr(tui_app, "is_market_open", lambda: False)
     calls: list[str] = []
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         # Wrap the sidebar's refresh_data to detect whether the auto tick
@@ -871,10 +871,10 @@ async def test_market_closed_pauses_tick_refresh(tui_db, monkeypatch):
 
 
 async def test_chrome_shows_market_closed_off_hours(tui_db, monkeypatch):
-    from brvm.apps.tui import app as tui_app
+    from kodji.apps.tui import app as tui_app
 
     monkeypatch.setattr(tui_app, "is_market_open", lambda: False)
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         app._paint_chrome()
@@ -889,9 +889,9 @@ async def test_home_shows_brief_collapsed_and_expands(tui_db):
     collapsed by default, expands to show the full markdown."""
     from textual.widgets import Collapsible, Markdown
 
-    from brvm.db import connect
-    from brvm.models import Brief
-    from brvm.store import briefs as briefs_repo
+    from kodji.db import connect
+    from kodji.models import Brief
+    from kodji.store import briefs as briefs_repo
 
     with connect(tui_db) as conn:
         briefs_repo.upsert(
@@ -904,7 +904,7 @@ async def test_home_shows_brief_collapsed_and_expands(tui_db):
             ),
         )
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         collapsible = app.query_one("#home-brief", Collapsible)
@@ -920,7 +920,7 @@ async def test_home_shows_brief_collapsed_and_expands(tui_db):
 
 async def test_home_brief_summary_when_no_brief(tui_db):
     """No brief on file → summary explains it, body has a run-it hint."""
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         summary = app.query_one("#home-brief-summary", Static)
@@ -932,7 +932,7 @@ async def test_paint_chrome_caches_last_snapshot_across_ticks(tui_db, monkeypatc
     1-second tick — ~86 400 idle scans per day. Cache the read for
     10 ticks so the per-second age render stays fast while the DB
     stays quiet."""
-    from brvm.apps.tui import app as app_mod
+    from kodji.apps.tui import app as app_mod
 
     call_count = 0
 
@@ -943,7 +943,7 @@ async def test_paint_chrome_caches_last_snapshot_across_ticks(tui_db, monkeypatc
 
     monkeypatch.setattr(app_mod.market_svc, "last_snapshot_utc", _spy)
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         baseline = call_count  # captures whatever mount + settle produced
@@ -963,9 +963,9 @@ async def test_home_o_binding_on_movers_does_not_open_news_url(tui_db):
     unrelated to what the reader was looking at. Now it routes to
     the ticker view for the highlighted mover instead of touching
     the news pane."""
-    from brvm.apps.tui.views.home import HomeView
+    from kodji.apps.tui.views.home import HomeView
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     opened: list[str] = []
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -987,7 +987,7 @@ async def test_ticker_view_has_no_brief_tab(tui_db):
     is a global summary so it lives on Home now."""
     from textual.widgets import TabbedContent
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -1009,7 +1009,7 @@ async def test_ticker_chart_tab_uses_plotext_widget(tui_db):
     widget, not Static.update(plt.build()) (which dumps raw ANSI)."""
     from textual_plotext import PlotextPlot
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -1028,7 +1028,7 @@ async def test_ticker_tabs_are_scrollable(tui_db):
     long Financials / Overview / Analyst bodies scroll with the wheel."""
     from textual.containers import VerticalScroll
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -1059,9 +1059,9 @@ async def test_news_tables_have_link_column(tui_db):
     from rich.text import Text
     from textual.widgets import DataTable
 
-    from brvm.db import connect
-    from brvm.models import NewsItem
-    from brvm.store import news as news_repo
+    from kodji.db import connect
+    from kodji.models import NewsItem
+    from kodji.store import news as news_repo
 
     with connect(tui_db) as conn:
         now = datetime.now(UTC)
@@ -1086,7 +1086,7 @@ async def test_news_tables_have_link_column(tui_db):
         )
         conn.commit()
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
 
@@ -1133,9 +1133,9 @@ async def test_pressing_o_on_home_news_opens_the_story_url(tui_db, monkeypatch):
 
     from textual.widgets import DataTable
 
-    from brvm.db import connect
-    from brvm.models import NewsItem
-    from brvm.store import news as news_repo
+    from kodji.db import connect
+    from kodji.models import NewsItem
+    from kodji.store import news as news_repo
 
     with connect(tui_db) as conn:
         now = datetime.now(UTC)
@@ -1160,7 +1160,7 @@ async def test_pressing_o_on_home_news_opens_the_story_url(tui_db, monkeypatch):
         conn.commit()
 
     opened: list[str] = []
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     monkeypatch.setattr(app, "open_url", lambda url, **_kw: opened.append(url))
 
     async with app.run_test() as pilot:
@@ -1180,9 +1180,9 @@ async def test_pressing_o_on_ticker_news_tab_opens_the_story_url(tui_db, monkeyp
 
     from textual.widgets import DataTable, TabbedContent
 
-    from brvm.db import connect
-    from brvm.models import NewsItem
-    from brvm.store import news as news_repo
+    from kodji.db import connect
+    from kodji.models import NewsItem
+    from kodji.store import news as news_repo
 
     with connect(tui_db) as conn:
         now = datetime.now(UTC)
@@ -1202,7 +1202,7 @@ async def test_pressing_o_on_ticker_news_tab_opens_the_story_url(tui_db, monkeyp
         conn.commit()
 
     opened: list[str] = []
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     monkeypatch.setattr(app, "open_url", lambda url, **_kw: opened.append(url))
 
     async with app.run_test() as pilot:
@@ -1229,7 +1229,7 @@ async def test_pressing_o_on_ticker_news_tab_opens_the_story_url(tui_db, monkeyp
 async def test_link_cell_falls_back_to_dash_when_url_missing():
     """Some scrapers (older communiqués) land without a URL — the Link
     cell must not raise; it renders as `—`."""
-    from brvm.apps.tui.format import link_cell
+    from kodji.apps.tui.format import link_cell
 
     assert link_cell(None) == "—"
     assert link_cell("") == "—"
@@ -1237,9 +1237,9 @@ async def test_link_cell_falls_back_to_dash_when_url_missing():
 
 async def test_search_palette_opens_and_filters(tui_db):
     """Ctrl-K opens the palette, typing `SNT` shows SNTS."""
-    from brvm.apps.tui.palette import SearchPalette
+    from kodji.apps.tui.palette import SearchPalette
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("ctrl+k")
@@ -1266,7 +1266,7 @@ def _plain(renderable) -> str:
 
 
 def _directory_cols():
-    from brvm.apps.tui.views.directory import _COLS
+    from kodji.apps.tui.views.directory import _COLS
 
     return _COLS
 
@@ -1279,10 +1279,10 @@ async def test_news_ticker_is_mounted_and_hidden_off_hours(tui_db, monkeypatch):
     (with a "market closed" message) whenever `is_market_open()` is
     False. On the wall-clock this test runs off-hours; if the wall
     clock happens to fall in market hours we monkeypatch."""
-    from brvm.apps.tui.news_ticker import NewsTicker
+    from kodji.apps.tui.news_ticker import NewsTicker
 
-    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: False)
-    app = BRVMTerminalApp()
+    monkeypatch.setattr("kodji.apps.tui.app.is_market_open", lambda: False)
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         # The ticker is on-screen (with a paused-state message).
@@ -1294,10 +1294,10 @@ async def test_news_ticker_is_mounted_and_hidden_off_hours(tui_db, monkeypatch):
 
 async def test_news_ticker_shows_headlines_when_pool_populated(tui_db, monkeypatch):
     """During market hours the ticker cycles through recent news items."""
-    from brvm.apps.tui.news_ticker import NewsTicker
-    from brvm.services._view import NewsFeed, NewsRow
+    from kodji.apps.tui.news_ticker import NewsTicker
+    from kodji.services._view import NewsFeed, NewsRow
 
-    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: True)
+    monkeypatch.setattr("kodji.apps.tui.app.is_market_open", lambda: True)
 
     def _fake_feed(**_kwargs):
         return NewsFeed(
@@ -1324,8 +1324,8 @@ async def test_news_ticker_shows_headlines_when_pool_populated(tui_db, monkeypat
             },
         )
 
-    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
-    app = BRVMTerminalApp()
+    monkeypatch.setattr("kodji.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         nt = app.query_one(NewsTicker)
@@ -1344,10 +1344,10 @@ async def test_news_ticker_paint_chrome_does_not_advance_headline(tui_db, monkey
     `_idx` after rendering, showed the NEXT headline one second after
     the cadence-controlled tick had drawn the current one (each headline
     survived ≤1 s instead of the intended 5 s)."""
-    from brvm.apps.tui.news_ticker import NewsTicker
-    from brvm.services._view import NewsFeed, NewsRow
+    from kodji.apps.tui.news_ticker import NewsTicker
+    from kodji.services._view import NewsFeed, NewsRow
 
-    monkeypatch.setattr("brvm.apps.tui.app.is_market_open", lambda: True)
+    monkeypatch.setattr("kodji.apps.tui.app.is_market_open", lambda: True)
 
     def _fake_feed(**_kwargs):
         return NewsFeed(
@@ -1374,8 +1374,8 @@ async def test_news_ticker_paint_chrome_does_not_advance_headline(tui_db, monkey
             },
         )
 
-    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
-    app = BRVMTerminalApp()
+    monkeypatch.setattr("kodji.apps.tui.news_ticker.news_svc.list_feed", _fake_feed)
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         nt = app.query_one(NewsTicker)
@@ -1404,20 +1404,20 @@ async def test_news_ticker_query_filters_by_lookback_hours(tui_db, monkeypatch):
     copy. The query itself had no time clause, so weeks-old headlines
     could rotate as if current. `refresh_pool` now passes `date_from`
     to `list_feed`."""
-    from brvm.apps.tui.news_ticker import NewsTicker
+    from kodji.apps.tui.news_ticker import NewsTicker
 
     calls: list[dict] = []
 
     def _spy_feed(**kwargs):
         calls.append(kwargs)
-        from brvm.services._view import NewsFeed
+        from kodji.services._view import NewsFeed
         return NewsFeed(
             items=[], total=0, limit=kwargs.get("limit", 10), offset=0,
             filters={},
         )
 
-    monkeypatch.setattr("brvm.apps.tui.news_ticker.news_svc.list_feed", _spy_feed)
-    app = BRVMTerminalApp()
+    monkeypatch.setattr("kodji.apps.tui.news_ticker.news_svc.list_feed", _spy_feed)
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         nt = app.query_one(NewsTicker)
@@ -1447,8 +1447,8 @@ async def test_slow_overview_fetch_does_not_freeze_event_loop(tui_db, monkeypatc
     import threading
     import time
 
-    from brvm.apps.tui.views.ticker import TickerView
-    from brvm.services import company as company_svc
+    from kodji.apps.tui.views.ticker import TickerView
+    from kodji.services import company as company_svc
 
     # Block the fetch until the test releases it. This way the placeholder
     # is definitely on screen while we assert on it.
@@ -1477,7 +1477,7 @@ async def test_slow_overview_fetch_does_not_freeze_event_loop(tui_db, monkeypatc
         lambda t: (_ for _ in ()).throw(RuntimeError("peers not under test")),
     )
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         tv = app.query_one(TickerView)
@@ -1517,14 +1517,14 @@ async def test_chart_render_is_lazy_until_tab_activated(tui_db, monkeypatch):
             return real_get_history(ticker, country)
         return []
 
-    from brvm.services import history as history_mod
+    from kodji.services import history as history_mod
     real_get_history = history_mod.get_history
     monkeypatch.setattr(
-        "brvm.apps.tui.views.ticker.history.get_history",
+        "kodji.apps.tui.views.ticker.history.get_history",
         _tracking_get_history,
     )
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         sb = app.query_one(Sidebar)
@@ -1555,9 +1555,9 @@ async def test_alerts_new_row_uses_selection_list_for_doctypes(tui_db):
 
     from textual.widgets import SelectionList
 
-    from brvm.models import FilingDocType
+    from kodji.models import FilingDocType
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")
@@ -1577,7 +1577,7 @@ async def test_alerts_new_filing_rule_persists_selected_doctypes(
     → the resulting AlertRule carries the CSV of the ticks."""
     from textual.widgets import Input, Select, SelectionList
 
-    from brvm.services import alerts as alerts_svc
+    from kodji.services import alerts as alerts_svc
 
     created: list = []
     monkeypatch.setattr(
@@ -1585,7 +1585,7 @@ async def test_alerts_new_filing_rule_persists_selected_doctypes(
         lambda r: created.append(r) or 1,
     )
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")
@@ -1616,7 +1616,7 @@ async def test_alerts_new_filing_needs_at_least_one_doctype(tui_db, monkeypatch)
     a warning notify and NOT create a rule."""
     from textual.widgets import Input, Select
 
-    from brvm.services import alerts as alerts_svc
+    from kodji.services import alerts as alerts_svc
 
     created: list = []
     monkeypatch.setattr(
@@ -1624,14 +1624,14 @@ async def test_alerts_new_filing_needs_at_least_one_doctype(tui_db, monkeypatch)
         lambda r: created.append(r) or 1,
     )
     notifications: list = []
-    from brvm.apps.tui.views.alerts import AlertsView as AV
+    from kodji.apps.tui.views.alerts import AlertsView as AV
 
     def _fake_notify(self, message, *, severity="information"):
         notifications.append((severity, message))
 
     monkeypatch.setattr(AV, "notify", _fake_notify)
 
-    app = BRVMTerminalApp()
+    app = KodjiTerminalApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         await pilot.press("a")

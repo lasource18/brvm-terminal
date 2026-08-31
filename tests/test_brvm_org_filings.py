@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Filing, Security
-from brvm.sources import brvm_org_filings as bf
-from brvm.sources._dedupe import url_hash as compute_url_hash
-from brvm.store import filings as filings_repo
-from brvm.store import securities as sec_repo
-from brvm.store import slugs as slugs_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Filing, Security
+from kodji.sources import brvm_org_filings as bf
+from kodji.sources._dedupe import url_hash as compute_url_hash
+from kodji.store import filings as filings_repo
+from kodji.store import securities as sec_repo
+from kodji.store import slugs as slugs_repo
 
 from .conftest import apply_migrations
 
@@ -343,12 +343,12 @@ def test_slug_map_hit_miss_and_persisted_null(tmp_db_path):
 
 
 def _fresh_svc(tmp_path, monkeypatch):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     filings_dir = tmp_path / "filings"
     monkeypatch.setenv("DB_PATH", str(db_path))
     monkeypatch.setenv("FILINGS_ROOT", str(filings_dir))
     reset_settings_cache()
-    from brvm.services import filings as svc
+    from kodji.services import filings as svc
     return svc, db_path, filings_dir
 
 

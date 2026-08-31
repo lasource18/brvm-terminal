@@ -20,17 +20,17 @@ from pathlib import Path
 
 import pytest
 
-from brvm.config import reset_settings_cache
-from brvm.db import connect
-from brvm.models import Brief, IndexLevel, NewsItem, Quote, Security
-from brvm.services import llm as llm_svc
-from brvm.services import translation as translation_svc
-from brvm.sources._dedupe import news_hash
-from brvm.store import briefs as briefs_repo
-from brvm.store import news as news_repo
-from brvm.store import quotes as quotes_repo
-from brvm.store import securities as sec_repo
-from brvm.store import spend as spend_repo
+from kodji.config import reset_settings_cache
+from kodji.db import connect
+from kodji.models import Brief, IndexLevel, NewsItem, Quote, Security
+from kodji.services import llm as llm_svc
+from kodji.services import translation as translation_svc
+from kodji.sources._dedupe import news_hash
+from kodji.store import briefs as briefs_repo
+from kodji.store import news as news_repo
+from kodji.store import quotes as quotes_repo
+from kodji.store import securities as sec_repo
+from kodji.store import spend as spend_repo
 
 from ._fake_anthropic import FakeAnthropic, reply
 from .conftest import apply_migrations
@@ -106,7 +106,7 @@ class TestTranslateMarkdownToFr:
 
 class TestStoreRoundtripsTranslationColumns:
     def test_brief_persists_markdown_fr(self, monkeypatch, tmp_path):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
         reset_settings_cache()
         with connect(db_path) as conn:
@@ -128,7 +128,7 @@ class TestStoreRoundtripsTranslationColumns:
     def test_brief_without_translation_leaves_fr_null(
         self, monkeypatch, tmp_path,
     ):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
         reset_settings_cache()
         with connect(db_path) as conn:
@@ -147,7 +147,7 @@ class TestStoreRoundtripsTranslationColumns:
     def test_set_translation_updates_only_the_fr_columns(
         self, monkeypatch, tmp_path,
     ):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
         reset_settings_cache()
         with connect(db_path) as conn:
@@ -174,7 +174,7 @@ class TestStoreRoundtripsTranslationColumns:
     def test_set_translation_returns_false_when_row_missing(
         self, monkeypatch, tmp_path,
     ):
-        db_path = tmp_path / "brvm.sqlite"
+        db_path = tmp_path / "kodji.sqlite"
         monkeypatch.setenv("DB_PATH", str(db_path))
         reset_settings_cache()
         with connect(db_path) as conn:
@@ -190,11 +190,11 @@ class TestStoreRoundtripsTranslationColumns:
 
 
 def _setup_brief(monkeypatch, tmp_path: Path):
-    db_path = tmp_path / "brvm.sqlite"
+    db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
     reset_settings_cache()
-    from brvm.services import brief as svc
-    from brvm.services import llm as llm_mod
+    from kodji.services import brief as svc
+    from kodji.services import llm as llm_mod
 
     llm_mod.reset_client()
     with connect(db_path) as conn:
@@ -262,7 +262,7 @@ class TestBriefGenerateWithTranslation:
 
         # Both calls billed to brief_spend (primary + translation).
         # F-19: brief spend keys on real UTC day, not the covered day.
-        from brvm.clock import utcnow
+        from kodji.clock import utcnow
         today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
             spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -308,7 +308,7 @@ class TestBriefGenerateWithTranslation:
 
         # Only the primary was billed (transport error → no billing).
         # F-19: brief spend keys on real UTC day, not the covered day.
-        from brvm.clock import utcnow
+        from kodji.clock import utcnow
         today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
             spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -336,7 +336,7 @@ class TestBriefGenerateWithTranslation:
         assert result.brief.markdown_fr is None
 
         # F-19: brief spend keys on real UTC day, not the covered day.
-        from brvm.clock import utcnow
+        from kodji.clock import utcnow
         today_iso = utcnow().date().isoformat()
         with connect(db_path) as conn:
             spent = spend_repo.spent_micros(conn, today_iso, table="brief_spend")
@@ -357,7 +357,7 @@ class TestBriefRouteHonorsLocale:
         # Seed a brief with both EN + FR bodies.
         import os
 
-        from brvm.db import connect
+        from kodji.db import connect
 
         with connect(os.environ["DB_PATH"]) as conn:
             briefs_repo.upsert(conn, Brief(
@@ -380,7 +380,7 @@ class TestBriefRouteHonorsLocale:
     def test_fr_cookie_falls_back_to_en_with_pending_badge(self, client):
         import os
 
-        from brvm.db import connect
+        from kodji.db import connect
 
         with connect(os.environ["DB_PATH"]) as conn:
             briefs_repo.upsert(conn, Brief(
@@ -402,7 +402,7 @@ class TestBriefRouteHonorsLocale:
     def test_en_default_ignores_fr_translation(self, client):
         import os
 
-        from brvm.db import connect
+        from kodji.db import connect
 
         with connect(os.environ["DB_PATH"]) as conn:
             briefs_repo.upsert(conn, Brief(

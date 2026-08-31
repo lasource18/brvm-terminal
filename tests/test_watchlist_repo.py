@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from brvm.db import connect, ensure_migrations_table
-from brvm.models import Security
-from brvm.store import securities as sec_repo
-from brvm.store import watchlists as wl_repo
+from kodji.db import connect, ensure_migrations_table
+from kodji.models import Security
+from kodji.store import securities as sec_repo
+from kodji.store import watchlists as wl_repo
 
 
 def _init(tmp_db_path: Path) -> None:

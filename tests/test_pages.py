@@ -11,7 +11,7 @@ def test_index_renders_overview(client):
     r = client.get("/")
     assert r.status_code == 200
     body = r.text
-    assert "brvm-terminal" in body
+    assert "kodji-terminal" in body
     assert "BRVM COMPOSITE" in body
     assert "Gainers" in body
     assert "Losers" in body
@@ -47,9 +47,9 @@ def test_security_description_tab(client, monkeypatch):
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_societe", fake_societe
+        "kodji.services.company.sikafinance.fetch_societe", fake_societe
     )
-    from brvm.services import company
+    from kodji.services import company
 
     company.clear_cache()
 
@@ -78,9 +78,9 @@ def test_security_peers_tab(client, monkeypatch):
         }
 
     monkeypatch.setattr(
-        "brvm.services.company.sikafinance.fetch_secteur", fake_secteur
+        "kodji.services.company.sikafinance.fetch_secteur", fake_secteur
     )
-    from brvm.services import company
+    from kodji.services import company
 
     company.clear_cache()
 
@@ -115,11 +115,11 @@ def test_security_fundamentals_tabs_render_extracted_data(client):
     the real values, not the empty-state copy."""
     from datetime import date
 
-    from brvm.config import settings
-    from brvm.db import connect
-    from brvm.models import Filing
-    from brvm.store import filings as filings_repo
-    from brvm.store import financials as fin_repo
+    from kodji.config import settings
+    from kodji.db import connect
+    from kodji.models import Filing
+    from kodji.store import filings as filings_repo
+    from kodji.store import financials as fin_repo
 
     filing = Filing(
         ticker="SNTS",
