@@ -19,6 +19,7 @@ from textual.widgets import DataTable, Label
 
 from kodji.apps.tui.format import coloured_pct, num
 from kodji.services import market, watchlist
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 
 # Sentinel slug — never collides with real slugs, which are lowercased and
 # hyphenated versions of user names.
@@ -69,7 +70,7 @@ class Sidebar(Vertical):
     # -- data --------------------------------------------------------------
 
     def _reload_sources(self) -> None:
-        user = watchlist.list_all()
+        user = watchlist.list_all(DEFAULT_ACCOUNT_ID)
         sources: list[SidebarSource] = []
         # Turnover leaders always available — a fresh install without any
         # user watchlists still shows something meaningful.
@@ -129,7 +130,7 @@ class Sidebar(Vertical):
                 for r in market.top_by_turnover(limit=20)
             ]
         try:
-            view = watchlist.get_with_quotes(src.slug)
+            view = watchlist.get_with_quotes(DEFAULT_ACCOUNT_ID, src.slug)
         except watchlist.WatchlistNotFound:
             # Deleted from under us — drop it and re-render turnover leaders.
             self._reload_sources()

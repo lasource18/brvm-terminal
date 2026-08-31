@@ -2,6 +2,7 @@ from pathlib import Path
 
 from kodji.db import connect, ensure_migrations_table
 from kodji.models import Security
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 from kodji.store import securities as sec_repo
 from kodji.store import watchlists as wl_repo
 
@@ -30,7 +31,7 @@ class TestSeedAndCrud:
     def test_default_seeded(self, tmp_db_path):
         _init(tmp_db_path)
         with connect(tmp_db_path) as conn:
-            rows = wl_repo.list_all(conn)
+            rows = wl_repo.list_all(conn, DEFAULT_ACCOUNT_ID)
         slugs = [r["slug"] for r in rows]
         assert "default" in slugs
 
@@ -44,18 +45,18 @@ class TestSeedAndCrud:
                     Security(ticker="ORAC", name="ORANGE CI", kind="equity", country="CI"),
                 ],
             )
-            wl_id = wl_repo.create(conn, "Core Four")
-            assert wl_repo.add_item(conn, wl_id, "SNTS") is True
-            assert wl_repo.add_item(conn, wl_id, "SNTS") is False  # dedupe
-            assert wl_repo.add_item(conn, wl_id, "ORAC") is True
+            wl_id = wl_repo.create(conn, DEFAULT_ACCOUNT_ID, "Core Four")
+            assert wl_repo.add_item(conn, DEFAULT_ACCOUNT_ID, wl_id, "SNTS") is True
+            assert wl_repo.add_item(conn, DEFAULT_ACCOUNT_ID, wl_id, "SNTS") is False  # dedupe
+            assert wl_repo.add_item(conn, DEFAULT_ACCOUNT_ID, wl_id, "ORAC") is True
 
             items = wl_repo.items(conn, wl_id)
             assert [i["ticker"] for i in items] == ["SNTS", "ORAC"]
 
-            assert wl_repo.remove_item(conn, wl_id, "SNTS") == 1
+            assert wl_repo.remove_item(conn, DEFAULT_ACCOUNT_ID, wl_id, "SNTS") == 1
             assert [i["ticker"] for i in wl_repo.items(conn, wl_id)] == ["ORAC"]
 
-            assert wl_repo.delete(conn, "core-four") == 1
+            assert wl_repo.delete(conn, DEFAULT_ACCOUNT_ID, "core-four") == 1
             # cascade: items are gone too
             n = conn.execute(
                 "SELECT COUNT(*) FROM watchlist_items WHERE watchlist_id = ?",
@@ -68,9 +69,9 @@ class TestSeedAndCrud:
 
         _init(tmp_db_path)
         with connect(tmp_db_path) as conn:
-            wl_repo.create(conn, "Alpha")
+            wl_repo.create(conn, DEFAULT_ACCOUNT_ID, "Alpha")
             try:
-                wl_repo.create(conn, "Alpha")
+                wl_repo.create(conn, DEFAULT_ACCOUNT_ID, "Alpha")
             except sqlite3.IntegrityError:
                 return
         raise AssertionError("expected IntegrityError on duplicate slug")

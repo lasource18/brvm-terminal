@@ -38,15 +38,16 @@ def _row_to_rule(r: sqlite3.Row) -> AlertRule:
     )
 
 
-def create_rule(conn: sqlite3.Connection, rule: AlertRule) -> int:
+def create_rule(conn: sqlite3.Connection, account_id: int, rule: AlertRule) -> int:
     cur = conn.execute(
         """
         INSERT INTO alert_rules
-            (kind, ticker, threshold_pct, min_relevance, doc_types,
+            (account_id, kind, ticker, threshold_pct, min_relevance, doc_types,
              label, enabled, created_utc)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
+            account_id,
             rule.kind,
             rule.ticker,
             rule.threshold_pct,
@@ -62,34 +63,56 @@ def create_rule(conn: sqlite3.Connection, rule: AlertRule) -> int:
 
 
 def list_rules(
-    conn: sqlite3.Connection, *, enabled_only: bool = False
+    conn: sqlite3.Connection, account_id: int, *, enabled_only: bool = False
 ) -> list[AlertRule]:
-    where = "WHERE enabled = 1" if enabled_only else ""
+    """Rules owned by one account — what the /alerts page renders."""
+    where = "WHERE account_id = ?" + (" AND enabled = 1" if enabled_only else "")
     rows = conn.execute(
-        f"SELECT * FROM alert_rules {where} ORDER BY id"
+        f"SELECT * FROM alert_rules {where} ORDER BY id", (account_id,)
     ).fetchall()
     return [_row_to_rule(r) for r in rows]
 
 
-def get_rule(conn: sqlite3.Connection, rule_id: int) -> AlertRule | None:
+def list_all_enabled_rules(conn: sqlite3.Connection) -> list[AlertRule]:
+    """Every enabled rule across every account — the evaluator's read.
+
+    Named separately, and deliberately not an `account_id=None` branch on
+    `list_rules`, so the one legitimate cross-tenant query in the codebase
+    is greppable and cannot be reached by accident from a request handler.
+    """
+    rows = conn.execute(
+        "SELECT * FROM alert_rules WHERE enabled = 1 ORDER BY id"
+    ).fetchall()
+    return [_row_to_rule(r) for r in rows]
+
+
+def get_rule(
+    conn: sqlite3.Connection, account_id: int, rule_id: int
+) -> AlertRule | None:
     r = conn.execute(
-        "SELECT * FROM alert_rules WHERE id = ?", (rule_id,)
+        "SELECT * FROM alert_rules WHERE id = ? AND account_id = ?",
+        (rule_id, account_id),
     ).fetchone()
     return _row_to_rule(r) if r else None
 
 
-def set_enabled(conn: sqlite3.Connection, rule_id: int, enabled: bool) -> int:
+def set_enabled(
+    conn: sqlite3.Connection, account_id: int, rule_id: int, enabled: bool
+) -> int:
     cur = conn.execute(
-        "UPDATE alert_rules SET enabled = ? WHERE id = ?",
-        (1 if enabled else 0, rule_id),
+        "UPDATE alert_rules SET enabled = ? WHERE id = ? AND account_id = ?",
+        (1 if enabled else 0, rule_id, account_id),
     )
     conn.commit()
     return cur.rowcount
 
 
-def delete_rule(conn: sqlite3.Connection, rule_id: int) -> int:
+def delete_rule(conn: sqlite3.Connection, account_id: int, rule_id: int) -> int:
     # ON DELETE CASCADE clears events; keep the deletion here small.
-    cur = conn.execute("DELETE FROM alert_rules WHERE id = ?", (rule_id,))
+    cur = conn.execute(
+        "DELETE FROM alert_rules WHERE id = ? AND account_id = ?",
+        (rule_id, account_id),
+    )
     conn.commit()
     return cur.rowcount
 

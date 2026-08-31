@@ -16,6 +16,7 @@ from textual.message import Message
 from textual.widgets import DataTable, Input, Label
 
 from kodji.services import watchlist
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 
 
 class WatchlistsView(Vertical):
@@ -64,12 +65,12 @@ class WatchlistsView(Vertical):
         wl = self.query_one("#wl-list", DataTable)
         w_cursor = wl.cursor_row
         wl.clear()
-        lists = watchlist.list_all()
+        lists = watchlist.list_all(DEFAULT_ACCOUNT_ID)
         counts: dict[str, int] = {}
         for w in lists:
             # Cheap `count` — the DB has one item table + a small watchlists set.
             try:
-                view = watchlist.get_with_quotes(w.slug)
+                view = watchlist.get_with_quotes(DEFAULT_ACCOUNT_ID, w.slug)
                 counts[w.slug] = len(view.items)
             except watchlist.WatchlistNotFound:
                 counts[w.slug] = 0
@@ -89,7 +90,7 @@ class WatchlistsView(Vertical):
         if self._selected_slug is None:
             return
         try:
-            view = watchlist.get_with_quotes(self._selected_slug)
+            view = watchlist.get_with_quotes(DEFAULT_ACCOUNT_ID, self._selected_slug)
         except watchlist.WatchlistNotFound:
             self._selected_slug = None
             return
@@ -128,7 +129,7 @@ class WatchlistsView(Vertical):
         if slug is None:
             return
         with contextlib.suppress(watchlist.WatchlistNotFound):
-            watchlist.delete(slug)
+            watchlist.delete(DEFAULT_ACCOUNT_ID, slug)
         self._selected_slug = None
         self.refresh_data()
         self.post_message(self.WatchlistChanged())
@@ -145,7 +146,7 @@ class WatchlistsView(Vertical):
         except Exception:
             return
         try:
-            watchlist.remove_item(slug, str(key))
+            watchlist.remove_item(DEFAULT_ACCOUNT_ID, slug, str(key))
         except (watchlist.WatchlistNotFound, watchlist.TickerUnknown):
             return
         self._refresh_items()
@@ -157,7 +158,7 @@ class WatchlistsView(Vertical):
             if not name:
                 return
             try:
-                created = watchlist.create(name)
+                created = watchlist.create(DEFAULT_ACCOUNT_ID, name)
             except watchlist.WatchlistExists as e:
                 # F-06: a duplicate slug used to raise IntegrityError up
                 # through the input handler and crash the whole app. Surface
@@ -180,7 +181,7 @@ class WatchlistsView(Vertical):
             if not ticker:
                 return
             try:
-                watchlist.add_item(slug, ticker)
+                watchlist.add_item(DEFAULT_ACCOUNT_ID, slug, ticker)
             except watchlist.TickerUnknown:
                 self.notify(f"unknown ticker: {ticker}", severity="warning")
                 return

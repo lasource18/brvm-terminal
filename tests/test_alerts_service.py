@@ -33,6 +33,7 @@ from kodji.models import (
     Quote,
     Security,
 )
+from kodji.services.accounts import DEFAULT_ACCOUNT_ID
 from kodji.sources._dedupe import news_hash
 from kodji.store import alerts as alerts_repo
 from kodji.store import filings as filings_repo
@@ -74,11 +75,11 @@ def _seed_snap(db_path: Path, ticker: str, change_pct: float, last: float = 10_0
 
 def test_create_rule_and_list(monkeypatch, tmp_path):
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    rule_id = svc.create_rule(AlertRule(
+    rule_id = svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(
         kind="price_move", ticker="SNTS", threshold_pct=5.0, label="big"
     ))
     assert rule_id > 0
-    rules = svc.list_rules()
+    rules = svc.list_rules(DEFAULT_ACCOUNT_ID)
     assert len(rules) == 1
     assert rules[0].label == "big"
     assert rules[0].enabled is True
@@ -86,18 +87,18 @@ def test_create_rule_and_list(monkeypatch, tmp_path):
 
 def test_toggle_and_delete_rule(monkeypatch, tmp_path):
     _db_path, svc = _setup(monkeypatch, tmp_path)
-    rid = svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
-    assert svc.set_enabled(rid, False) == 1
-    assert svc.list_rules()[0].enabled is False
-    assert svc.list_rules(enabled_only=True) == []
-    assert svc.delete_rule(rid) == 1
-    assert svc.list_rules() == []
+    rid = svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
+    assert svc.set_enabled(DEFAULT_ACCOUNT_ID, rid, False) == 1
+    assert svc.list_rules(DEFAULT_ACCOUNT_ID)[0].enabled is False
+    assert svc.list_rules(DEFAULT_ACCOUNT_ID, enabled_only=True) == []
+    assert svc.delete_rule(DEFAULT_ACCOUNT_ID, rid) == 1
+    assert svc.list_rules(DEFAULT_ACCOUNT_ID) == []
 
 
 def test_record_event_deduplicates_on_key(monkeypatch, tmp_path):
     db_path, _svc = _setup(monkeypatch, tmp_path)
     with connect(db_path) as conn:
-        rid = alerts_repo.create_rule(conn, AlertRule(kind="price_move", threshold_pct=1.0))
+        rid = alerts_repo.create_rule(conn, DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", threshold_pct=1.0))
         assert alerts_repo.record_event(
             conn, rule_id=rid, kind="price_move", ticker="SNTS",
             subject="s", body="b", payload=None, dedupe_key="k1",
@@ -118,7 +119,7 @@ def test_record_event_deduplicates_on_key(monkeypatch, tmp_path):
 
 def test_price_move_fires_on_ticker_specific_rule(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)  # not watched → no fire
 
@@ -133,7 +134,7 @@ def test_price_move_fires_on_ticker_specific_rule(monkeypatch, tmp_path):
 
 def test_price_move_wildcard_ticker_scans_every_snapshot(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=2.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=2.0))
     _seed_snap(db_path, "SNTS", 3.0)
     _seed_snap(db_path, "ORAC", -4.0)
     _seed_snap(db_path, "SPHC", 1.0)  # under threshold
@@ -146,7 +147,7 @@ def test_price_move_wildcard_ticker_scans_every_snapshot(monkeypatch, tmp_path):
 
 def test_price_move_reeval_is_a_no_op(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
     _seed_snap(db_path, "SNTS", 5.0)
 
     first = svc.evaluate_all()
@@ -158,7 +159,7 @@ def test_price_move_reeval_is_a_no_op(monkeypatch, tmp_path):
 
 def test_price_move_rule_without_threshold_is_skipped(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=None))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=None))
     _seed_snap(db_path, "SNTS", 10.0)
     counts = svc.evaluate_all()
     assert counts.price_move_fired == 0
@@ -166,8 +167,8 @@ def test_price_move_rule_without_threshold_is_skipped(monkeypatch, tmp_path):
 
 def test_disabled_rule_does_not_fire(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    rid = svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
-    svc.set_enabled(rid, False)
+    rid = svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
+    svc.set_enabled(DEFAULT_ACCOUNT_ID, rid, False)
     _seed_snap(db_path, "SNTS", 5.0)
     counts = svc.evaluate_all()
     assert counts.price_move_fired == 0
@@ -207,7 +208,7 @@ def _seed_filing(
 
 def test_new_filing_fires_for_watched_ticker(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="new_filing", ticker="SNTS"))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="new_filing", ticker="SNTS"))
     _seed_filing(db_path, ticker="SNTS")
     _seed_filing(db_path, ticker="ORAC", url_suffix="b")
 
@@ -219,7 +220,7 @@ def test_new_filing_fires_for_watched_ticker(monkeypatch, tmp_path):
 
 def test_new_filing_doc_type_filter(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(
         kind="new_filing", ticker=None, doc_types="rapport_annuel"
     ))
     _seed_filing(db_path, doc_type="rapport_annuel")
@@ -231,7 +232,7 @@ def test_new_filing_doc_type_filter(monkeypatch, tmp_path):
 
 def test_new_filing_rerun_is_deduped(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="new_filing", ticker="SNTS"))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="new_filing", ticker="SNTS"))
     _seed_filing(db_path)
     assert svc.evaluate_all().new_filing_fired == 1
     assert svc.evaluate_all().new_filing_fired == 0
@@ -257,7 +258,7 @@ def test_new_filing_rule_skips_rows_older_than_rule_created_utc(
             ("2020-01-01T00:00:00+00:00", "hash-SNTS-hist"),
         )
         conn.commit()
-    svc.create_rule(AlertRule(kind="new_filing", ticker=None))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="new_filing", ticker=None))
     # New filing arrives after rule creation — should fire.
     _seed_filing(db_path, ticker="ORAC", url_suffix="new")
     counts = svc.evaluate_all()
@@ -280,7 +281,7 @@ def test_news_rule_skips_rows_older_than_rule_created_utc(
             ("2020-01-01T00:00:00+00:00", "OLD news"),
         )
         conn.commit()
-    svc.create_rule(AlertRule(kind="news", ticker=None, min_relevance=0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="news", ticker=None, min_relevance=0))
     _seed_news(db_path, title="FRESH news",
                tickers_llm="ORAC", relevance=9, category="dividend")
     counts = svc.evaluate_all()
@@ -316,7 +317,7 @@ def _seed_news(db_path: Path, *, title: str, tickers_llm: str,
 
 def test_news_evaluator_only_matches_tagged_rows(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="news", ticker="SNTS", min_relevance=5))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="news", ticker="SNTS", min_relevance=5))
     _seed_news(db_path, title="SONATEL earnings", tickers_llm="SNTS", relevance=8)
     # An untagged row (relevance IS NULL) must not fire even if the
     # ticker_hint matches — the min_relevance gate has nothing to check.
@@ -335,7 +336,7 @@ def test_news_evaluator_only_matches_tagged_rows(monkeypatch, tmp_path):
 
 def test_news_min_relevance_gate(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="news", ticker=None, min_relevance=7))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="news", ticker=None, min_relevance=7))
     _seed_news(db_path, title="hi rel", tickers_llm="SNTS", relevance=8)
     _seed_news(db_path, title="lo rel", tickers_llm="ORAC", relevance=3)
     counts = svc.evaluate_all()
@@ -344,7 +345,7 @@ def test_news_min_relevance_gate(monkeypatch, tmp_path):
 
 def test_news_matches_via_tickers_llm_csv(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="news", ticker="ORAC", min_relevance=0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="news", ticker="ORAC", min_relevance=0))
     # ticker_hint is different from the watched ticker — the LLM CSV is
     # the only path to a match.
     _seed_news(
@@ -386,7 +387,7 @@ class _StubSender:
 
 
 def _fire_one(db_path: Path, svc) -> int:
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     svc.evaluate_all()
     return svc.list_recent_events()[0].id or 0
@@ -435,7 +436,7 @@ def test_delivery_no_webhook_skips_events(monkeypatch, tmp_path):
 def test_delivery_batch_cap_limits_a_single_pass(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
     # Fire three events by seeding three tickers with a wildcard rule.
-    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)
     _seed_snap(db_path, "SPHC", 3.0)
@@ -454,7 +455,7 @@ def test_delivery_stops_on_first_failure(monkeypatch, tmp_path):
     """A webhook that's failing shouldn't be spammed with every queued
     event on the same pass — retry the whole batch next time."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)
     _seed_snap(db_path, "SPHC", 3.0)
@@ -497,7 +498,7 @@ def test_price_move_dedupes_across_intraday_snapshots(monkeypatch, tmp_path):
     """Two snapshots on the same trading session must only fire once,
     even when the second row lands with a fresh `captured_utc`."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
 
     _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T09:15:00Z")
     assert svc.evaluate_all().price_move_fired == 1
@@ -515,7 +516,7 @@ def test_price_move_dedupes_weekend_rescrapes_of_friday_close(
     Sat/Sun shouldn't re-fire — all three snapshots collapse to the
     Friday session bucket."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
 
     # Friday close.
     _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T14:59:00Z")
@@ -533,7 +534,7 @@ def test_price_move_dedupes_weekend_rescrapes_of_friday_close(
 def test_price_move_fires_again_on_next_session(monkeypatch, tmp_path):
     """A fresh trading session must be able to fire a new alert."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
 
     _stamp_snap(db_path, "SNTS", 4.5, "2026-08-28T14:59:00Z")
     assert svc.evaluate_all().price_move_fired == 1
@@ -552,7 +553,7 @@ def test_price_move_evaluator_survives_null_last(monkeypatch, tmp_path):
     evaluations silently produced zero events. Now the row still fires
     and downstream evaluators keep running."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker="SNTS", threshold_pct=3.0))
 
     with connect(db_path) as conn:
         conn.execute(
@@ -605,7 +606,7 @@ def test_delivery_permanent_4xx_leaves_the_queue(monkeypatch, tmp_path):
     at head-of-queue would wedge everything behind it. The event must be
     stamped delivered_utc so the next event in the batch gets a chance."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)
     svc.evaluate_all()
@@ -626,7 +627,7 @@ def test_delivery_transient_5xx_keeps_queue_intact(monkeypatch, tmp_path):
     """Transient failures still stop-and-retry: the queue must stay
     intact for the next pass."""
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)
     svc.evaluate_all()

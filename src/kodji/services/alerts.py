@@ -409,7 +409,10 @@ def evaluate_all() -> EvalCounts:
     """One pass over every enabled rule. Safe to call on an empty DB."""
     counts = EvalCounts()
     with connect(_db_path()) as conn:
-        rules = alerts_repo.list_rules(conn, enabled_only=True)
+        # Cross-account by design: the scheduler evaluates every
+        # customer's rules in one pass. Named distinctly from the
+        # account-scoped `list_rules` so this stays the only such read.
+        rules = alerts_repo.list_all_enabled_rules(conn)
         counts.rules_considered = len(rules)
         if not rules:
             log.info("alerts eval: no enabled rules")
@@ -576,9 +579,9 @@ def deliver_pending(
 # ---------------------------------------------------------------------------
 
 
-def list_rules(*, enabled_only: bool = False) -> list[AlertRule]:
+def list_rules(account_id: int, *, enabled_only: bool = False) -> list[AlertRule]:
     with connect(_db_path()) as conn:
-        return alerts_repo.list_rules(conn, enabled_only=enabled_only)
+        return alerts_repo.list_rules(conn, account_id, enabled_only=enabled_only)
 
 
 def list_recent_events(*, limit: int = 25) -> list[AlertEvent]:
@@ -586,19 +589,19 @@ def list_recent_events(*, limit: int = 25) -> list[AlertEvent]:
         return alerts_repo.list_recent(conn, limit=limit)
 
 
-def create_rule(rule: AlertRule) -> int:
+def create_rule(account_id: int, rule: AlertRule) -> int:
     with connect(_db_path()) as conn:
-        return alerts_repo.create_rule(conn, rule)
+        return alerts_repo.create_rule(conn, account_id, rule)
 
 
-def set_enabled(rule_id: int, enabled: bool) -> int:
+def set_enabled(account_id: int, rule_id: int, enabled: bool) -> int:
     with connect(_db_path()) as conn:
-        return alerts_repo.set_enabled(conn, rule_id, enabled)
+        return alerts_repo.set_enabled(conn, account_id, rule_id, enabled)
 
 
-def delete_rule(rule_id: int) -> int:
+def delete_rule(account_id: int, rule_id: int) -> int:
     with connect(_db_path()) as conn:
-        return alerts_repo.delete_rule(conn, rule_id)
+        return alerts_repo.delete_rule(conn, account_id, rule_id)
 
 
 __all__ = [
