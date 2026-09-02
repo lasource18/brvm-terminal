@@ -70,6 +70,45 @@ _FR: dict[str, str] = {
     "That code isn't right, or it has expired. Ask for a new one.":
         "Ce code est incorrect ou a expiré. Demandez-en un nouveau.",
 
+    # ---- plan gating + pricing (PR-Y) ----
+    "PAID PLAN": "OFFRE PAYANTE",
+    "This is part of the paid plan. Quotes, the securities directory, "
+    "the news feed and bond reference data stay free.":
+        "Cette fonctionnalité fait partie de l'offre payante. Les cours, "
+        "le répertoire des titres, le fil d'actualités et les données de "
+        "référence obligataires restent gratuits.",
+    "See plans": "Voir les offres",
+    "Plans": "Offres",
+    "Free": "Gratuit",
+    "Paid": "Payant",
+    "Your plan": "Votre offre",
+    "Raw market facts are free. What Kodji computes on top of them is "
+    "the paid plan.":
+        "Les données brutes du marché sont gratuites. Ce que Kodji "
+        "calcule à partir de celles-ci relève de l'offre payante.",
+    "Quotes and index levels": "Cours et niveaux d'indices",
+    "Securities directory and descriptions":
+        "Répertoire des titres et fiches sociétés",
+    "News feed": "Fil d'actualités",
+    "Bond reference data": "Données de référence obligataires",
+    "Watchlist of up to": "Liste de suivi jusqu'à",
+    "Charts — 25 years of daily history":
+        "Graphiques — 25 ans d'historique quotidien",
+    "Financials and ratios": "États financiers et ratios",
+    "Peers comparison": "Comparaison avec les pairs",
+    "Bond yield, duration and cash flow":
+        "Rendement, duration et flux obligataires",
+    "Daily brief": "Résumé quotidien",
+    "Unlimited watchlists": "Listes de suivi illimitées",
+    "Checkout is not open yet. Mobile money and card payment arrive "
+    "with the billing release.":
+        "Le paiement n'est pas encore ouvert. Mobile money et carte "
+        "bancaire arrivent avec la mise en service de la facturation.",
+    "Free plan tracks up to": "L'offre gratuite suit jusqu'à",
+    "securities.": "titres.",
+    # Tab labels double as the blocked-feature name on the 402 wall;
+    # they are already in the security-tab section below.
+
     # ---- news page + feed (PR-X3) ----
     "Ticker (e.g. SNTS)…": "Ticker (ex. SNTS)…",
     "Ticker (e.g. SNTS)": "Ticker (ex. SNTS)",

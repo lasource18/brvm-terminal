@@ -534,3 +534,28 @@ article.brief-body strong { color: var(--fg); }
 }
 .auth-foot { margin-top: 16px; }
 .auth-foot a { color: var(--blue); }
+
+/* --- paid-plan wall (PR-Y) ---
+   Deliberately quiet: this is a reader who hit a locked feature, not a
+   conversion funnel. It states what is locked, what stays free, and
+   offers one link. */
+.upgrade-wall { max-width: 520px; margin: 48px auto; padding: 20px; border: 1px solid var(--border); background: var(--bg-panel); }
+.upgrade-badge { display: inline-block; padding: 1px 6px; border: 1px solid var(--accent); border-radius: 2px; color: var(--accent); font-size: 11px; letter-spacing: 0.5px; }
+.upgrade-wall h2 { margin: 12px 0 6px; font-size: 15px; color: var(--fg); }
+.upgrade-wall p { margin: 0 0 16px; line-height: 1.6; }
+.upgrade-cta { display: inline-block; padding: 7px 14px; border: 1px solid var(--accent); color: var(--accent); text-decoration: none; }
+.upgrade-cta:hover { background: var(--bg-hover); }
+
+/* --- pricing (PR-Y) --- */
+.plan-grid { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+.plan-card { flex: 1 1 280px; min-width: 260px; padding: 16px; border: 1px solid var(--border); background: var(--bg-panel); }
+.plan-card.current { border-color: var(--accent); }
+.plan-card h2 { margin: 0 0 4px; font-size: 14px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+.plan-badge { display: inline-block; margin-bottom: 8px; padding: 1px 6px; border: 1px solid var(--dim); border-radius: 2px; color: var(--dim); font-size: 11px; }
+.plan-card ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.8; }
+/* Topbar link to /pricing, shown only on the free plan. Matches the
+   locale toggle's weight — a way through, not a call to action. */
+.topbar .plan-link { color: var(--accent); text-decoration: none; white-space: nowrap; padding: 4px 7px; border: 1px solid var(--border); }
+.topbar .plan-link:hover { background: var(--bg-hover); }
+.wl-limit { color: var(--accent); }
+.wl-limit a { color: var(--accent); }

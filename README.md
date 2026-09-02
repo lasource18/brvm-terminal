@@ -580,7 +580,56 @@ Three things matter more than the vendor choice:
 box working exactly as it does: a request with no session resolves to
 the account migration 0017 seeded. **Set it to `true` before the app is
 reachable by anyone but you** — with it off, an anonymous visitor reads
-that account's data. PR-Y flips it alongside plan gating.
+that account's data.
+
+Plan gating (PR-Y) does *not* depend on that flag: an anonymous request
+resolves to the default account and is enforced against whatever plan it
+holds. The two are independent — gating decides *what* a caller sees,
+`AUTH_REQUIRED` decides *whether* a caller has to identify themselves.
+
+## Try it (PR-Y demo — plan gating)
+
+Raw market facts are free; what the app computes on top of them is paid.
+The split is `docs/kodji-plan.md` P4, and `/pricing` renders it.
+
+Your own account stays on paid — migration 0019 puts account 1 there, so
+gating can't lock the operator out of their own terminal. To *see* the
+free tier, flip it and flip it back:
+
+```bash
+just migrate                 # applies 0019
+uv run python - <<'EOF'
+from kodji.db import connect
+from kodji.config import settings
+from kodji.store import accounts as repo
+with connect(settings.db_path) as c:
+    repo.set_plan(c, 1, "free")
+EOF
+just dev
+# /              → renders; Alerts and Brief drop off the topbar
+# /s/SNTS/chart  → 402 with an upgrade wall
+# /api/history/SNTS → 402 {"error": "payment_required"}
+# /pricing       → free vs paid, always reachable
+# adding an 11th distinct ticker to a watchlist → 402 + a cap notice
+```
+
+Put yourself back with `repo.set_plan(c, 1, "paid")`.
+
+Where the enforcement lives:
+
+- `apps/web/tabs.py` — `TabSpec.min_plan` marks a tab paid, and
+  `visible_for(kind, plan)` drops it from the tabbar.
+- `apps/web/_gating.py` — `refuse_if_unpaid(request, feature=...)`, called
+  as the first statement of every paid route across **all three** route
+  families (pages, `_frag` fragments, `/api`). Hiding a tab is not access
+  control; the URL stays typeable.
+- `services/watchlist.py` — `FREE_WATCHLIST_LIMIT`, counted on distinct
+  tickers across all of an account's lists. Enforced in the service, not
+  the route, because the TUI adds items too.
+
+`tests/test_gating.py` walks every paid tab across all three route
+families and asserts a free caller is refused on each. Adding a paid tab
+without a guard fails that test.
 
 ## Try it (Phase 1 demo)
 
