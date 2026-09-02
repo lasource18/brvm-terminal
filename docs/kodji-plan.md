@@ -3,7 +3,7 @@
 **30 Aug 2026.** Turning a single-user BRVM terminal into a multi-tenant PWA with a
 free tier, a paid tier, and a downloadable TUI — without outgrowing one 4 GB VPS.
 
-`brvm-terminal` → `kodji-terminal` · 754 tests · 16 migrations · 0 users
+`brvm-terminal` → `kodji-terminal` · 828 tests · 18 migrations · 0 users
 
 > A rendered version of this document is published at
 > https://claude.ai/code/artifact/fbe26916-86b3-4e1f-afbc-ed1475917214
@@ -18,6 +18,7 @@ free tier, a paid tier, and a downloadable TUI — without outgrowing one 4 GB V
 | What's paid | **Only your own transformations** | Raw facts stay free; charts, ratios, brief, alerts, analyst view are the product. |
 | Payments | **Flutterwave primary**, mobile money + cards, XOF | Stripe is likely unavailable to a CI entity — see P0. |
 | TUI | **Ships to paying users** as a synced local replica | Cheap, because every service already resolves the DB through `settings.db_path`. |
+| Email | **Resend**, sending from Ireland | Free tier covers the whole pre-revenue period. Deliverability to Abidjan or Dakar is decided by the recipient's mailbox (Gmail/Yahoo/Outlook) and by SPF+DKIM+DMARC on our sending subdomain — not by the vendor. Postmark is the escalation if sign-in mail starts landing in spam. |
 
 ## P0 · Two things to settle before writing any code
 
@@ -112,6 +113,8 @@ New migrations:
   2026-08-30:** teams are plausible, so ownership keys on `account_id` from day one
   rather than being retrofitted across every scoped table later.
 - `sessions` — token hash, user_id, expires_utc
+- `login_tokens` — hashed link token *and* hashed 6-digit code for one sign-in
+  challenge, with an attempt counter (PR-X2)
 - `subscriptions` — **account_id**, plan, provider, provider_ref, status,
   current_period_end_utc (a plan is bought by an account, not a person)
 - `push_subscriptions` — user_id, endpoint, keys (for P5) — push is per *device*, so
@@ -253,7 +256,7 @@ Continuing the PR-letter convention from where PR-U left off.
 | **PR-V** | Rename to kodji | 785 import sites, zero behaviour change, green suite. Alone and first. **Shipped (#70).** |
 | **PR-W** | Production surface polish | Drop the "Bloomberg-ish" subtitle and hide model id + token counts + generation cost from the brief and analyst bylines. |
 | **PR-X** | Accounts and ownership | Migration 0017, `account_id` scoping across watchlists and alert rules, subscriptions table. **Shipped.** |
-| **PR-X2** | Authentication | Magic-link sign-in and session cookies. Split out of PR-X because it needs an email provider chosen first — none is configured. |
+| **PR-X2** | Authentication | Magic-link sign-in and session cookies, on Resend. **Shipped.** |
 | **PR-Y** | Plan gating | `TabSpec.min_plan`, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. |
 | **PR-Z** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
 | **PR-AA** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
@@ -289,6 +292,37 @@ Continuing the PR-letter convention from where PR-U left off.
   at source, so a further delay would have differentiated almost nothing while adding
   a read-side filter to every quote path — and it would have made the paid claim hard
   to state honestly. Feature access is the whole free/paid boundary.
+
+- **Email provider: Resend** (31 Aug). The premise the question started from —
+  that serving users in Africa needs a specially-chosen provider — doesn't survive
+  contact with how email actually routes: recipients in Abidjan, Dakar and
+  Ouagadougou are overwhelmingly on Gmail, Yahoo and Outlook, whose MX are global
+  anycast. Deliverability is decided by domain authentication and sending hygiene,
+  not by the vendor's geography. So the choice came down to cost at zero users and
+  time-to-first-email, and Resend's free tier (3 000/mo) covers the entire
+  pre-revenue period with an Ireland sending region, the closest to West Africa by
+  network path.
+
+  What does need care, in order:
+
+  1. **SPF + DKIM + DMARC on a sending subdomain**, never the apex. Gmail and Yahoo
+     have required alignment from bulk senders since 2024.
+  2. **The daily brief gets its own subdomain and key.** It is bulk-shaped and
+     attracts complaints; a spam run against it must not take sign-in mail down
+     with it. This is the argument that would move us to Postmark later — it
+     enforces the separation — not raw deliverability numbers.
+  3. **A link-prefetcher must not burn a magic link.** Scanners GET every URL in a
+     message, so the link lands on a page with a POST button, and a 6-digit code
+     ships alongside it for the mail-app-in-app-browser case. Both shipped in PR-X2.
+  4. **Billing, not delivery, is the CI-specific risk.** Resend bills through
+     Stripe and an Ivorian-issued card can fail on US SaaS. The free tier defers
+     this until there are paying users.
+
+  **WhatsApp is the planned second channel**, not a replacement: for a mobile-first
+  West African audience it is the more natural place to receive a code than email.
+  `services/mailer.py` keeps `SendResult` channel-neutral and the auth flow calls a
+  single `send()`, so a WhatsApp channel is a sibling module and a per-user channel
+  choice — not a rewrite of the sign-in flow.
 
 - **Teams: plausible.** Ownership keys on **`account_id`, not `user_id`** — a personal
   account is auto-created per user at signup. Shipped in PR-X.

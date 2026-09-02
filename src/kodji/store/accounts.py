@@ -7,9 +7,9 @@ rules, a subscription — hangs off the account, so adding teams later is a
 membership change rather than a migration across every scoped table.
 
 `DEFAULT_ACCOUNT_ID` is the account migration 0017 assigns to all
-pre-existing data. Until authentication lands (PR-X2) it is also what the
-request context resolves to, which keeps the app single-user without
-leaving the scoping unenforced.
+pre-existing data. It is also what a request with no session resolves to
+while `AUTH_REQUIRED` is off, and what local processes (TUI, jobs) always
+resolve to — see `services/accounts.py` for that decision.
 """
 
 from __future__ import annotations
@@ -116,6 +116,36 @@ def create_user_with_personal_account(
     Returns `(user_id, account_id)`.
     """
     user_id = create_user(conn, email)
+    account_id = create_account(conn, name=email.strip(), kind="personal")
+    add_member(conn, account_id, user_id, role="owner")
+    return user_id, account_id
+
+
+def ensure_user_with_account(
+    conn: sqlite3.Connection, email: str
+) -> tuple[int, int]:
+    """Get-or-create the (user, account) pair for an email address.
+
+    Idempotent on email, because magic-link sign-in has no separate
+    "register" step: the same submitted address must mean "sign me in"
+    for a returning user and "make me an account" for a new one. Running
+    it twice returns the same pair rather than minting a second personal
+    account.
+
+    The middle branch covers a user whose memberships were all removed —
+    a team-management bug or a manual DB edit. Re-homing them onto a
+    fresh personal account is better than handing back a user id with no
+    account, which every scoped query downstream would then reject.
+    """
+    existing = get_user_by_email(conn, email)
+    if existing is None:
+        return create_user_with_personal_account(conn, email)
+
+    user_id = int(existing["id"])
+    accounts = accounts_for_user(conn, user_id)
+    if accounts:
+        return user_id, int(accounts[0]["id"])
+
     account_id = create_account(conn, name=email.strip(), kind="personal")
     add_member(conn, account_id, user_id, role="owner")
     return user_id, account_id

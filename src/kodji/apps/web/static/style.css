@@ -468,3 +468,53 @@ article.brief-body strong { color: var(--fg); }
   align-items: start;
 }
 @media (max-width: 900px) { .analyst-layout { grid-template-columns: 1fr; } }
+
+/* --- auth (PR-X2) ------------------------------------------------------ */
+.topbar .account { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.topbar .account a { color: var(--muted); text-decoration: none; }
+.topbar .account a:hover { color: var(--accent); }
+/* Long addresses must not push the clock and market badge off the bar. */
+.topbar .account-email {
+  color: var(--muted);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topbar .logout-form { display: inline; margin: 0; }
+.topbar .logout-form button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.topbar .logout-form button:hover { color: var(--red); }
+
+.auth-card { max-width: 420px; margin: 48px auto; }
+.auth-lede { margin: -4px 0 16px; }
+.auth-form { display: flex; flex-direction: column; gap: 6px; }
+.auth-form label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+.auth-form input, .auth-form button {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  font: inherit;
+  padding: 8px 10px;
+}
+.auth-form input:focus { outline: none; border-color: var(--accent); }
+.auth-form button { margin-top: 10px; cursor: pointer; }
+.auth-form button:hover { border-color: var(--accent); color: var(--accent); }
+/* The code is read off a phone and typed here — worth the extra size. */
+.auth-form .auth-code { font-size: 20px; letter-spacing: 6px; text-align: center; }
+.auth-error {
+  border: 1px solid var(--red);
+  color: var(--red);
+  padding: 8px 10px;
+  font-size: 12px;
+  margin: 0 0 14px;
+}
+.auth-foot { margin-top: 16px; }
+.auth-foot a { color: var(--blue); }

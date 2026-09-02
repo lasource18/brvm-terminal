@@ -42,6 +42,34 @@ _FR: dict[str, str] = {
     "MARKET OPEN": "MARCHÉ OUVERT",
     "MARKET CLOSED": "MARCHÉ FERMÉ",
 
+    # ---- sign-in (PR-X2) ----
+    "Sign in": "Connexion",
+    "Sign out": "Déconnexion",
+    "Email address": "Adresse e-mail",
+    "Send me a link": "Envoyez-moi un lien",
+    "Check your email": "Consultez votre messagerie",
+    "6-digit code": "Code à 6 chiffres",
+    "Send another link": "Envoyer un nouveau lien",
+    "Continue as": "Continuer en tant que",
+    "We sent a sign-in link and a code to":
+        "Nous avons envoyé un lien de connexion et un code à",
+    "No password. We email you a link and a 6-digit code — either one "
+    "signs you in.":
+        "Sans mot de passe. Nous vous envoyons un lien et un code à "
+        "6 chiffres : l'un ou l'autre vous connecte.",
+    "Open the link on this device, or type the code below if you're "
+    "reading your mail somewhere else.":
+        "Ouvrez le lien sur cet appareil, ou saisissez le code ci-dessous "
+        "si vous consultez votre messagerie ailleurs.",
+    "That doesn't look like an email address.":
+        "Cette adresse e-mail ne semble pas valide.",
+    "We couldn't send that email just now. Try again in a moment.":
+        "L'envoi de l'e-mail a échoué. Réessayez dans un instant.",
+    "That link has expired or has already been used. Ask for a new one.":
+        "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.",
+    "That code isn't right, or it has expired. Ask for a new one.":
+        "Ce code est incorrect ou a expiré. Demandez-en un nouveau.",
+
     # ---- Peers ratio glossary ----
     "Ratio glossary": "Glossaire des ratios",
     "formulas + reading guide": "formules + guide de lecture",
