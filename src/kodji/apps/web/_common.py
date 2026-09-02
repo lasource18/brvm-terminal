@@ -26,11 +26,9 @@ LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-@pass_context
-def _t(ctx: Context, source: str) -> str:
-    """Jinja `t` filter — translates `source` using the per-render locale.
+def _ctx_locale(ctx: Context) -> Locale:
+    """The effective locale for one render, in priority order:
 
-    Locale is resolved in priority order:
     1. `locale` already in the template context (`base_ctx` sets it on
        every full-page render)
     2. `request` in the context (Starlette's `TemplateResponse` puts it
@@ -39,19 +37,43 @@ def _t(ctx: Context, source: str) -> str:
        honour the user's cookie without every fragment route needing to
        thread `locale` explicitly
     3. Default locale as a last resort
-
-    `pass_context` keeps this request-scoped — no module globals, no
-    cross-request race.
     """
     locale = ctx.get("locale")
     if locale is None:
         request = ctx.get("request")
         if request is not None:
             locale = resolve_locale(request)
-    return translate(source, locale or DEFAULT_LOCALE)
+    return locale or DEFAULT_LOCALE
+
+
+@pass_context
+def _t(ctx: Context, source: str) -> str:
+    """Jinja `t` filter — translates `source` using the per-render locale.
+
+    `pass_context` keeps this request-scoped — no module globals, no
+    cross-request race.
+    """
+    return translate(source, _ctx_locale(ctx))
+
+
+@pass_context
+def _current_locale(ctx: Context) -> Locale:
+    """Jinja `current_locale()` — the same resolution as the `t` filter,
+    exposed for the places that must *branch* on locale rather than look
+    a string up.
+
+    The news feed is the reason this exists: each item carries a stored
+    `summary_en` and `summary_fr` from the tagging pass, and which one to
+    show is a choice between two pieces of data, not a catalog lookup.
+    Fragments reach this through the `request` in their context, so
+    `/_frag/news` picks the right summary on an HTMX swap without the
+    route threading `locale` through.
+    """
+    return _ctx_locale(ctx)
 
 
 templates.env.filters["t"] = _t
+templates.env.globals["current_locale"] = _current_locale
 
 
 def resolve_locale(request: Request) -> Locale:
