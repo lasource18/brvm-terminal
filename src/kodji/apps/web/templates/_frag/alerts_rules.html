@@ -3,12 +3,12 @@
     <thead>
       <tr>
         <th>#</th>
-        <th>Kind</th>
-        <th>Ticker</th>
-        <th>Trigger</th>
-        <th>Label</th>
-        <th class="right">Enabled</th>
-        <th class="right">Actions</th>
+        <th>{{ "Kind"|t }}</th>
+        <th>{{ "Ticker"|t }}</th>
+        <th>{{ "Trigger"|t }}</th>
+        <th>{{ "Label"|t }}</th>
+        <th class="right">{{ "Enabled"|t }}</th>
+        <th class="right">{{ "Actions"|t }}</th>
       </tr>
     </thead>
     <tbody>
@@ -21,9 +21,9 @@
             {% if r.kind == 'price_move' %}
               |Δ| ≥ {{ '%.1f'|format(r.threshold_pct or 0) }}%
             {% elif r.kind == 'new_filing' %}
-              {{ r.doc_types or 'any doc type' }}
+              {{ r.doc_types or 'any doc type'|t }}
             {% elif r.kind == 'news' %}
-              relevance ≥ {{ r.min_relevance if r.min_relevance is not none else 0 }}
+              {{ "relevance"|t }} ≥ {{ r.min_relevance if r.min_relevance is not none else 0 }}
             {% else %}
               —
             {% endif %}
@@ -34,7 +34,7 @@
                     hx-post="/_frag/alerts/rules/{{ r.id }}/toggle"
                     hx-target="#alert-rules-wrap"
                     hx-swap="innerHTML">
-              {{ 'on' if r.enabled else 'off' }}
+              {{ ('on' if r.enabled else 'off')|t }}
             </button>
           </td>
           <td class="right">
@@ -42,8 +42,8 @@
                     hx-delete="/_frag/alerts/rules/{{ r.id }}"
                     hx-target="#alert-rules-wrap"
                     hx-swap="innerHTML"
-                    hx-confirm="Delete rule #{{ r.id }}? (queued events stay in history)">
-              del
+                    hx-confirm="{{ 'Delete rule'|t }} #{{ r.id }}? {{ '(queued events stay in history)'|t }}">
+              {{ "del"|t }}
             </button>
           </td>
         </tr>
@@ -51,5 +51,5 @@
     </tbody>
   </table>
 {% else %}
-  <div class="dim" style="padding: 12px 0;">No rules yet — add one below.</div>
+  <div class="dim" style="padding: 12px 0;">{{ "No rules yet — add one below."|t }}</div>
 {% endif %}

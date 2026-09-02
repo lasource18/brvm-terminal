@@ -380,7 +380,7 @@ def generate_for(
     # gets another shot at translation.
     markdown_fr: str | None = None
     translation_generated_utc: str | None = None
-    translation_usage = _translate_or_none(markdown, client=client, day=spend_day)
+    translation_usage = translate_or_none(markdown, client=client, day=spend_day)
     if translation_usage is not None:
         markdown_fr = translation_usage[0]
         translation_generated_utc = utc_iso()
@@ -437,7 +437,7 @@ def generate_for(
     return result
 
 
-def _translate_or_none(
+def translate_or_none(
     source_markdown: str,
     *,
     client: Any | None,
@@ -450,6 +450,11 @@ def _translate_or_none(
     primary brief write so both versions land atomically. Kept as a
     module-level helper (not a nested function) so tests can monkey-patch
     it to skip the second LLM call.
+
+    Public because `scripts/backfill_translations.py` reruns it over rows
+    whose translation is missing — going through this helper rather than
+    calling the translator directly is what keeps a backfill billed to
+    the same daily counter as a normal run.
     """
     if client is None and not translation_svc.has_llm():
         return None

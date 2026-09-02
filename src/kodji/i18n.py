@@ -70,6 +70,121 @@ _FR: dict[str, str] = {
     "That code isn't right, or it has expired. Ask for a new one.":
         "Ce code est incorrect ou a expiré. Demandez-en un nouveau.",
 
+    # ---- news page + feed (PR-X3) ----
+    "Ticker (e.g. SNTS)…": "Ticker (ex. SNTS)…",
+    "Ticker (e.g. SNTS)": "Ticker (ex. SNTS)",
+    "All categories": "Toutes catégories",
+    "From date (inclusive)": "Date de début (incluse)",
+    "To date (inclusive)": "Date de fin (incluse)",
+    "Min rel": "Pert. min",
+    "Minimum LLM relevance (0-10)": "Pertinence LLM minimale (0-10)",
+    "Reset": "Réinitialiser",
+    "rel": "pert.",
+    "Showing": "Affichage",
+    "of": "sur",
+    "page": "page",
+    "Prev": "Préc.",
+    "Next": "Suiv.",
+    "No news matches these filters.":
+        "Aucune actualité ne correspond à ces filtres.",
+    # News categories are stored as codes; only the visible label changes.
+    "earnings": "résultats",
+    "dividend": "dividende",
+    "governance": "gouvernance",
+    "macro": "macro",
+    "capital_action": "opération sur titres",
+    "other": "autre",
+    # Item kind badge — the two values `news_items.kind` takes.
+    "news": "actu",
+    "communique": "communiqué",
+
+    # ---- directory ----
+    "Securities directory": "Répertoire des titres",
+    "ticker or name": "ticker ou nom",
+    "All countries": "Tous les pays",
+    "All sectors": "Tous les secteurs",
+    "All kinds": "Tous les types",
+    "equity": "action",
+    "index": "indice",
+    "bond": "obligation",
+    "Sort by": "Trier par",
+    "asc": "croissant",
+    "desc": "décroissant",
+    "SECTOR": "SECTEUR",
+    "1W%": "1S%",
+    "1M%": "1M%",
+    "3M%": "3M%",
+    "1Y%": "1A%",
+    "ALL%": "TOT%",
+    "From the earliest recorded close/level for this ticker":
+        "Depuis le premier cours/niveau enregistré pour ce ticker",
+    "No matches.": "Aucun résultat.",
+    "No historical data available.":
+        "Aucune donnée historique disponible.",
+    "securities": "titres",
+
+    # ---- alerts ----
+    "Rules evaluate every 15 min during market hours, hourly otherwise. "
+    "Fired events land in the queue below and get pushed to Discord "
+    "within ~5 min when":
+        "Les règles sont évaluées toutes les 15 min pendant les heures de "
+        "marché, sinon toutes les heures. Les événements déclenchés "
+        "arrivent dans la file ci-dessous et sont envoyés vers Discord "
+        "sous ~5 min lorsque",
+    "is configured.": "est configuré.",
+    "no webhook": "aucun webhook",
+    "Rules": "Règles",
+    "Add a rule": "Ajouter une règle",
+    "Kind": "Type",
+    "Ticker": "Ticker",
+    "Label": "Libellé",
+    "(blank = any)": "(vide = tous)",
+    "(optional)": "(facultatif)",
+    "e.g. Sonatel big moves": "ex. gros mouvements Sonatel",
+    "Threshold %": "Seuil %",
+    "fires on |day change| ≥ threshold":
+        "se déclenche si |variation du jour| ≥ seuil",
+    "Doc types": "Types de document",
+    "(CSV, blank = any)": "(CSV, vide = tous)",
+    "Min relevance": "Pertinence min",
+    "Add rule": "Ajouter la règle",
+    "Recent events": "Événements récents",
+    "Trigger": "Déclencheur",
+    "Enabled": "Activée",
+    "Actions": "Actions",
+    "any doc type": "tout type de document",
+    "relevance": "pertinence",
+    "on": "on",
+    "off": "off",
+    "Delete rule": "Supprimer la règle",
+    "(queued events stay in history)":
+        "(les événements en file restent dans l'historique)",
+    "del": "suppr",
+    "No rules yet — add one below.":
+        "Aucune règle pour le moment — ajoutez-en une ci-dessous.",
+    "delivered": "envoyé",
+    "failed (retry)": "échec (nouvelle tentative)",
+    "skipped (no webhook)": "ignoré (aucun webhook)",
+    "queued": "en file",
+    "No events yet.": "Aucun événement pour le moment.",
+
+    # ---- watchlists ----
+    "Watchlist": "Liste de suivi",
+    "Add": "Ajouter",
+    "tickers must exist in the securities table (run":
+        "les tickers doivent exister dans la table des titres (lancez",
+    "first)": "d'abord)",
+    "Remove": "Retirer",
+    "from": "de",
+    "Empty. Add a ticker above.": "Vide. Ajoutez un ticker ci-dessus.",
+
+    # ---- brief archive + tab placeholder ----
+    "Session recap": "Résumé de séance",
+    "This tab lands in": "Cet onglet arrive en",
+    "The page shell is in place so links won't break in the meantime.":
+        "La structure de la page est en place pour que les liens restent "
+        "valides d'ici là.",
+
     # ---- Peers ratio glossary ----
     "Ratio glossary": "Glossaire des ratios",
     "formulas + reading guide": "formules + guide de lecture",

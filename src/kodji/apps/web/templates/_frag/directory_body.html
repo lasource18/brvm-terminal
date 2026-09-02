@@ -25,26 +25,26 @@
      hx-target="#dir-body"
      hx-swap="outerHTML"
      style="cursor: pointer; text-decoration: none; color: inherit;"
-     title="Sort by {{ label }} ({{ next_dir }})">{{ label }}{{ arrow }}</a>
+     title="{{ 'Sort by'|t }} {{ label }} ({{ next_dir|t }})">{{ label }}{{ arrow }}</a>
 {%- endmacro %}
 <div id="dir-body" class="panel" style="margin-top: 12px;">
   <table class="quotes dir-table">
     <thead>
       <tr>
-        <th>{{ sort_link('TICKER',  'ticker',         current) }}</th>
-        <th>{{ sort_link('NAME',    'name',           current) }}</th>
-        <th>{{ sort_link('KIND',    'kind',           current) }}</th>
-        <th>{{ sort_link('COUNTRY', 'country',        current) }}</th>
-        <th>{{ sort_link('SECTOR',  'sector',         current) }}</th>
-        <th>{{ sort_link('LAST',    'last',           current, numeric=true) }}</th>
-        <th>{{ sort_link('DAY%',    'change_pct',     current, numeric=true) }}</th>
-        <th>{{ sort_link('1W%',     'change_1w_pct',  current, numeric=true) }}</th>
-        <th>{{ sort_link('1M%',     'change_1m_pct',  current, numeric=true) }}</th>
-        <th>{{ sort_link('3M%',     'change_3m_pct',  current, numeric=true) }}</th>
-        <th>{{ sort_link('YTD%',    'change_ytd_pct', current, numeric=true) }}</th>
-        <th>{{ sort_link('1Y%',     'change_1y_pct',  current, numeric=true) }}</th>
-        <th title="From the earliest recorded close/level for this ticker">
-          {{ sort_link('ALL%',      'change_all_pct', current, numeric=true) }}
+        <th>{{ sort_link('TICKER'|t,  'ticker',         current) }}</th>
+        <th>{{ sort_link('NAME'|t,    'name',           current) }}</th>
+        <th>{{ sort_link('KIND'|t,    'kind',           current) }}</th>
+        <th>{{ sort_link('COUNTRY'|t, 'country',        current) }}</th>
+        <th>{{ sort_link('SECTOR'|t,  'sector',         current) }}</th>
+        <th>{{ sort_link('LAST'|t,    'last',           current, numeric=true) }}</th>
+        <th>{{ sort_link('DAY%'|t,    'change_pct',     current, numeric=true) }}</th>
+        <th>{{ sort_link('1W%'|t,     'change_1w_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('1M%'|t,     'change_1m_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('3M%'|t,     'change_3m_pct',  current, numeric=true) }}</th>
+        <th>{{ sort_link('YTD%'|t,    'change_ytd_pct', current, numeric=true) }}</th>
+        <th>{{ sort_link('1Y%'|t,     'change_1y_pct',  current, numeric=true) }}</th>
+        <th title="{{ 'From the earliest recorded close/level for this ticker'|t }}">
+          {{ sort_link('ALL%'|t,      'change_all_pct', current, numeric=true) }}
         </th>
       </tr>
     </thead>
@@ -53,7 +53,7 @@
         <tr>
           <td><a href="/s/{{ r.ticker }}">{{ r.ticker }}</a></td>
           <td>{{ r.name }}</td>
-          <td class="dim">{{ r.kind }}</td>
+          <td class="dim">{{ r.kind|t }}</td>
           <td>{{ r.country or "—" }}</td>
           <td class="dim">{{ r.sector or "—" }}</td>
           <td>{% if r.last is not none %}{{ "{:,.0f}".format(r.last) }}{% else %}—{% endif %}</td>
@@ -64,9 +64,9 @@
           {% endfor %}
         </tr>
       {% else %}
-        <tr><td colspan="13" class="dim" style="text-align: center; padding: 20px;">No matches.</td></tr>
+        <tr><td colspan="13" class="dim" style="text-align: center; padding: 20px;">{{ "No matches."|t }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  <div class="dim" style="padding: 6px 10px;">{{ rows|length }} securities</div>
+  <div class="dim" style="padding: 6px 10px;">{{ rows|length }} {{ "securities"|t }}</div>
 </div>
