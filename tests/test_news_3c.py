@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 
+from kodji.clock import utcnow
 from kodji.config import reset_settings_cache
 from kodji.db import connect
 from kodji.models import CorporateAction, NewsItem
@@ -123,6 +124,12 @@ def test_list_upcoming_actions_joins_security_name(monkeypatch, tmp_path):
 
 # ------------------------------------------------------------------ web layer -
 
+# The seeded corporate action must stay in the future: the views under
+# test filter to *upcoming* actions in a 30-day window, so a hardcoded
+# ex_date silently turns these tests red once it slips into the past.
+SEEDED_EX_DATE = utcnow().date() + timedelta(days=7)
+
+
 def _seed_feed(client, *, n=5):
     """Insert `n` tagged news rows and a corporate action against the DB
     the `client` fixture set up. Item `i` gets a distinct `published_at`
@@ -153,7 +160,7 @@ def _seed_feed(client, *, n=5):
             )
         news_repo.upsert_corporate_actions(conn, [
             CorporateAction(ticker="SNTS", kind="dividend",
-                            ex_date=date(2026, 9, 1),
+                            ex_date=SEEDED_EX_DATE,
                             amount=1750.0, currency="XOF", yield_pct=5.4,
                             source="sikafinance"),
         ])
@@ -179,7 +186,7 @@ def test_corporate_actions_tab_lists_upcoming(client):
     assert r.status_code == 200
     body = r.text
     assert "Corporate actions · SNTS" in body
-    assert "2026-09-01" in body
+    assert SEEDED_EX_DATE.isoformat() in body
     assert "dividend" in body
 
 
