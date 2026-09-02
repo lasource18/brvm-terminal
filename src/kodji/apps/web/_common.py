@@ -13,6 +13,7 @@ from kodji import __version__
 from kodji.clock import is_market_open, now_abidjan
 from kodji.i18n import DEFAULT_LOCALE, Locale, normalize, translate
 from kodji.services import accounts as accounts_svc
+from kodji.store.accounts import DEFAULT_ACCOUNT_ID, PAID_PLAN
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -76,6 +77,17 @@ templates.env.filters["t"] = _t
 templates.env.globals["current_locale"] = _current_locale
 
 
+def _plan_for(identity: accounts_svc.Identity | None) -> str:
+    """Plan for an already-resolved identity.
+
+    Anonymous readers fall to the default account, which matches
+    `current_account_id`'s behaviour with `AUTH_REQUIRED` off — the
+    single-user deployment keeps whatever plan account 1 holds.
+    """
+    account_id = identity.account_id if identity else DEFAULT_ACCOUNT_ID
+    return accounts_svc.plan_for(account_id)
+
+
 def resolve_locale(request: Request) -> Locale:
     """Resolve the effective locale for this request.
 
@@ -91,6 +103,7 @@ def resolve_locale(request: Request) -> Locale:
 def base_ctx(request: Request) -> dict:
     """Common template context injected into every full-page render."""
     locale = resolve_locale(request)
+    identity = accounts_svc.identity_for(request)
     return {
         "version": __version__,
         "abidjan_now": now_abidjan().strftime("%Y-%m-%d %H:%M %Z"),
@@ -102,5 +115,8 @@ def base_ctx(request: Request) -> dict:
         # None when signed out. One indexed lookup on the session cookie
         # per full-page render; fragments don't call base_ctx, so HTMX
         # traffic doesn't pay for it.
-        "identity": accounts_svc.identity_for(request),
+        "identity": identity,
+        # Drives which nav links the topbar offers (PR-Y). Resolved from
+        # the identity already in hand rather than re-reading the cookie.
+        "is_paid": _plan_for(identity) == PAID_PLAN,
     }

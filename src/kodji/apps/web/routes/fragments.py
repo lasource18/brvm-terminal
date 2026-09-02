@@ -1,4 +1,11 @@
-"""HTMX fragment endpoints."""
+"""HTMX fragment endpoints.
+
+Every alert fragment here is behind the paid gate. These are the routes
+that are easy to forget when gating: the Alerts *page* is guarded in
+`routes/pages.py`, but each button on it posts to a `/_frag/alerts/...`
+URL that a free caller can hit directly with curl, and a rule created
+that way would evaluate and deliver like any other.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from kodji.apps.web._common import templates
+from kodji.apps.web._gating import plan_for_request, refuse_if_unpaid
 from kodji.clock import is_market_open, utc_iso
 from kodji.models import AlertRule
 from kodji.services import accounts as accounts_svc
@@ -59,13 +67,28 @@ def watchlist_body_frag(request: Request, slug: str):
 @router.post("/watchlists/{slug}/items", response_class=HTMLResponse)
 def add_watchlist_item(request: Request, slug: str, ticker: str = Form(...)):
     try:
-        watchlist.add_item(accounts_svc.current_account_id(request), slug, ticker)
+        watchlist.add_item(
+            accounts_svc.current_account_id(request),
+            slug,
+            ticker,
+            plan=plan_for_request(request),
+        )
     except watchlist.WatchlistNotFound as e:
         raise HTTPException(status_code=404, detail=f"unknown watchlist: {slug}") from e
     except watchlist.TickerUnknown as e:
         raise HTTPException(
             status_code=400, detail=f"unknown ticker: {ticker.upper()}"
         ) from e
+    except watchlist.WatchlistLimitReached:
+        # 402, not 400: the request is valid and would succeed on a paid
+        # plan. Re-renders the list with the cap notice so the HTMX swap
+        # still lands something useful in the target div.
+        return templates.TemplateResponse(
+            request,
+            "_frag/watchlist.html",
+            {**_wl_ctx(request, slug), "limit_reached": watchlist.FREE_WATCHLIST_LIMIT},
+            status_code=402,
+        )
     return templates.TemplateResponse(request, "_frag/watchlist.html", _wl_ctx(request, slug))
 
 
@@ -179,6 +202,8 @@ def create_alert_rule(
     doc_types: str = Form(default=""),
     min_relevance: str = Form(default=""),
 ):
+    if (refused := refuse_if_unpaid(request, feature="Alerts")) is not None:
+        return refused
     if kind not in {"price_move", "new_filing", "news"}:
         raise HTTPException(status_code=400, detail=f"unknown kind: {kind}")
     t = (ticker or "").strip().upper() or None
@@ -228,6 +253,8 @@ def create_alert_rule(
 
 @router.post("/alerts/rules/{rule_id}/toggle", response_class=HTMLResponse)
 def toggle_alert_rule(request: Request, rule_id: int):
+    if (refused := refuse_if_unpaid(request, feature="Alerts")) is not None:
+        return refused
     from kodji.config import settings as _s
     from kodji.db import connect
     from kodji.store import alerts as _alerts_repo
@@ -245,6 +272,8 @@ def toggle_alert_rule(request: Request, rule_id: int):
 
 @router.delete("/alerts/rules/{rule_id}", response_class=HTMLResponse)
 def delete_alert_rule(request: Request, rule_id: int):
+    if (refused := refuse_if_unpaid(request, feature="Alerts")) is not None:
+        return refused
     n = alerts_svc.delete_rule(accounts_svc.current_account_id(request), rule_id)
     if n == 0:
         raise HTTPException(status_code=404, detail=f"unknown rule: {rule_id}")

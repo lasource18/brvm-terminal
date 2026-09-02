@@ -1,0 +1,13 @@
+{#
+  The 402 body for an HTMX swap — no page chrome, because it lands inside
+  whatever div the request targeted. The full-page version wraps this.
+#}
+<div class="upgrade-wall">
+  <div class="upgrade-badge">{{ "PAID PLAN"|t }}</div>
+  <h2>{{ feature|t }}</h2>
+  <p class="dim">
+    {{ "This is part of the paid plan. Quotes, the securities directory, "
+       "the news feed and bond reference data stay free."|t }}
+  </p>
+  <a class="upgrade-cta" href="/pricing">{{ "See plans"|t }}</a>
+</div>

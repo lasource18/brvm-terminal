@@ -139,14 +139,19 @@ def test_deleting_an_account_takes_its_data(two_accounts):
 def test_new_accounts_start_on_the_free_plan(two_accounts):
     a, b = two_accounts
     with connect(settings.db_path) as conn:
-        assert accounts_repo.plan_for(conn, a) == "free"
+        # Account 1 is the operator's own — migration 0019 puts it on paid
+        # so PR-Y's gating can't lock the owner out of their own terminal.
+        assert accounts_repo.plan_for(conn, a) == "paid"
+        # Anyone who signs up afterwards starts free.
         assert accounts_repo.plan_for(conn, b) == "free"
 
         accounts_repo.set_plan(conn, b, "paid", provider="flutterwave",
                                provider_ref="sub_123")
         assert accounts_repo.plan_for(conn, b) == "paid"
-        # One account upgrading must not upgrade the other.
-        assert accounts_repo.plan_for(conn, a) == "free"
+
+        c = accounts_repo.create_account(conn, "Third customer")
+        # One account upgrading must not upgrade another.
+        assert accounts_repo.plan_for(conn, c) == "free"
 
 
 @pytest.mark.parametrize(

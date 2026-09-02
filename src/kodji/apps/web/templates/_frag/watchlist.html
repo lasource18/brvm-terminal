@@ -35,6 +35,14 @@
   {% else %}
     <div class="dim" style="padding: 12px;">{{ "Empty. Add a ticker above."|t }}</div>
   {% endif %}
+  {% if limit_reached %}
+    {# The free cap counts distinct tickers across every list, so this
+       fires on breadth, not on how the reader has organised them. #}
+    <div class="wl-limit" style="padding: 8px 10px;">
+      {{ "Free plan tracks up to"|t }} {{ limit_reached }} {{ "securities."|t }}
+      <a href="/pricing">{{ "See plans"|t }}</a>
+    </div>
+  {% endif %}
   <div class="dim" style="padding: 6px 10px;">
     <span class="tick">{{ "generated"|t }} {{ generated_utc }}</span>
     · {{ "auto-refresh every"|t }} {{ interval }}s
