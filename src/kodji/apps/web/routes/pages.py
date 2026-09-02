@@ -13,6 +13,7 @@ from kodji.apps.web._common import (
     base_ctx,
     templates,
 )
+from kodji.apps.web._gating import is_paid, refuse_if_unpaid
 from kodji.clock import is_market_open, utc_iso
 from kodji.config import settings
 from kodji.i18n import normalize
@@ -63,13 +64,16 @@ def set_locale(code: str, next: str = "/"):
 
 
 @router.get("/s/{ticker}", response_class=HTMLResponse)
-def security_root(ticker: str):
+def security_root(request: Request, ticker: str):
     # Kind-aware redirect: bonds land on Overview (their DES-equivalent),
     # equities + indices land on Chart. Unknown tickers still 307 to
     # /chart which surfaces a clean 404 from the tab route.
     sec = market.get_security(ticker)
     kind = sec.kind if sec else None
-    return RedirectResponse(url=f"/s/{ticker}/{tabs.default_tab_for(kind)}", status_code=307)
+    plan = "paid" if is_paid(request) else "free"
+    return RedirectResponse(
+        url=f"/s/{ticker}/{tabs.default_tab_for(kind, plan)}", status_code=307
+    )
 
 
 @router.get("/s/{ticker}/{tab}", response_class=HTMLResponse)
@@ -84,10 +88,17 @@ def security_tab(request: Request, ticker: str, tab: str):
         raise HTTPException(
             status_code=404, detail=f"tab {tab!r} not available for {sec.kind}"
         )
+    # Before any service call: a refused request must not pay for the
+    # queries behind the tab it isn't allowed to see.
+    if spec.is_paid and (
+        refused := refuse_if_unpaid(request, feature=spec.label)
+    ) is not None:
+        return refused
+    plan = "paid" if is_paid(request) else "free"
     ctx = {
         **base_ctx(request),
         "sec": sec,
-        "tabs": tabs.visible_for(sec.kind),
+        "tabs": tabs.visible_for(sec.kind, plan),
         "active_tab": spec.key,
         "tab": spec,
         "tab_template": spec.template,
@@ -148,6 +159,8 @@ def security_tab(request: Request, ticker: str, tab: str):
 @router.get("/s/{ticker}/analyst/{week_start}", response_class=HTMLResponse)
 def analyst_note_by_week(request: Request, ticker: str, week_start: str):
     """Archive route — a specific historical note for a ticker."""
+    if (refused := refuse_if_unpaid(request, feature="Analyst view")) is not None:
+        return refused
     from datetime import date as _date
     try:
         _date.fromisoformat(week_start)
@@ -319,6 +332,8 @@ def watchlist_page(request: Request, slug: str):
 
 @router.get("/alerts", response_class=HTMLResponse)
 def alerts_page(request: Request):
+    if (refused := refuse_if_unpaid(request, feature="Alerts")) is not None:
+        return refused
     return templates.TemplateResponse(
         request,
         "alerts.html",
@@ -355,12 +370,16 @@ def _render_brief_page(request: Request, brief) -> HTMLResponse:
 
 @router.get("/brief", response_class=HTMLResponse)
 def brief_latest(request: Request):
+    if (refused := refuse_if_unpaid(request, feature="Daily brief")) is not None:
+        return refused
     latest = brief_svc.latest_brief()
     return _render_brief_page(request, latest)
 
 
 @router.get("/brief/{day}", response_class=HTMLResponse)
 def brief_by_day(request: Request, day: str):
+    if (refused := refuse_if_unpaid(request, feature="Daily brief")) is not None:
+        return refused
     # Cheap guard so a "/brief/foo" doesn't reach the SQL layer.
     from datetime import date as _date
     try:
@@ -371,6 +390,24 @@ def brief_by_day(request: Request, day: str):
     if b is None:
         raise HTTPException(status_code=404, detail=f"no brief for {day}")
     return _render_brief_page(request, b)
+
+
+@router.get("/pricing", response_class=HTMLResponse)
+def pricing_page(request: Request):
+    """What free gets and what paid gets.
+
+    Ungated on purpose: it is the destination of every upgrade link in
+    the app, and a paywalled pricing page would be a loop.
+    """
+    return templates.TemplateResponse(
+        request,
+        "pricing.html",
+        {
+            **base_ctx(request),
+            "plan": "paid" if is_paid(request) else "free",
+            "free_watchlist_limit": watchlist.FREE_WATCHLIST_LIMIT,
+        },
+    )
 
 
 @router.get("/health")

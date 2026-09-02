@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ "Plans"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <h1 class="page-title">{{ "Plans"|t }}</h1>
+  <p class="dim auth-lede">
+    {{ "Raw market facts are free. What Kodji computes on top of them is "
+       "the paid plan."|t }}
+  </p>
+
+  <div class="plan-grid">
+    <div class="plan-card{% if plan == 'free' %} current{% endif %}">
+      <h2>{{ "Free"|t }}</h2>
+      {% if plan == 'free' %}<div class="plan-badge">{{ "Your plan"|t }}</div>{% endif %}
+      <ul>
+        <li>{{ "Quotes and index levels"|t }}</li>
+        <li>{{ "Securities directory and descriptions"|t }}</li>
+        <li>{{ "News feed"|t }}</li>
+        <li>{{ "Bond reference data"|t }}</li>
+        <li>{{ "Watchlist of up to"|t }} {{ free_watchlist_limit }} {{ "securities"|t }}</li>
+      </ul>
+    </div>
+
+    <div class="plan-card{% if plan == 'paid' %} current{% endif %}">
+      <h2>{{ "Paid"|t }}</h2>
+      {% if plan == 'paid' %}<div class="plan-badge">{{ "Your plan"|t }}</div>{% endif %}
+      <ul>
+        <li>{{ "Charts — 25 years of daily history"|t }}</li>
+        <li>{{ "Financials and ratios"|t }}</li>
+        <li>{{ "Peers comparison"|t }}</li>
+        <li>{{ "Bond yield, duration and cash flow"|t }}</li>
+        <li>{{ "Daily brief"|t }}</li>
+        <li>{{ "Analyst view"|t }}</li>
+        <li>{{ "Alerts"|t }}</li>
+        <li>{{ "Unlimited watchlists"|t }}</li>
+      </ul>
+    </div>
+  </div>
+
+  {# Checkout lands with PR-Z (Flutterwave). Saying so beats a button
+     that does nothing, and beats no page at all behind every upgrade
+     link in the app. #}
+  <p class="dim" style="margin-top: 20px;">
+    {{ "Checkout is not open yet. Mobile money and card payment arrive "
+       "with the billing release."|t }}
+  </p>
+{% endblock %}
