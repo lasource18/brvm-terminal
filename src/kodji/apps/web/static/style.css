@@ -21,39 +21,50 @@ body {
 }
 
 /* --- layout --- */
+/* The bar has to hold the same chrome in both locales, and the French
+   labels run ~90px wider than the English ones ("Listes de suivi" alone
+   is half again the width of "Watchlists"). Three things absorb that:
+   the nav links carry their spacing as a gap rather than a per-link
+   margin (no dead margin after the last one), the search input is the
+   one item allowed to shrink, and the row wraps as a last resort instead
+   of pushing the clock and market badge off the edge. */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   font-size: 12px;
 }
-.topbar .brand { color: var(--accent); font-weight: bold; letter-spacing: 0.5px; }
+.topbar .brand { color: var(--accent); font-weight: bold; letter-spacing: 0.5px; white-space: nowrap; }
 .topbar .brand a { color: var(--accent); text-decoration: none; }
+.topbar nav { display: flex; flex-wrap: wrap; gap: 2px; }
 .topbar nav a {
   color: var(--fg);
   text-decoration: none;
-  margin-right: 12px;
-  padding: 4px 8px;
+  padding: 4px 7px;
   border: 1px solid transparent;
+  white-space: nowrap;
 }
 .topbar nav a:hover { border-color: var(--border); background: var(--bg-hover); }
-.topbar .spacer { flex: 1; }
-.topbar .clock { color: var(--muted); }
+.topbar .spacer { flex: 1 1 0; min-width: 0; }
+.topbar .clock { color: var(--muted); white-space: nowrap; }
 /* FR|EN toggle — inactive locale is dim, active is bright + underlined so
    the current choice is obvious at a glance. Kept compact so it doesn't
    compete with the search input for horizontal space. */
-.topbar .lang-toggle { color: var(--muted); font-size: 0.9em; letter-spacing: 0.5px; }
+.topbar .lang-toggle { color: var(--muted); font-size: 0.9em; letter-spacing: 0.5px; white-space: nowrap; }
 .topbar .lang-toggle a { color: var(--muted); text-decoration: none; padding: 2px 4px; }
 .topbar .lang-toggle a:hover { color: var(--fg); }
 .topbar .lang-toggle a.lang-active { color: var(--accent); font-weight: bold; text-decoration: underline; }
 
 /* --- search box in topbar --- */
-.search-wrap { position: relative; }
+/* Shrinkable down to a still-typeable width: it is the only item on the
+   bar that loses nothing but slack when it gets narrower. */
+.search-wrap { position: relative; flex: 0 1 260px; min-width: 120px; }
 #search-input {
-  width: 260px;
+  width: 100%;
   padding: 5px 10px;
   background: var(--bg);
   color: var(--fg);
@@ -67,6 +78,9 @@ body {
   top: 100%;
   left: 0;
   right: 0;
+  /* The input may shrink with the bar; the results grid (ticker / name /
+     price) still needs room, so the dropdown keeps its own floor. */
+  min-width: 260px;
   z-index: 30;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -192,6 +206,8 @@ table.quotes tr:last-child td { border-bottom: 0; }
 .badge.open { color: var(--green); }
 .badge.closed { color: var(--red); }
 .badge.stale { color: var(--accent); }
+/* "MARCHÉ FERMÉ" must not break across two lines inside the topbar. */
+.topbar .badge { white-space: nowrap; }
 
 /* --- security page --- */
 .sec-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -470,7 +486,7 @@ article.brief-body strong { color: var(--fg); }
 @media (max-width: 900px) { .analyst-layout { grid-template-columns: 1fr; } }
 
 /* --- auth (PR-X2) ------------------------------------------------------ */
-.topbar .account { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.topbar .account { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
 .topbar .account a { color: var(--muted); text-decoration: none; }
 .topbar .account a:hover { color: var(--accent); }
 /* Long addresses must not push the clock and market badge off the bar. */
