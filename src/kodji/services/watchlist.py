@@ -1,4 +1,12 @@
-"""Watchlist CRUD on top of the store + latest-snapshot join for the UI."""
+"""Watchlist CRUD on top of the store + latest-snapshot join for the UI.
+
+The free-plan cap (PR-Y) is enforced here rather than in the route,
+because there are two ways in — the web fragment and the TUI — and only
+one of them goes through FastAPI. Counting happens on **distinct tickers
+across all of the account's lists**, so the same name on three lists
+costs one slot; otherwise the cap would punish organising rather than
+limit breadth, which is not what it is for.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +17,12 @@ from kodji.config import settings
 from kodji.db import connect
 from kodji.services._view import QuoteRow, WatchlistView
 from kodji.store import watchlists as repo
+from kodji.store.accounts import PAID_PLAN
+
+# Distinct securities a free account may track across all its lists.
+# Named here rather than in config: it is a product decision from
+# docs/kodji-plan.md P4, not a deployment knob.
+FREE_WATCHLIST_LIMIT = 10
 
 
 class WatchlistNotFound(LookupError):
@@ -17,6 +31,18 @@ class WatchlistNotFound(LookupError):
 
 class TickerUnknown(LookupError):
     pass
+
+
+class WatchlistLimitReached(ValueError):
+    """The free plan's distinct-ticker cap is already used up.
+
+    Carries the cap so the caller can say "10 of 10" rather than a bare
+    refusal, and so the number lives in one place.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        super().__init__(f"free plan is limited to {limit} securities")
 
 
 class WatchlistExists(ValueError):
@@ -152,7 +178,30 @@ def get_with_quotes(account_id: int, slug: str) -> WatchlistView:
     )
 
 
-def add_item(account_id: int, slug: str, ticker: str) -> None:
+def distinct_ticker_count(account_id: int) -> int:
+    """How many distinct securities this account tracks, across all lists."""
+    with connect(_db_path()) as conn:
+        return _distinct_ticker_count(conn, account_id)
+
+
+def _distinct_ticker_count(conn: sqlite3.Connection, account_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(DISTINCT i.ticker) AS n "
+        "FROM watchlist_items i "
+        "JOIN watchlists w ON w.id = i.watchlist_id "
+        "WHERE w.account_id = ?",
+        (account_id,),
+    ).fetchone()
+    return int(row["n"] if row else 0)
+
+
+def add_item(account_id: int, slug: str, ticker: str, *, plan: str = PAID_PLAN) -> None:
+    """Add `ticker` to `slug`.
+
+    `plan` defaults to paid so callers with no plan notion — the TUI,
+    jobs, tests older than PR-Y — are unaffected. The web layer passes
+    the real plan.
+    """
     ticker = ticker.upper().strip()
     with connect(_db_path()) as conn:
         wl = repo.get_by_slug(conn, account_id, slug)
@@ -163,6 +212,18 @@ def add_item(account_id: int, slug: str, ticker: str) -> None:
         ).fetchone()
         if not known:
             raise TickerUnknown(ticker)
+        if plan != PAID_PLAN:
+            # Re-adding a ticker the account already tracks is always
+            # allowed: it consumes no new slot, and refusing it would
+            # make a capped user unable to organise what they already have.
+            already = conn.execute(
+                "SELECT 1 FROM watchlist_items i "
+                "JOIN watchlists w ON w.id = i.watchlist_id "
+                "WHERE w.account_id = ? AND i.ticker = ? LIMIT 1",
+                (account_id, ticker),
+            ).fetchone()
+            if not already and _distinct_ticker_count(conn, account_id) >= FREE_WATCHLIST_LIMIT:
+                raise WatchlistLimitReached(FREE_WATCHLIST_LIMIT)
         repo.add_item(conn, account_id, wl["id"], ticker)
 
 

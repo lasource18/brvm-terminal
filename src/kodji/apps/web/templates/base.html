@@ -17,8 +17,13 @@
       <a href="/directory">{{ "Directory"|t }}</a>
       <a href="/news">{{ "News"|t }}</a>
       <a href="/watchlists">{{ "Watchlists"|t }}</a>
-      <a href="/alerts">{{ "Alerts"|t }}</a>
-      <a href="/brief">{{ "Brief"|t }}</a>
+      {# Alerts and Brief are paid. Free readers don't see the links —
+         the routes refuse them anyway, but offering a link that 402s is
+         a worse experience than not offering it. #}
+      {% if is_paid %}
+        <a href="/alerts">{{ "Alerts"|t }}</a>
+        <a href="/brief">{{ "Brief"|t }}</a>
+      {% endif %}
     </nav>
     <div class="search-wrap">
       <input id="search-input"
@@ -46,6 +51,9 @@
     </span>
     {# Signed-in identity, or the way in. `identity` comes from base_ctx,
        so it's present on every full-page render and absent on fragments. #}
+    {% if not is_paid %}
+      <a class="plan-link" href="/pricing">{{ "Plans"|t }}</a>
+    {% endif %}
     <span class="account">
       {% if identity %}
         <span class="account-email" title="{{ identity.email }}">{{ identity.email }}</span>
