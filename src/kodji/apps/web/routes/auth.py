@@ -61,19 +61,35 @@ def _cross_origin(request: Request) -> bool:
     Origin is allowed through: that's curl, the test client, and older
     same-origin form posts — none of which an attacker controls a
     victim's browser into producing.
+
+    Two hosts count as "us": the configured `PUBLIC_BASE_URL`, and the
+    host this request actually arrived on. The second is safe to trust
+    here even though link-building must not (see `Settings.public_base_
+    url`): a cross-site attacker can make a victim's browser POST to us,
+    but cannot make it send a `Host` different from the URL it posted
+    to, so Origin == Host is exactly the same-origin case. Without it,
+    a production `.env` copied to a laptop, or the live box reached
+    through an SSH tunnel on localhost, refuses every sign-in and
+    sign-out with a message that reads like an attack.
     """
     origin = request.headers.get("origin")
     if not origin:
         return False
-    return urlparse(origin).netloc != urlparse(_base_url(request)).netloc
+    ours = {urlparse(_base_url(request)).netloc, request.url.netloc}
+    return urlparse(origin).netloc not in ours
 
 
 def _refuse_cross_origin(request: Request) -> Response | None:
     if not _cross_origin(request):
         return None
-    log.warning("auth: rejected cross-origin POST from %s to %s",
-                request.headers.get("origin"), request.url.path)
-    return PlainTextResponse("cross-origin request refused", status_code=403)
+    origin = request.headers.get("origin")
+    log.warning("auth: rejected cross-origin POST from %s to %s", origin, request.url.path)
+    # Name the expected host: the operator hitting this from a misconfigured
+    # box needs to know what to fix, and the public origin is not a secret.
+    return PlainTextResponse(
+        f"cross-origin request refused: Origin {origin} is not {_base_url(request)}",
+        status_code=403,
+    )
 
 
 def _sign_in(grant: auth_svc.Grant) -> RedirectResponse:
