@@ -67,6 +67,8 @@ _FR: dict[str, str] = {
         "L'envoi de l'e-mail a échoué. Réessayez dans un instant.",
     "That link has expired or has already been used. Ask for a new one.":
         "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.",
+    "The link and code expire in %d minutes and work only once.":
+        "Le lien et le code expirent dans %d minutes et ne servent qu'une fois.",
     "That code isn't right, or it has expired. Ask for a new one.":
         "Ce code est incorrect ou a expiré. Demandez-en un nouveau.",
 

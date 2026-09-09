@@ -50,6 +50,21 @@ def test_login_page_renders(client):
     assert 'name="email"' in resp.text
 
 
+def test_sent_page_states_the_same_expiry_as_the_email(client, outbox):
+    """The page and the email must never disagree on the TTL — both read
+    `login_token_ttl_minutes`. Checked in both locales, and on the
+    wrong-code re-render, which is the moment a user most wants to know
+    whether the code they have is still good."""
+    en = client.post("/login", data={"email": EMAIL}).text
+    assert "expire in 20 minutes" in en
+
+    fr = client.post("/login?lang=fr", data={"email": EMAIL}).text
+    assert "expirent dans 20 minutes" in fr
+
+    again = client.post("/login/code", data={"email": EMAIL, "code": "000000"}).text
+    assert "20 minutes" in again
+
+
 def test_submitting_an_address_sends_the_mail(client, outbox):
     resp = client.post("/login", data={"email": EMAIL})
 

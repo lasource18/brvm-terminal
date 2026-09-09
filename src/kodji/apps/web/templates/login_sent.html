@@ -11,6 +11,10 @@
          opens links in its own browser, or reading mail on a second device. #}
       {{ "Open the link on this device, or type the code below if you're reading your mail somewhere else."|t }}
     </p>
+    <p class="dim auth-lede">
+      {# Same sentence as the email, so the two never disagree on the TTL. #}
+      {{ ("The link and code expire in %d minutes and work only once."|t)|format(ttl_minutes) }}
+    </p>
 
     {% if error %}
       <p class="auth-error">{{ "That code isn't right, or it has expired. Ask for a new one."|t }}</p>
