@@ -252,12 +252,12 @@ Continuing the PR-letter convention from where PR-U left off.
 
 | | Ships | Note |
 | --- | --- | --- |
-| **P0** | Verify, don't build | Stripe country list · Flutterwave CI onboarding · kodji domain + OAPI trademark. All three can change what you build. |
+| **P0** | Verify, don't build | Stripe country list · Flutterwave CI onboarding · kodji domain + OAPI trademark. All three can change what you build. **`kodji.app` registered (Namecheap, 9 Sep 2026), mailbox on PrivateEmail.** OAPI trademark still open. |
 | **PR-V** | Rename to kodji | 785 import sites, zero behaviour change, green suite. Alone and first. **Shipped (#70).** |
 | **PR-W** | Production surface polish | Drop the "Bloomberg-ish" subtitle and hide model id + token counts + generation cost from the brief and analyst bylines. |
 | **PR-X** | Accounts and ownership | Migration 0017, `account_id` scoping across watchlists and alert rules, subscriptions table. **Shipped.** |
 | **PR-X2** | Authentication | Magic-link sign-in and session cookies, on Resend. **Shipped.** |
-| **PR-Y** | Plan gating | `TabSpec.min_plan`, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. |
+| **PR-Y** | Plan gating | `TabSpec.min_plan`, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. **Shipped (#77).** |
 | **PR-Z** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
 | **PR-AA** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
 | **PR-AB** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. |

@@ -1,4 +1,4 @@
-brvm.example.com {
+kodji.app {
     encode gzip
     reverse_proxy app:8765
 }

@@ -14,12 +14,22 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 def apply_migrations(conn) -> None:
     """Apply every migration in order. Tests use this instead of naming
-    files so a new migration doesn't need a sweep through the suite."""
+    files so a new migration doesn't need a sweep through the suite.
+
+    Records each id in `_schema_migrations` exactly as `scripts/
+    migrate.py` does — otherwise a test DB looks unmigrated to
+    `db.assert_schema_current`, which the web app runs at startup.
+    """
     from kodji.db import ensure_migrations_table
 
     ensure_migrations_table(conn)
     for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
         conn.executescript(f.read_text(encoding="utf-8"))
+        conn.execute(
+            "INSERT OR REPLACE INTO _schema_migrations(id, applied_utc) "
+            "VALUES (?, datetime('now'))",
+            (f.stem,),
+        )
     conn.commit()
 
 

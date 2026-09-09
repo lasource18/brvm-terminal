@@ -22,6 +22,11 @@ tui:
 migrate:
     uv run python scripts/migrate.py
 
+# Report pending migrations without applying them; exits 1 if any are
+# pending, so it chains: `just migrate-check || just migrate`.
+migrate-check:
+    uv run python scripts/migrate.py --check
+
 # Run tests (offline, fixture-based)
 test:
     uv run pytest
