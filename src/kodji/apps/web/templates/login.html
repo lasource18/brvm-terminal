@@ -13,6 +13,8 @@
           {{ "That doesn't look like an email address."|t }}
         {% elif error == "send_failed" %}
           {{ "We couldn't send that email just now. Try again in a moment."|t }}
+        {% elif error == "capped" %}
+          {{ "Sign-in is temporarily unavailable — too many requests right now. Try again in a little while."|t }}
         {% else %}
           {{ "That link has expired or has already been used. Ask for a new one."|t }}
         {% endif %}

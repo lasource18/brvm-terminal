@@ -156,6 +156,19 @@ def login_submit(request: Request, email: str = Form(...)):
             status_code=502,
         )
 
+    # Unlike the per-address limit, the global cap IS surfaced: nothing is
+    # coming to this mailbox and saying so is honest. It reveals nothing
+    # about any particular address — only that the site as a whole is
+    # busy — so the enumeration argument above does not apply.
+    if result.note == "capped":
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {**base_ctx(request), "error": "capped", "email": email},
+            status_code=503,
+            headers={"Retry-After": "600"},
+        )
+
     return templates.TemplateResponse(
         request,
         "login_sent.html",

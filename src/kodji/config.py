@@ -155,6 +155,15 @@ class Settings(BaseSettings):
     # Sign-in requests accepted per address per hour. Bounds both mailbox
     # flooding of a third party and our own send volume.
     login_max_per_hour: int = 5
+    # Global send budget, on top of the per-address cap. A spray of
+    # *distinct* addresses passes the per-address check every time and
+    # burns the provider's quota — Resend's free tier is 100/day — which
+    # both locks real users out of sign-in until the quota resets and
+    # makes our sending domain a source of unwanted mail. The daily cap
+    # sits under the provider's so an attacker can never spend the last
+    # legitimate email; the hourly cap catches the burst early.
+    login_max_sends_per_hour: int = 30
+    login_max_sends_per_day: int = 80
     session_ttl_days: int = 30
     # OFF until PR-Y puts plan gating on every route. With it off, a
     # request without a session still resolves to the migration's default

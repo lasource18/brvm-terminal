@@ -191,6 +191,89 @@ def test_rate_limited_per_address(client, mailer, monkeypatch):
                                   mailer=mailer).ok
 
 
+# --- global send budget ------------------------------------------------------
+
+
+def _ask(mailer, email: str):
+    return auth_svc.request_login(email, base_url="https://x", mailer=mailer)
+
+
+def test_global_send_cap_per_hour(client, mailer, monkeypatch):
+    """The spray defence: distinct addresses each pass the per-address
+    cap; only a total can see them."""
+    monkeypatch.setenv("LOGIN_MAX_SENDS_PER_HOUR", "2")
+    reset_settings_cache()
+
+    assert _ask(mailer, "a@example.ci").ok
+    assert _ask(mailer, "b@example.ci").ok
+    third = _ask(mailer, "c@example.ci")
+
+    assert not third.ok
+    assert third.note == "capped"
+    assert len(mailer.sent) == 2
+
+
+def test_global_send_cap_per_day(client, mailer, monkeypatch):
+    monkeypatch.setenv("LOGIN_MAX_SENDS_PER_HOUR", "100")
+    monkeypatch.setenv("LOGIN_MAX_SENDS_PER_DAY", "1")
+    reset_settings_cache()
+
+    assert _ask(mailer, "a@example.ci").ok
+    assert _ask(mailer, "b@example.ci").note == "capped"
+    assert len(mailer.sent) == 1
+
+
+def test_per_address_limited_requests_do_not_spend_the_global_budget(
+    client, mailer, monkeypatch
+):
+    """One address hammering us is absorbed by its own cap and must not
+    push everyone else into the global one."""
+    monkeypatch.setenv("LOGIN_MAX_PER_HOUR", "1")
+    monkeypatch.setenv("LOGIN_MAX_SENDS_PER_HOUR", "2")
+    reset_settings_cache()
+
+    assert _ask(mailer, EMAIL).ok
+    for _ in range(5):
+        assert _ask(mailer, EMAIL).note == "rate_limited"
+
+    # Budget of 2, one spent: a second address still gets through, a
+    # third does not.
+    assert _ask(mailer, "b@example.ci").ok
+    assert _ask(mailer, "c@example.ci").note == "capped"
+
+
+def test_purge_keeps_the_last_day_as_the_send_ledger(client, mailer):
+    """The daily cap has to see a full day. A spent challenge from two
+    hours ago survives the 03:30 purge; one from yesterday does not."""
+    from datetime import timedelta
+
+    now = auth_svc.utcnow()
+    with connect(settings.db_path) as conn:
+        for tag, age_h in (("fresh", 2), ("stale", 30)):
+            created = now - timedelta(hours=age_h)
+            conn.execute(
+                "INSERT INTO login_tokens(token_hash, code_hash, email, locale, "
+                "created_utc, expires_utc, consumed_utc) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    f"h_{tag}", f"c_{tag}", f"{tag}@example.ci", "fr",
+                    auth_svc.utc_iso(created),
+                    auth_svc.utc_iso(created + timedelta(minutes=20)),
+                    auth_svc.utc_iso(created + timedelta(minutes=1)),
+                ),
+            )
+        conn.commit()
+
+    _, tokens = auth_svc.purge_expired()
+    assert tokens == 1
+
+    with connect(settings.db_path) as conn:
+        left = {r["email"] for r in conn.execute("SELECT email FROM login_tokens")}
+        assert left == {"fresh@example.ci"}
+        # ...and it still counts toward today's budget.
+        day_ago = auth_svc.utc_iso(now - timedelta(hours=24))
+        assert auth_repo.count_recent(conn, day_ago) == 1
+
+
 def test_a_new_request_supersedes_the_previous_code(client, mailer):
     """Only the newest live challenge answers to a typed code, so an old
     mail sitting in an inbox stops being a credential."""
@@ -283,12 +366,20 @@ def test_expired_session_stops_resolving(client, mailer):
 
 
 def test_purge_drops_expired_sessions_and_spent_challenges(client, mailer):
-    grant = auth_svc.complete_with_token(_challenge(mailer).token)
+    spent = _challenge(mailer)
+    grant = auth_svc.complete_with_token(spent.token)
     assert grant is not None
     _challenge(mailer)  # a live one, must survive
 
     with connect(settings.db_path) as conn:
         conn.execute("UPDATE sessions SET expires_utc = '2020-01-01T00:00:00Z'")
+        # A spent challenge is kept for a day as the send ledger (see
+        # test_purge_keeps_the_last_day_as_the_send_ledger); age this one
+        # past that so the purge is allowed to take it.
+        conn.execute(
+            "UPDATE login_tokens SET created_utc = '2020-01-01T00:00:00Z' "
+            "WHERE consumed_utc IS NOT NULL"
+        )
         conn.commit()
 
     sessions, tokens = auth_svc.purge_expired()

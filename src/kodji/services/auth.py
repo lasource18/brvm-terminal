@@ -92,6 +92,8 @@ class LoginRequest:
 
     ok: bool
     email: str = ""
+    # "invalid_email" | "rate_limited" (this address) | "capped" (the
+    # global send budget) | "send_failed" (provider) | "" on success.
     note: str = ""
     token: str = ""
     code: str = ""
@@ -166,6 +168,26 @@ def request_login(
             # who has been asking for links.
             log.warning("login: rate limited %s (%d in the last hour)", email, recent)
             return LoginRequest(ok=False, email=email, note="rate_limited")
+
+        # Global budget, checked *after* the per-address cap so a single
+        # address hammering us is absorbed silently there and never
+        # spends what everyone else needs. This is the spray defence:
+        # distinct addresses each pass the check above; only a total
+        # can see them.
+        sent_hour = auth_repo.count_recent(conn, window_start)
+        sent_day = auth_repo.count_recent(conn, utc_iso(now - timedelta(hours=24)))
+        if (
+            sent_hour >= settings.login_max_sends_per_hour
+            or sent_day >= settings.login_max_sends_per_day
+        ):
+            # ERROR, not WARNING: either someone is attacking the form or
+            # the product just got popular, and both want a human to look.
+            log.error(
+                "login: global send cap hit (%d/h of %d, %d/24h of %d) — refusing %s",
+                sent_hour, settings.login_max_sends_per_hour,
+                sent_day, settings.login_max_sends_per_day, email,
+            )
+            return LoginRequest(ok=False, email=email, note="capped")
 
         auth_repo.create_login_token(
             conn,
@@ -301,10 +323,22 @@ def logout(raw_token: str | None) -> bool:
         return auth_repo.delete_session(conn, hash_secret(raw_token)) > 0
 
 
+# How long spent challenges stay as the send ledger. Must cover the
+# longest window `request_login` counts over (24h) — a shorter retention
+# would quietly turn the daily cap into a "since the last purge" cap.
+_SEND_LEDGER_HOURS = 24
+
+
 def purge_expired() -> tuple[int, int]:
-    """Housekeeping: drop expired sessions and spent challenges."""
+    """Housekeeping: drop expired sessions and spent challenges — except
+    the last day's challenges, which the global send cap counts."""
+    now = utcnow()
     with connect(_db_path()) as conn:
-        return auth_repo.purge_expired(conn, utc_iso())
+        return auth_repo.purge_expired(
+            conn,
+            utc_iso(now),
+            keep_since_utc=utc_iso(now - timedelta(hours=_SEND_LEDGER_HOURS)),
+        )
 
 
 # --- the message itself ----------------------------------------------------

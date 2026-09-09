@@ -628,6 +628,30 @@ record across before the switch — MX, apex SPF, DKIM, the autodiscover
 CNAMEs — and leave all of them DNS-only (grey cloud). Proxying an MX
 host silently breaks mail delivery.
 
+### Abuse caps on the sign-in form
+
+Three, in the order they are checked:
+
+| Cap | Setting | On trip |
+| --- | --- | --- |
+| Per address, per hour | `LOGIN_MAX_PER_HOUR=5` | Same "check your email" page, nothing sent — a stranger learns nothing about who has been asking for links. |
+| Global, per hour / per day | `LOGIN_MAX_SENDS_PER_HOUR=30` · `LOGIN_MAX_SENDS_PER_DAY=80` | `503` with `Retry-After`, an honest "temporarily unavailable", and an `ERROR` log line. |
+| Wrong-code guesses per challenge | `LOGIN_CODE_MAX_ATTEMPTS=5` | The challenge is burned; ask for a new link. |
+
+The global one is the spray defence: a script posting 100 *different*
+addresses passes the per-address cap every time and would otherwise
+spend Resend's free-tier quota (100/day) in a minute — locking every
+real user out until the reset and making `mail.kodji.app` a source of
+unwanted mail. Keep the daily cap under the provider's quota.
+
+**Per-IP is deliberately not done in the app.** Behind Caddy the app
+sees `127.0.0.1` for every request, and trusting a forwarded header is
+a deploy-time decision. Once the site is behind Cloudflare, add a
+Rate Limiting rule (free plan includes one): *if* `URI Path equals
+/login` *and* `Request Method equals POST`, *then* block for 10 minutes
+above 5 requests per 10 minutes per IP. That, plus the global cap
+underneath it, is the whole defence.
+
 ### Turning sign-in from optional into required
 
 `AUTH_REQUIRED` is `false` today, which keeps the existing single-user
