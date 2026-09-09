@@ -151,6 +151,30 @@ def ensure_user_with_account(
     return user_id, account_id
 
 
+def attach_user_to_account(
+    conn: sqlite3.Connection, email: str, account_id: int, role: str = "owner"
+) -> tuple[int, bool]:
+    """Make `email` a member of an existing account, creating the user
+    row if needed. Returns `(user_id, membership_created)`.
+
+    Exists for one job: handing the operator their own data. Migration
+    0017 seeded account 1 with everything the database held before
+    multi-tenancy, and 0019 put it on the paid plan — but no user row
+    points at it, so the operator's first magic-link sign-in would mint
+    a fresh free account instead (`ensure_user_with_account`). Running
+    this before `AUTH_REQUIRED=true` closes that gap. Idempotent, and
+    account 1 sorts first in `accounts_for_user`, so it also wins over a
+    personal account the operator created by signing in too early.
+    """
+    existing = get_user_by_email(conn, email)
+    user_id = int(existing["id"]) if existing is not None else create_user(conn, email)
+    already = any(int(a["id"]) == account_id for a in accounts_for_user(conn, user_id))
+    if already:
+        return user_id, False
+    add_member(conn, account_id, user_id, role=role)
+    return user_id, True
+
+
 # --- subscriptions ---------------------------------------------------------
 
 

@@ -27,6 +27,13 @@ migrate:
 migrate-check:
     uv run python scripts/migrate.py --check
 
+# Make an address the owner of account 1 — the account holding every
+# watchlist, alert rule and note from before multi-tenancy. Run once per
+# deployment BEFORE AUTH_REQUIRED=true, or the first sign-in lands in a
+# fresh free account with none of it. Idempotent.
+claim-owner email:
+    uv run python scripts/claim_owner.py {{email}}
+
 # Run tests (offline, fixture-based)
 test:
     uv run pytest

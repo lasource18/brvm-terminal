@@ -181,3 +181,36 @@ def test_signup_is_idempotent_on_email(client):
     with connect(settings.db_path) as conn:
         n = conn.execute("SELECT count(*) FROM users").fetchone()[0]
         assert n == 1
+
+
+# --- claiming the operator account (scripts/claim_owner.py) ----------------
+
+
+def test_attach_user_to_account_hands_the_operator_account_1(client):
+    with connect(settings.db_path) as conn:
+        user_id, created = accounts_repo.attach_user_to_account(
+            conn, "owner@example.ci", DEFAULT_ACCOUNT_ID
+        )
+        assert created
+        # What the sign-in flow will now resolve to.
+        assert accounts_repo.ensure_user_with_account(conn, "owner@example.ci") == (
+            user_id, DEFAULT_ACCOUNT_ID,
+        )
+        # Idempotent, and case-insensitive like the users index.
+        assert accounts_repo.attach_user_to_account(
+            conn, "Owner@Example.CI", DEFAULT_ACCOUNT_ID
+        ) == (user_id, False)
+
+
+def test_attach_wins_over_a_personal_account_created_by_signing_in_too_early(client):
+    """The operator signed in once before running the claim: a personal
+    account now exists. Account 1 sorts first in `accounts_for_user`, so
+    the next sign-in still lands on their real data."""
+    with connect(settings.db_path) as conn:
+        user_id, personal = accounts_repo.ensure_user_with_account(conn, "owner@example.ci")
+        assert personal != DEFAULT_ACCOUNT_ID
+
+        accounts_repo.attach_user_to_account(conn, "owner@example.ci", DEFAULT_ACCOUNT_ID)
+        assert accounts_repo.ensure_user_with_account(conn, "owner@example.ci") == (
+            user_id, DEFAULT_ACCOUNT_ID,
+        )
