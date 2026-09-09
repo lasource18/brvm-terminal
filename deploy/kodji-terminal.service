@@ -1,6 +1,6 @@
 # /etc/systemd/system/kodji-terminal.service
 #
-# Bare-metal unit for the Hetzner box. Runbook: docs/deploy-kodji-app.md.
+# Bare-metal unit for the VPS. Runbook: docs/deploy-kodji-app.md.
 # The app refuses to start when migrations are pending (kodji.db.
 # assert_schema_current), so the start-limit below turns that into three
 # tries and a stopped unit rather than a five-second restart loop.

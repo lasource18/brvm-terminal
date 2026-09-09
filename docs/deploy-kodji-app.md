@@ -1,7 +1,7 @@
 # Deploying kodji.app
 
-The production runbook. One Hetzner CX22 (2 vCPU, 4 GB, 40 GB, Ubuntu 24.04),
-one process, one SQLite file, Cloudflare in front. Written 2026-09-09 against
+The production runbook. One 4 GB VPS (Vultr, 2 vCPU, Ubuntu 24.04), one
+process, one SQLite file, Cloudflare in front. Written 2026-09-09 against
 `main`; follow it top to bottom the first time. Every step ends with a check —
 do not move on until the check passes.
 
@@ -41,7 +41,7 @@ Have all of these open before touching anything:
 
 | | |
 | --- | --- |
-| VPS | Hetzner CX22, Ubuntu 24.04, your SSH key installed, its IPv4 (and IPv6) noted |
+| VPS | Vultr, 4 GB plan, Ubuntu 24.04, your SSH key added **at creation**, its IPv4 (and IPv6) noted — see the Vultr notes below |
 | Cloudflare | An account (free plan) |
 | Namecheap | Logged in — you will change nameservers there |
 | Resend | An API key with **Sending access** scoped to `mail.kodji.app`, copied at creation time |
@@ -50,6 +50,28 @@ Have all of these open before touching anything:
 | Your Mac | The repo at `main`, and `data/kodji.sqlite` (11 MB — the months of quotes, news, fundamentals you want on the box) |
 
 Time: about two hours the first time, most of it waiting on DNS.
+
+### Vultr notes
+
+- **Plan:** 4 GB RAM is the floor — `MemoryMax=384M` for the app plus
+  scrapers, Caddy and the OS assume it. 2 vCPU is plenty. 40 GB+ disk only
+  matters if you copy the filings corpus.
+- **Region:** Paris or Amsterdam. Users in Abidjan and Dakar reach Europe in
+  ~100 ms; Johannesburg is farther from West Africa than Paris is. Cloudflare
+  serves the static assets from its edge either way.
+- **SSH:** add your key on the create form and, after first login, set
+  `PasswordAuthentication no` in `/etc/ssh/sshd_config.d/kodji.conf` and
+  `systemctl reload ssh`. Vultr images allow root password login by default.
+- **Firewall:** Vultr's network firewall (Products → Firewall) can sit in
+  front of `ufw`. If you use it, one rule for SSH from your IP and one for
+  TCP 443 with **Cloudflare** as the source — Vultr maintains that IP list
+  for you, which removes the "re-run the ufw loop when ranges change" chore.
+  Keep `ufw` anyway; belt and braces.
+- **Backups:** skip the paid automatic-backup add-on. What it protects is
+  rebuildable from this runbook in an hour, and the data is covered off-box
+  by §8 (nightly `.backup` + rsync) and, later, Litestream. Do take **one
+  manual snapshot** right after §7 passes — billed per GB stored, cents a
+  month for this box — so a restore is a click instead of a runbook.
 
 ## 1. Snapshot what exists
 
