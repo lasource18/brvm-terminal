@@ -13,7 +13,7 @@ free tier, a paid tier, and a downloadable TUI — without outgrowing one 4 GB V
 
 | Question | Decision | Consequence |
 | --- | --- | --- |
-| Hosting | **Hetzner CX22 origin, Cloudflare free tier in front** | Cloudflare Workers would be a rewrite, not a deploy target — APScheduler needs a long-lived process, `selectolax` is a C extension, SQLite-the-file becomes D1-the-API. |
+| Hosting | **A 4 GB VPS origin (Vultr, decided 9 Sep 2026 — was Hetzner CX22), Cloudflare free tier in front** | Cloudflare Workers would be a rewrite, not a deploy target — APScheduler needs a long-lived process, `selectolax` is a C extension, SQLite-the-file becomes D1-the-API. |
 | Data source | **Scrape-only; commercial BRVM feed not used** | Delete the unused `BRVM_API_*` path rather than leave dead credentials in `env.example`. |
 | What's paid | **Only your own transformations** | Raw facts stay free; charts, ratios, brief, alerts, analyst view are the product. |
 | Payments | **Flutterwave primary**, mobile money + cards, XOF | Stripe is likely unavailable to a CI entity — see P0. |
@@ -241,7 +241,7 @@ the architecture supports it, but it isn't on the critical path to first revenue
 - **Caddy** for TLS at the origin, **Cloudflare Tunnel** so the VPS needs no inbound
   ports open.
 - Secrets off the box's `.env` into a systemd `EnvironmentFile` at 0600, or Docker secrets.
-- **Keep the CX22.** ~500 MB RSS is dominated by scrapers and jobs (fixed cost). Sessions
+- **Keep the 4 GB box.** ~500 MB RSS is dominated by scrapers and jobs (fixed cost). Sessions
   and auth barely move it, and P3 explains why user growth doesn't either.
 - Extend the health endpoint with an external uptime check, and alert yourself when a
   scheduled job silently doesn't run — the 15:45 brief and 16:00 BOC reconcile matter most.

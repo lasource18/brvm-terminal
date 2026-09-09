@@ -742,7 +742,7 @@ SGBC     SGBCI                               39,200.00   -0.25%        7,088    
 
 ## Deploy
 
-The production runbook — Hetzner CX22 behind Cloudflare, Caddy with an
+The production runbook — a 4 GB Vultr VPS behind Cloudflare, Caddy with an
 origin certificate, systemd, the `.env` diff, the owner claim, smoke
 tests, day-2 operations — is
 [`docs/deploy-kodji-app.md`](./docs/deploy-kodji-app.md). It is written
