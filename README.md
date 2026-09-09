@@ -55,6 +55,32 @@ just dev                   # http://127.0.0.1:8765
 today — it turns on the Phase 3b news tagger. Leave it blank and
 everything else still works; news is simply stored untagged.
 
+### Schema drift
+
+Both entry points refuse to start when `migrations/` is ahead of the DB
+recorded in `_schema_migrations`:
+
+```
+kodji.db.PendingMigrations: 1 migration(s) not applied to ./data/kodji.sqlite:
+0020_example. Run `just migrate` before starting the app.
+```
+
+This is deliberate. Before the check, a deploy that shipped a migration
+but never ran `just migrate` booted clean and then returned a 500 on the
+first request that touched the new column — at whatever hour a user
+happened to open that page. Now the mistake surfaces at the moment it is
+made, when the fix is one command.
+
+To ask without starting anything — for a deploy script, ahead of the
+service restart:
+
+```bash
+just migrate-check     # exit 0 = up to date, 1 = pending (names them)
+```
+
+A DB that is *ahead* of the files (rolled back to older code) is not
+drift the app can fix by migrating, so it does not block startup.
+
 ### Upgrading from `brvm-terminal`
 
 The project was renamed to `kodji-terminal`. Your `.env` is not tracked by
@@ -557,22 +583,43 @@ Resend is the provider (chosen 31 Aug 2026 — see
 ```bash
 # .env
 RESEND_API_KEY=re_...
-EMAIL_FROM=Kodji <connexion@mail.kodji.ci>
-PUBLIC_BASE_URL=https://kodji.ci      # required in production, see below
+EMAIL_FROM=Kodji <connexion@mail.kodji.app>
+PUBLIC_BASE_URL=https://kodji.app     # required in production, see below
 ```
 
 Three things matter more than the vendor choice:
 
 - **Authenticate a sending subdomain**, not the apex: SPF, DKIM and
-  DMARC on `mail.kodji.ci`. Gmail and Yahoo have required alignment
+  DMARC on `mail.kodji.app`. Gmail and Yahoo have required alignment
   from bulk senders since 2024, and a good chunk of BRVM's audience is
-  on one or the other.
+  on one or the other. The apex belongs to the human mailbox
+  (PrivateEmail) — keeping the two apart means an app-side spam
+  complaint cannot touch your own mail.
 - **Keep the daily brief off this sender.** A brief blast is bulk-shaped
   and attracts complaints; sign-in mail must not share its reputation.
 - **Set `PUBLIC_BASE_URL` in production.** Behind Cloudflare and Caddy
   the request's own host is whatever the last proxy claimed, and a link
   built from a spoofed `Host` header is a live credential pointed at
   someone else's domain.
+
+Note the value is unquoted in `.env`: `EMAIL_FROM=Kodji <connexion@...>`.
+If you do quote it, use straight ASCII quotes on both ends — a smart
+quote from a text editor becomes part of the address and Resend rejects
+every message with a 422.
+
+DNS, when the domain already hosts a mailbox (kodji.app on
+PrivateEmail):
+
+| Host | Type | Why |
+| --- | --- | --- |
+| `mail.kodji.app` | TXT (DKIM) + MX + SPF, all from Resend's dashboard | The sending subdomain. Resend's MX is the bounce return path; it does not touch apex mail. |
+| `kodji.app` | MX → PrivateEmail, TXT SPF → `include:spf.privateemail.com` | Unchanged. This is where you *receive*. |
+| `_dmarc.kodji.app` | TXT `v=DMARC1; p=none; rua=mailto:you@kodji.app` | Start at `p=none`, read the reports for a week, then tighten to `quarantine`. It covers subdomains too. |
+
+If you move the nameservers to Cloudflare, copy **every** PrivateEmail
+record across before the switch — MX, apex SPF, DKIM, the autodiscover
+CNAMEs — and leave all of them DNS-only (grey cloud). Proxying an MX
+host silently breaks mail delivery.
 
 ### Turning sign-in from optional into required
 

@@ -24,7 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from kodji.config import settings  # noqa: E402
-from kodji.db import connect, ensure_migrations_table  # noqa: E402
+from kodji.db import (  # noqa: E402
+    connect,
+    ensure_migrations_table,
+    pending_migrations,
+)
 
 MIGRATIONS_DIR = ROOT / "migrations"
 
@@ -61,5 +65,22 @@ def apply_all() -> None:
     print("[migrate] done")
 
 
+def check() -> int:
+    """`--check`: report drift without touching the DB.
+
+    For a deploy script that wants the answer before restarting the
+    service. Exit 1 when something is pending, so `python scripts/
+    migrate.py --check && systemctl restart kodji` reads correctly.
+    """
+    pending = pending_migrations(settings.db_path, MIGRATIONS_DIR)
+    if not pending:
+        print(f"[migrate] up to date ({settings.db_path})")
+        return 0
+    print(f"[migrate] {len(pending)} pending: {', '.join(pending)}")
+    return 1
+
+
 if __name__ == "__main__":
+    if "--check" in sys.argv[1:]:
+        raise SystemExit(check())
     apply_all()

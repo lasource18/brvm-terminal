@@ -15,6 +15,8 @@ from fastapi.staticfiles import StaticFiles
 from kodji import __version__
 from kodji.apps.web._common import STATIC_DIR
 from kodji.apps.web.routes import api, auth, fragments, pages
+from kodji.config import settings
+from kodji.db import assert_schema_current
 from kodji.jobs.scheduler import build_scheduler
 from kodji.logging import get
 from kodji.services.accounts import NotAuthenticated
@@ -24,6 +26,11 @@ log = get(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before anything touches the DB. A deploy that ships a migration but
+    # forgets `just migrate` used to boot clean and then 500 on the first
+    # request hitting the new column; this turns that into a refusal to
+    # start, naming the files and the fix.
+    assert_schema_current(settings.db_path)
     sched = build_scheduler()
     sched.start()
     log.info("scheduler started: %s", [j.id for j in sched.get_jobs()])

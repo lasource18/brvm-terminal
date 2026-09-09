@@ -130,8 +130,9 @@ class Settings(BaseSettings):
     # it, so a fresh clone can still complete a sign-in from the log.
     resend_api_key: str = ""
     # Must be an address on a domain verified in Resend, e.g.
-    # "Kodji <connexion@mail.kodji.ci>". Sign-in mail gets its own
-    # subdomain so a future daily-brief blast cannot spend its reputation.
+    # "Kodji <connexion@mail.kodji.app>". Sign-in mail gets its own
+    # subdomain so a future daily-brief blast cannot spend its reputation,
+    # and so the apex stays free for the human mailbox.
     email_from: str = ""
     # Absolute origin used to build magic links. Set it in production:
     # behind Cloudflare + Caddy the request's own host/scheme is whatever
