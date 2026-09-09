@@ -53,6 +53,12 @@ def _base_url(request: Request) -> str:
     return settings.public_base_url.rstrip("/") or str(request.base_url).rstrip("/")
 
 
+def _ttl_minutes() -> int:
+    """The link/code lifetime the "check your email" page states. Read
+    from the same setting the email body uses so the two can't drift."""
+    return settings.login_token_ttl_minutes
+
+
 def _cross_origin(request: Request) -> bool:
     """True when this POST came from somewhere that isn't us.
 
@@ -153,7 +159,7 @@ def login_submit(request: Request, email: str = Form(...)):
     return templates.TemplateResponse(
         request,
         "login_sent.html",
-        {**base_ctx(request), "email": result.email or email},
+        {**base_ctx(request), "email": result.email or email, "ttl_minutes": _ttl_minutes()},
     )
 
 
@@ -201,7 +207,12 @@ def login_with_code(request: Request, email: str = Form(...), code: str = Form(.
         return templates.TemplateResponse(
             request,
             "login_sent.html",
-            {**base_ctx(request), "email": email, "error": "bad_code"},
+            {
+                **base_ctx(request),
+                "email": email,
+                "error": "bad_code",
+                "ttl_minutes": _ttl_minutes(),
+            },
             status_code=400,
         )
     return _sign_in(grant)
