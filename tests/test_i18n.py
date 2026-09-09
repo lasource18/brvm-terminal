@@ -105,3 +105,73 @@ class TestLocaleRenderFlow:
         assert 'href="/lang/fr' in r.text
         assert 'href="/lang/en' in r.text
         assert "lang-active" in r.text  # one of the two links is marked active
+
+
+class TestNewsFeedLocale:
+    """The feed stores both summaries per item; the reader gets one.
+
+    Before PR-X3 the fragment rendered `summary_en` and `summary_fr`
+    stacked on every item regardless of locale, which is what made the
+    French screenshots read as half-translated.
+    """
+
+    def _seed(self, client):
+        from tests.test_news_3c import _mk_news, _seed_feed  # noqa: F401
+
+        _seed_feed(client, n=3)
+
+    def test_french_shows_only_the_french_summary(self, client):
+        self._seed(client)
+        r = client.get("/news?lang=fr")
+        assert r.status_code == 200
+        assert "Un résumé." in r.text
+        assert "A tagged summary." not in r.text
+
+    def test_english_shows_only_the_english_summary(self, client):
+        self._seed(client)
+        r = client.get("/news?lang=en")
+        assert r.status_code == 200
+        assert "A tagged summary." in r.text
+        assert "Un résumé." not in r.text
+
+    def test_fragment_honours_the_cookie(self, client):
+        # `/_frag/news` never calls `base_ctx`, so the locale has to come
+        # off the request. An HTMX swap must not silently revert to EN.
+        self._seed(client)
+        client.get("/lang/fr?next=/news", follow_redirects=False)
+        r = client.get("/_frag/news")
+        assert r.status_code == 200
+        assert "Un résumé." in r.text
+        assert "A tagged summary." not in r.text
+
+
+class TestFrenchPageCoverage:
+    """Pages that had zero `|t` calls before PR-X3.
+
+    Each assertion pins one string that a French reader would otherwise
+    have hit in English.
+    """
+
+    def test_news_page_chrome_is_french(self, client):
+        r = client.get("/news?lang=fr")
+        assert "Toutes catégories" in r.text
+        assert "Réinitialiser" in r.text
+        assert "All categories" not in r.text
+
+    def test_directory_is_french(self, client):
+        r = client.get("/directory?lang=fr")
+        assert "Répertoire des titres" in r.text
+        assert "Tous les pays" in r.text
+        assert "Securities directory" not in r.text
+
+    def test_alerts_is_french(self, client):
+        r = client.get("/alerts?lang=fr")
+        assert "Ajouter une règle" in r.text
+        assert "Événements récents" in r.text
+        assert "Add a rule" not in r.text
+
+    def test_watchlists_index_is_french(self, client):
+        r = client.get("/watchlists?lang=fr")
+        assert "Listes de suivi" in r.text
+        assert "Créer la liste" in r.text
+        assert "Create list" not in r.text

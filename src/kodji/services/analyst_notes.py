@@ -695,7 +695,7 @@ def _db_path() -> Path:
     return Path(settings.db_path)
 
 
-def _translate_or_none(
+def translate_or_none(
     source_markdown: str,
     *,
     client: Any | None,
@@ -704,7 +704,12 @@ def _translate_or_none(
     """Attempt an EN → FR translation for a note, returning (text, usage)
     on success or None on any soft failure. Mirrors the same helper in
     `services.brief`; kept per-module so each writer's spend billing
-    points at its own daily counter (`note_spend` here)."""
+    points at its own daily counter (`note_spend` here).
+
+    Public because `scripts/backfill_translations.py` reruns it over rows
+    whose translation is missing — going through this helper rather than
+    calling the translator directly is what keeps a backfill billed to
+    the same daily counter as a normal run."""
     if client is None and not translation_svc.has_llm():
         return None
     try:
@@ -863,7 +868,7 @@ def generate_for_ticker(
     # weekly re-run gets another shot at translation.
     markdown_fr: str | None = None
     translation_generated_utc: str | None = None
-    translation_usage = _translate_or_none(markdown, client=client, day=today)
+    translation_usage = translate_or_none(markdown, client=client, day=today)
     if translation_usage is not None:
         markdown_fr = translation_usage[0]
         translation_generated_utc = utc_iso()

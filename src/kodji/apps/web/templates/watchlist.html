@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ wl.name }} · Watchlist · kodji-terminal{% endblock %}
+{% block title %}{{ wl.name }} · {{ "Watchlist"|t }} · kodji-terminal{% endblock %}
 {% block content %}
   <h2 style="color: var(--accent); font-size: 14px; margin: 0 0 12px; text-transform: uppercase;">
     {{ wl.name }} <span class="dim">/ {{ wl.slug }}</span>
@@ -9,10 +9,10 @@
         hx-post="/_frag/watchlists/{{ wl.slug }}/items"
         hx-target="#wl-body"
         hx-swap="outerHTML">
-    <input name="ticker" placeholder="Ticker (e.g. SNTS)" required
+    <input name="ticker" placeholder="{{ 'Ticker (e.g. SNTS)'|t }}" required
            style="text-transform: uppercase;">
-    <button type="submit">Add</button>
-    <span class="dim">— tickers must exist in the securities table (run <code>just snapshot</code> first)</span>
+    <button type="submit">{{ "Add"|t }}</button>
+    <span class="dim">— {{ "tickers must exist in the securities table (run"|t }} <code>just snapshot</code> {{ "first)"|t }}</span>
   </form>
 
   {% set market_open = market_open %}

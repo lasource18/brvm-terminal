@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% block title %}News · kodji-terminal{% endblock %}
+{% block title %}{{ "News"|t }} · kodji-terminal{% endblock %}
 {% block content %}
-  <h1 class="page-title">News</h1>
+  <h1 class="page-title">{{ "News"|t }}</h1>
   <form class="dir-filter"
         hx-get="/_frag/news"
         hx-trigger="change from:select delay:100ms, keyup delay:250ms changed from:input[type='search'], keyup delay:250ms changed from:input[type='number']"
@@ -10,23 +10,23 @@
         hx-include="closest form"
         hx-push-url="true">
     <input type="search" name="ticker" value="{{ feed.filters.ticker }}"
-           placeholder="Ticker (e.g. SNTS)…" autocomplete="off"
+           placeholder="{{ 'Ticker (e.g. SNTS)…'|t }}" autocomplete="off"
            style="width: 160px; text-transform: uppercase;">
     <select name="category">
-      <option value="">All categories</option>
+      <option value="">{{ "All categories"|t }}</option>
       {% for c in categories %}
-        <option value="{{ c }}" {% if feed.filters.category == c %}selected{% endif %}>{{ c }}</option>
+        <option value="{{ c }}" {% if feed.filters.category == c %}selected{% endif %}>{{ c|t }}</option>
       {% endfor %}
     </select>
     <input type="date" name="date_from" value="{{ feed.filters.date_from }}"
-           title="From date (inclusive)">
+           title="{{ 'From date (inclusive)'|t }}">
     <input type="date" name="date_to" value="{{ feed.filters.date_to }}"
-           title="To date (inclusive)">
+           title="{{ 'To date (inclusive)'|t }}">
     <input type="number" name="min_relevance" min="0" max="10"
            value="{{ feed.filters.min_relevance }}"
-           placeholder="Min rel" style="width: 90px;"
-           title="Minimum LLM relevance (0-10)">
-    <a href="/news" class="dim" style="margin-left: auto;">Reset</a>
+           placeholder="{{ 'Min rel'|t }}" style="width: 90px;"
+           title="{{ 'Minimum LLM relevance (0-10)'|t }}">
+    <a href="/news" class="dim" style="margin-left: auto;">{{ "Reset"|t }}</a>
   </form>
   {% set feed_url = '/_frag/news' %}
   {% include '_frag/news_feed.html' %}

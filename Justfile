@@ -148,6 +148,17 @@ alerts-deliver:
 # Phase 6b: generate today's post-close brief and persist it to `briefs`.
 # Respects the $0.50/day cap (BRIEF_DAILY_CAP_CENTS). Runs Mon-Fri at
 # 15:30 Abidjan on the scheduler; use this to trigger a manual pass.
+# Regenerate the product screenshots in screenshots/ (French by default).
+# `just screenshots --locale en` for the English set.
+screenshots *args:
+    uv run python scripts/screenshots.py {{args}}
+
+# Fill in missing FR translations on briefs + analyst notes. Costs Haiku
+# calls, billed to the same daily counters as a normal brief/note run.
+# `just backfill-translations --dry-run` to see what is pending first.
+backfill-translations *args:
+    uv run python scripts/backfill_translations.py {{args}}
+
 # Extra args pass through: `just brief-run --date 2026-08-20`.
 brief-run *args:
     uv run python -m kodji.jobs.brief_run --once {{args}}

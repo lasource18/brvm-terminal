@@ -1,31 +1,31 @@
 {% extends "base.html" %}
-{% block title %}Directory · kodji-terminal{% endblock %}
+{% block title %}{{ "Directory"|t }} · kodji-terminal{% endblock %}
 {% block content %}
-  <h2 class="page-title">Securities directory</h2>
+  <h2 class="page-title">{{ "Securities directory"|t }}</h2>
 
   <form class="dir-filter"
         hx-get="/_frag/directory"
         hx-trigger="change from:select, keyup changed delay:200ms from:input[name=q]"
         hx-target="#dir-body"
         hx-swap="outerHTML">
-    <input type="text" name="q" placeholder="ticker or name" value="{{ current.q }}">
+    <input type="text" name="q" placeholder="{{ 'ticker or name'|t }}" value="{{ current.q }}">
     <select name="country">
-      <option value="">All countries</option>
+      <option value="">{{ "All countries"|t }}</option>
       {% for c in countries %}
         <option value="{{ c }}" {% if current.country == c %}selected{% endif %}>{{ c }}</option>
       {% endfor %}
     </select>
     <select name="sector">
-      <option value="">All sectors</option>
+      <option value="">{{ "All sectors"|t }}</option>
       {% for s in sectors %}
         <option value="{{ s }}" {% if current.sector == s %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
     </select>
     <select name="kind">
-      <option value="">All kinds</option>
-      <option value="equity" {% if current.kind == 'equity' %}selected{% endif %}>Equity</option>
-      <option value="index" {% if current.kind == 'index' %}selected{% endif %}>Index</option>
-      <option value="bond" {% if current.kind == 'bond' %}selected{% endif %}>Bond</option>
+      <option value="">{{ "All kinds"|t }}</option>
+      <option value="equity" {% if current.kind == 'equity' %}selected{% endif %}>{{ "Equity"|t }}</option>
+      <option value="index" {% if current.kind == 'index' %}selected{% endif %}>{{ "Index"|t }}</option>
+      <option value="bond" {% if current.kind == 'bond' %}selected{% endif %}>{{ "Bond"|t }}</option>
     </select>
     {# Preserve the active sort across filter changes — the hidden inputs
        ride along on every hx-get so a filter tweak doesn't reset the

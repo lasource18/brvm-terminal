@@ -39,11 +39,16 @@
       const kind = payload && payload.kind;
       const bars = payload && payload.bars;
       if (!bars || bars.length === 0) {
-        if (empty) empty.textContent = "No historical data available.";
+        if (empty) empty.textContent = empty.dataset.empty || "No historical data available.";
         return;
       }
       if (empty) empty.remove();
+      // Lightweight Charts formats its own axis and crosshair dates, so
+      // without this the month ticks read "Jul/Aug/Sep" on a French page.
+      // `<html lang>` is set from the resolved locale in base.html.
+      const pageLang = document.documentElement.lang === "fr" ? "fr-FR" : "en-US";
       const chart = LightweightCharts.createChart(el, {
+        localization: { locale: pageLang },
         layout: {
           background: { color: "#12181f" },
           textColor: "#d6e2ee",

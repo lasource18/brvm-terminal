@@ -36,7 +36,7 @@
           {% for b in archive %}
             <li{% if brief and b.day == brief.day %} class="current"{% endif %}>
               <a href="/brief/{{ b.day }}">{{ b.day }}</a>
-              {% if b.title %}<div class="dim archive-title">{{ b.title }}</div>{% endif %}
+              {% if b.title %}<div class="dim archive-title">{{ b.title|t }}</div>{% endif %}
             </li>
           {% endfor %}
         </ul>

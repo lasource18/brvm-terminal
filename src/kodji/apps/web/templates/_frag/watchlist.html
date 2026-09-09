@@ -7,7 +7,7 @@
     <table class="quotes">
       <thead>
         <tr>
-          <th>TICKER</th><th>LAST</th><th>CHG%</th><th>VOLUME</th><th>TURNOVER</th><th></th>
+          <th>{{ "TICKER"|t }}</th><th>{{ "LAST"|t }}</th><th>{{ "CHG%"|t }}</th><th>{{ "VOLUME"|t }}</th><th>{{ "TURNOVER"|t }}</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -26,17 +26,17 @@
                       hx-delete="/_frag/watchlists/{{ wl.slug }}/items/{{ q.ticker }}"
                       hx-target="#wl-body"
                       hx-swap="outerHTML"
-                      hx-confirm="Remove {{ q.ticker }} from {{ wl.name }}?">×</button>
+                      hx-confirm="{{ 'Remove'|t }} {{ q.ticker }} {{ 'from'|t }} {{ wl.name }}?">×</button>
             </td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <div class="dim" style="padding: 12px;">Empty. Add a ticker above.</div>
+    <div class="dim" style="padding: 12px;">{{ "Empty. Add a ticker above."|t }}</div>
   {% endif %}
   <div class="dim" style="padding: 6px 10px;">
-    <span class="tick">generated {{ generated_utc }}</span>
-    · auto-refresh every {{ interval }}s
+    <span class="tick">{{ "generated"|t }} {{ generated_utc }}</span>
+    · {{ "auto-refresh every"|t }} {{ interval }}s
   </div>
 </div>

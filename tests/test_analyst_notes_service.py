@@ -59,7 +59,7 @@ def _setup(monkeypatch, tmp_path: Path):
     history_mod.clear_cache()
     # Default: skip translation. See test_analyst_notes_translation.py
     # (added in PR-I) for coverage of the translation branch.
-    monkeypatch.setattr(svc, "_translate_or_none", lambda *a, **kw: None)
+    monkeypatch.setattr(svc, "translate_or_none", lambda *a, **kw: None)
 
     with connect(db_path) as conn:
         apply_migrations(conn)

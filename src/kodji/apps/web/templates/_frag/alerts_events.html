@@ -7,10 +7,10 @@
           {% if e.ticker %}<a class="tk" href="/s/{{ e.ticker }}/chart">{{ e.ticker }}</a>{% endif %}
           <span class="ts">{{ (e.fired_utc or '')[:16].replace('T', ' ') }}</span>
           <span class="status {{ (e.delivery_status or 'queued') }}">
-            {% if e.delivery_status == 'ok' %}delivered
-            {% elif e.delivery_status == 'failed' %}failed (retry)
-            {% elif e.delivery_status == 'skipped' %}skipped (no webhook)
-            {% else %}queued
+            {% if e.delivery_status == 'ok' %}{{ "delivered"|t }}
+            {% elif e.delivery_status == 'failed' %}{{ "failed (retry)"|t }}
+            {% elif e.delivery_status == 'skipped' %}{{ "skipped (no webhook)"|t }}
+            {% else %}{{ "queued"|t }}
             {% endif %}
           </span>
         </div>
@@ -20,5 +20,5 @@
     {% endfor %}
   </ul>
 {% else %}
-  <div class="dim" style="padding: 12px 0;">No events yet.</div>
+  <div class="dim" style="padding: 12px 0;">{{ "No events yet."|t }}</div>
 {% endif %}

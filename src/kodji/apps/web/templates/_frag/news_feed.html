@@ -13,9 +13,9 @@
     {% for it in feed.items %}
       <li class="news-item">
         <div class="news-hd">
-          <span class="kind">{{ it.kind }}</span>
-          {% if it.category %}<span class="cat cat-{{ it.category }}">{{ it.category }}</span>{% endif %}
-          {% if it.relevance is not none %}<span class="rel">rel {{ it.relevance }}/10</span>{% endif %}
+          <span class="kind">{{ it.kind|t }}</span>
+          {% if it.category %}<span class="cat cat-{{ it.category }}">{{ it.category|t }}</span>{% endif %}
+          {% if it.relevance is not none %}<span class="rel">{{ "rel"|t }} {{ it.relevance }}/10</span>{% endif %}
           {% for t in it.tickers %}
             <a class="tk" href="/s/{{ t }}/news">{{ t }}</a>
           {% endfor %}
@@ -24,16 +24,25 @@
         <div class="news-title">
           <a href="{{ it.url }}" target="_blank" rel="noopener">{{ it.title }}</a>
         </div>
-        {% if it.summary_en %}
-          <div class="news-sum">{{ it.summary_en }}</div>
+        {#
+          One summary, in the reader's language — not both stacked. The
+          tagging pass stores `summary_en` and `summary_fr` for every
+          item, so this is a choice between two pieces of data rather
+          than a catalog lookup, hence `current_locale()` instead of `|t`.
+          Each falls back to the other before falling back to the
+          source-language chapeau, because an item tagged before the
+          bilingual pass may only have one of them.
+        #}
+        {% set summary = it.summary_fr or it.summary_en
+                         if current_locale() == 'fr'
+                         else it.summary_en or it.summary_fr %}
+        {% if summary %}
+          <div class="news-sum">{{ summary }}</div>
         {% elif it.chapeau %}
           <div class="news-sum dim">{{ it.chapeau }}</div>
         {% endif %}
-        {% if it.summary_fr %}
-          <div class="news-sum-fr dim">{{ it.summary_fr }}</div>
-        {% endif %}
         <div class="news-meta dim">
-          source: {{ it.source }}
+          {{ "source"|t }}: {{ it.source }}
           {% if it.issuer_name %} · {{ it.issuer_name }}{% endif %}
         </div>
       </li>
@@ -46,25 +55,25 @@
   {% set _ = base_qs.append('limit=' ~ feed.limit) %}
   <div class="pager">
     <span class="dim">
-      Showing {{ feed.offset + 1 }}–{{ feed.offset + feed.items|length }}
-      of {{ feed.total }} · page {{ feed.page }}/{{ feed.total_pages }}
+      {{ "Showing"|t }} {{ feed.offset + 1 }}–{{ feed.offset + feed.items|length }}
+      {{ "of"|t }} {{ feed.total }} · {{ "page"|t }} {{ feed.page }}/{{ feed.total_pages }}
     </span>
     <span class="pager-buttons">
       {% if feed.offset > 0 %}
         {% set prev_qs = base_qs + ['offset=' ~ ((feed.offset - feed.limit)|int if (feed.offset - feed.limit) > 0 else 0)] %}
         <button hx-get="{{ feed_url }}?{{ prev_qs|join('&') }}"
                 hx-target="#{{ feed_id|default('news-feed') }}"
-                hx-swap="outerHTML">‹ Prev</button>
+                hx-swap="outerHTML">‹ {{ "Prev"|t }}</button>
       {% endif %}
       {% if feed.has_more %}
         {% set next_qs = base_qs + ['offset=' ~ feed.next_offset] %}
         <button hx-get="{{ feed_url }}?{{ next_qs|join('&') }}"
                 hx-target="#{{ feed_id|default('news-feed') }}"
-                hx-swap="outerHTML">Next ›</button>
+                hx-swap="outerHTML">{{ "Next"|t }} ›</button>
       {% endif %}
     </span>
   </div>
 {% else %}
-  <div class="dim" style="padding: 12px;">No news matches these filters.</div>
+  <div class="dim" style="padding: 12px;">{{ "No news matches these filters."|t }}</div>
 {% endif %}
 </div>

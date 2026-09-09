@@ -1,2 +1,5 @@
 <div id="chart" data-ticker="{{ sec.ticker }}"></div>
-<div id="chart-empty" class="dim">{{ "Loading chart…"|t }}</div>
+{# The empty-state copy is rendered here rather than hardcoded in app.js
+   so it goes through the same catalog as the rest of the UI. #}
+<div id="chart-empty" class="dim"
+     data-empty="{{ 'No historical data available.'|t }}">{{ "Loading chart…"|t }}</div>

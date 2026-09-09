@@ -59,7 +59,7 @@
               <tr>
                 <td>{% if a.ex_date %}{{ a.ex_date }}{% else %}<span class="dim">{{ "TBD"|t }}</span>{% endif %}</td>
                 <td><a href="/s/{{ a.ticker }}/corporate-actions">{{ a.ticker }}</a></td>
-                <td class="dim">{{ a.kind }}</td>
+                <td class="dim">{{ a.kind|t }}</td>
                 <td>{% if a.amount is not none %}{{ "{:,.0f}".format(a.amount) }}{% else %}—{% endif %}</td>
               </tr>
             {% endfor %}
