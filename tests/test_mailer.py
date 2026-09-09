@@ -60,6 +60,20 @@ def test_resend_request_shape():
     }
 
 
+def test_reply_to_rides_along_only_when_configured():
+    """The sender is on a subdomain with no mailbox, so replies need a
+    home — but an empty `reply_to` is an invalid address to Resend, not
+    the absence of a header, so it must be omitted rather than sent
+    blank."""
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    without = ResendMailer("k", "Kodji <c@mail.kodji.test>", client=client).payload(MSG)
+    assert "reply_to" not in without
+    with_ = ResendMailer(
+        "k", "Kodji <c@mail.kodji.test>", reply_to="support@kodji.test", client=client
+    ).payload(MSG)
+    assert with_["reply_to"] == "support@kodji.test"
+
+
 def test_plain_text_always_rides_along():
     """A text part is both better-scoring with spam filters and the only
     thing some low-bandwidth mobile clients render."""
@@ -115,10 +129,13 @@ def test_a_key_without_a_sender_still_falls_back(monkeypatch):
 def test_resend_mailer_when_configured(monkeypatch):
     monkeypatch.setenv("RESEND_API_KEY", "re_live_key")
     monkeypatch.setenv("EMAIL_FROM", "Kodji <connexion@mail.kodji.test>")
+    monkeypatch.setenv("EMAIL_REPLY_TO", "support@kodji.test")
     reset_settings_cache()
     mailer = get_mailer()
     try:
         assert isinstance(mailer, ResendMailer)
+        # The setting has to actually reach the wire, not just parse.
+        assert mailer.payload(MSG)["reply_to"] == "support@kodji.test"
     finally:
         mailer.close()
 

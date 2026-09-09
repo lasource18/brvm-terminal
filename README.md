@@ -584,8 +584,15 @@ Resend is the provider (chosen 31 Aug 2026 — see
 # .env
 RESEND_API_KEY=re_...
 EMAIL_FROM=Kodji <connexion@mail.kodji.app>
+EMAIL_REPLY_TO=support@kodji.app      # optional; see below
 PUBLIC_BASE_URL=https://kodji.app     # required in production, see below
 ```
+
+`EMAIL_REPLY_TO` matters more than it looks. The sender is on
+`mail.kodji.app`, which has no mailbox behind it (only Resend's bounce
+handler), so a user who hits Reply on the sign-in mail — "I never got
+the code" is a common one — bounces. Point it at a PrivateEmail alias
+on the apex that you actually read.
 
 Three things matter more than the vendor choice:
 
