@@ -86,11 +86,13 @@ class ResendMailer:
         api_key: str,
         sender: str,
         *,
+        reply_to: str = "",
         client: httpx.Client | None = None,
         timeout: float | None = None,
     ) -> None:
         self._api_key = api_key
         self._sender = sender
+        self._reply_to = reply_to
         self._owns_client = client is None
         self._client = client or httpx.Client(
             timeout=timeout or settings.http_timeout_s
@@ -98,13 +100,18 @@ class ResendMailer:
 
     def payload(self, msg: EmailMessage) -> dict:
         """The request body — exposed so tests can pin the wire format."""
-        return {
+        body = {
             "from": self._sender,
             "to": [msg.to],
             "subject": msg.subject,
             "text": msg.text,
             "html": msg.html,
         }
+        # Only when configured: an empty string is not "no header" to
+        # Resend, it is an invalid address and a 422.
+        if self._reply_to:
+            body["reply_to"] = self._reply_to
+        return body
 
     def send(self, msg: EmailMessage) -> SendResult:
         try:
@@ -171,5 +178,9 @@ def get_mailer() -> Mailer:
     worse failure than falling back to the log.
     """
     if settings.has_email:
-        return ResendMailer(settings.resend_api_key, settings.email_from)
+        return ResendMailer(
+            settings.resend_api_key,
+            settings.email_from,
+            reply_to=settings.email_reply_to,
+        )
     return ConsoleMailer()

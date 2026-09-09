@@ -134,6 +134,11 @@ class Settings(BaseSettings):
     # subdomain so a future daily-brief blast cannot spend its reputation,
     # and so the apex stays free for the human mailbox.
     email_from: str = ""
+    # Where a reply to a sign-in mail lands. The sender lives on the
+    # sending subdomain, which has no mailbox behind it, so without this
+    # a user who hits Reply ("I never got the code") bounces. Blank →
+    # no Reply-To header; Resend then leaves replies going to the sender.
+    email_reply_to: str = ""
     # Absolute origin used to build magic links. Set it in production:
     # behind Cloudflare + Caddy the request's own host/scheme is whatever
     # the last proxy claimed, and a link built from a spoofed Host header
