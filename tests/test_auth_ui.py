@@ -215,3 +215,30 @@ def test_same_origin_post_is_allowed(client, outbox):
     resp = client.post(_path(link), headers={"origin": "http://testserver"},
                        follow_redirects=False)
     assert resp.status_code == 303
+
+
+def test_request_host_is_same_origin_even_under_a_production_base_url(
+    client, outbox, monkeypatch
+):
+    """A production `.env` on a laptop, or the live box through an SSH
+    tunnel: the browser's Origin is the host it typed, not
+    PUBLIC_BASE_URL. That is still same-origin — the attacker case is
+    Origin != Host, never Origin == Host — so sign-in and sign-out must
+    work, and only a genuinely foreign Origin is refused."""
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://kodji.app")
+    reset_settings_cache()
+    here = {"origin": "http://testserver"}
+
+    client.post("/login", data={"email": EMAIL}, headers=here)
+    link, _ = _link_and_code(outbox)
+    assert client.post(_path(link), headers=here, follow_redirects=False).status_code == 303
+    assert SESSION_COOKIE in client.cookies
+
+    evil = client.post("/logout", headers={"origin": "https://evil.example.com"})
+    assert evil.status_code == 403
+    # The refusal names what it wanted, for the operator reading it.
+    assert "https://kodji.app" in evil.text
+    assert SESSION_COOKIE in client.cookies
+
+    assert client.post("/logout", headers=here, follow_redirects=False).status_code == 303
+    assert SESSION_COOKIE not in client.cookies
