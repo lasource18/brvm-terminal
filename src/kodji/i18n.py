@@ -65,6 +65,9 @@ _FR: dict[str, str] = {
         "Cette adresse e-mail ne semble pas valide.",
     "We couldn't send that email just now. Try again in a moment.":
         "L'envoi de l'e-mail a échoué. Réessayez dans un instant.",
+    "Sign-in is temporarily unavailable — too many requests right now. Try again in a little while.":
+        "La connexion est momentanément indisponible — trop de demandes en ce moment. "
+        "Réessayez dans quelques minutes.",
     "That link has expired or has already been used. Ask for a new one.":
         "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.",
     "The link and code expire in %d minutes and work only once.":

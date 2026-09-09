@@ -65,6 +65,26 @@ def test_sent_page_states_the_same_expiry_as_the_email(client, outbox):
     assert "20 minutes" in again
 
 
+def test_global_cap_is_surfaced_honestly(client, outbox, monkeypatch):
+    """Unlike the per-address limit, the global cap says so: nothing is
+    coming to this mailbox, and "temporarily unavailable" reveals
+    nothing about any one address — only that the site is busy."""
+    monkeypatch.setenv("LOGIN_MAX_SENDS_PER_HOUR", "1")
+    reset_settings_cache()
+
+    assert client.post("/login", data={"email": EMAIL}).status_code == 200
+
+    capped = client.post("/login", data={"email": "other@example.ci"})
+    assert capped.status_code == 503
+    assert capped.headers["retry-after"] == "600"
+    assert "temporarily unavailable" in capped.text
+    assert len(outbox.sent) == 1
+
+    fr = client.post("/login?lang=fr", data={"email": "third@example.ci"})
+    assert fr.status_code == 503
+    assert "momentanément indisponible" in fr.text
+
+
 def test_submitting_an_address_sends_the_mail(client, outbox):
     resp = client.post("/login", data={"email": EMAIL})
 

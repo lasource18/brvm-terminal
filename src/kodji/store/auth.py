@@ -146,6 +146,18 @@ def count_recent_for_email(
     return int(row["n"]) if row else 0
 
 
+def count_recent(conn: sqlite3.Connection, since_utc: str) -> int:
+    """Challenges minted for *any* address since `since_utc` — the global
+    send-budget input. Every row is one send attempt (rows are created
+    only after the per-address check, right before the send), so the
+    table doubles as the ledger; `purge_expired` keeps it for a day."""
+    row = conn.execute(
+        "SELECT count(*) AS n FROM login_tokens WHERE created_utc >= ?",
+        (since_utc,),
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
 # --- sessions --------------------------------------------------------------
 
 
@@ -207,19 +219,26 @@ def delete_session(conn: sqlite3.Connection, token_hash: str) -> int:
     return cur.rowcount
 
 
-def purge_expired(conn: sqlite3.Connection, now_utc: str) -> tuple[int, int]:
+def purge_expired(
+    conn: sqlite3.Connection, now_utc: str, *, keep_since_utc: str
+) -> tuple[int, int]:
     """Drop expired sessions and spent/expired challenges.
 
     Returns `(sessions, login_tokens)` removed. Consumed challenges are
     dropped too — once used they are dead weight, and keeping them would
     make `login_tokens` grow without bound on a long-lived install.
+
+    Challenges created since `keep_since_utc` survive regardless: they
+    are the send ledger behind `count_recent`, and the daily cap has to
+    see a full day, not whatever the 03:30 purge left of it.
     """
     sessions = conn.execute(
         "DELETE FROM sessions WHERE expires_utc <= ?", (now_utc,)
     ).rowcount
     tokens = conn.execute(
-        "DELETE FROM login_tokens WHERE expires_utc <= ? OR consumed_utc IS NOT NULL",
-        (now_utc,),
+        "DELETE FROM login_tokens "
+        "WHERE (expires_utc <= ? OR consumed_utc IS NOT NULL) AND created_utc < ?",
+        (now_utc, keep_since_utc),
     ).rowcount
     conn.commit()
     return sessions, tokens
