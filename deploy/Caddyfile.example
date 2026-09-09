@@ -1,4 +1,18 @@
+# /etc/caddy/Caddyfile — bare-metal form (systemd), Cloudflare in front.
+#
+# TLS is a Cloudflare Origin CA certificate (SSL/TLS → Origin Server), not
+# Let's Encrypt: it needs no port 80, no renewal for 15 years, and pairs
+# with Cloudflare's "Full (strict)" mode. Only Cloudflare trusts it, which
+# is fine because ufw only lets Cloudflare's ranges reach :443.
+# The docker-compose skeleton would use `reverse_proxy app:8765` instead.
+
 kodji.app {
-    encode gzip
-    reverse_proxy app:8765
+    tls /etc/caddy/certs/kodji.app.pem /etc/caddy/certs/kodji.app.key
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765
+}
+
+www.kodji.app {
+    tls /etc/caddy/certs/kodji.app.pem /etc/caddy/certs/kodji.app.key
+    redir https://kodji.app{uri} permanent
 }

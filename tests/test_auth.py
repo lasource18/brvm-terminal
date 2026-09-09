@@ -22,6 +22,7 @@ from kodji.services import accounts as accounts_svc
 from kodji.services import auth as auth_svc
 from kodji.services.auth import SESSION_COOKIE
 from kodji.services.mailer import ConsoleMailer
+from kodji.store import accounts as accounts_repo
 from kodji.store import auth as auth_repo
 from kodji.store.accounts import DEFAULT_ACCOUNT_ID
 
@@ -85,6 +86,21 @@ def test_email_is_normalized(client, mailer):
     with connect(settings.db_path) as conn:
         row = conn.execute("SELECT email FROM users").fetchone()
         assert row["email"] == EMAIL
+
+
+def test_claimed_owner_signs_in_to_account_1_and_is_paid(client, mailer):
+    """End to end for `just claim-owner`: after the claim, a magic link
+    for that address lands on the seeded operator account, which 0019
+    put on the paid plan — not on a fresh free one."""
+    from kodji.store.accounts import PAID_PLAN
+
+    with connect(settings.db_path) as conn:
+        accounts_repo.attach_user_to_account(conn, EMAIL, DEFAULT_ACCOUNT_ID)
+
+    grant = auth_svc.complete_with_token(_challenge(mailer).token)
+    assert grant is not None
+    assert grant.account_id == DEFAULT_ACCOUNT_ID
+    assert accounts_svc.plan_for(grant.account_id) == PAID_PLAN
 
 
 # --- prefetch safety -------------------------------------------------------

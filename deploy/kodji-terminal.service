@@ -1,18 +1,35 @@
+# /etc/systemd/system/kodji-terminal.service
+#
+# Bare-metal unit for the Hetzner box. Runbook: docs/deploy-kodji-app.md.
+# The app refuses to start when migrations are pending (kodji.db.
+# assert_schema_current), so the start-limit below turns that into three
+# tries and a stopped unit rather than a five-second restart loop.
+
 [Unit]
 Description=kodji-terminal (FastAPI + APScheduler)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=3
 
 [Service]
 Type=simple
-User=brvm
-Group=brvm
+User=kodji
+Group=kodji
 WorkingDirectory=/opt/kodji-terminal
+# pydantic-settings reads .env from WorkingDirectory too; this makes the
+# same values visible to ExecStart itself. Keep values free of `#` and
+# backslashes — systemd and python-dotenv parse those differently.
 EnvironmentFile=/opt/kodji-terminal/.env
+Environment=PYTHONUNBUFFERED=1
+# uvicorn trusts X-Forwarded-* from 127.0.0.1 by default, which is Caddy.
 ExecStart=/opt/kodji-terminal/.venv/bin/uvicorn kodji.apps.web.main:app --host 127.0.0.1 --port 8765
 Restart=on-failure
 RestartSec=5
 MemoryMax=384M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
 
 [Install]
 WantedBy=multi-user.target

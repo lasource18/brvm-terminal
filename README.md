@@ -647,10 +647,12 @@ unwanted mail. Keep the daily cap under the provider's quota.
 **Per-IP is deliberately not done in the app.** Behind Caddy the app
 sees `127.0.0.1` for every request, and trusting a forwarded header is
 a deploy-time decision. Once the site is behind Cloudflare, add a
-Rate Limiting rule (free plan includes one): *if* `URI Path equals
-/login` *and* `Request Method equals POST`, *then* block for 10 minutes
-above 5 requests per 10 minutes per IP. That, plus the global cap
-underneath it, is the whole defence.
+Rate Limiting rule (the free plan includes one, with the period and
+block fixed at 10 seconds): *if* `URI Path equals /login` *and*
+`Request Method equals POST`, *then* block above 3 requests per
+10 seconds per IP. That throttles a burst; the global cap underneath
+it is what actually bounds the damage. Exact steps are in the
+[deploy runbook](./docs/deploy-kodji-app.md).
 
 ### Turning sign-in from optional into required
 
@@ -659,6 +661,14 @@ box working exactly as it does: a request with no session resolves to
 the account migration 0017 seeded. **Set it to `true` before the app is
 reachable by anyone but you** — with it off, an anonymous visitor reads
 that account's data.
+
+**First, claim that account.** Nothing links an email address to the
+seeded account 1, so your own first sign-in would mint a fresh free
+account and none of your watchlists or alert rules would be in it:
+
+```bash
+just claim-owner you@example.com     # idempotent; then sign out and in
+```
 
 Plan gating (PR-Y) does *not* depend on that flag: an anonymous request
 resolves to the default account and is enforced against whatever plan it
@@ -729,6 +739,14 @@ SGBC     SGBCI                               39,200.00   -0.25%        7,088    
 ...
 ```
 
+
+## Deploy
+
+The production runbook — Hetzner CX22 behind Cloudflare, Caddy with an
+origin certificate, systemd, the `.env` diff, the owner claim, smoke
+tests, day-2 operations — is
+[`docs/deploy-kodji-app.md`](./docs/deploy-kodji-app.md). It is written
+to be followed top to bottom.
 
 ## Data sources
 
