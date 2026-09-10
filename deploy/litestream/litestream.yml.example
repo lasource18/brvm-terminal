@@ -1,0 +1,18 @@
+# /etc/litestream.yml — continuous replication of the production SQLite to
+# Cloudflare R2 (PR-AB). Credentials come from /etc/litestream.env (0600)
+# through the systemd drop-in next to this file, never from here.
+# Install steps: docs/deploy-kodji-app.md §8 "Backups".
+dbs:
+  - path: /opt/kodji-terminal/data/kodji.sqlite
+    replicas:
+      - type: s3
+        bucket: kodji-litestream
+        path: kodji.sqlite
+        endpoint: https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com
+        region: auto
+        force-path-style: true
+        # How far behind the replica can be: WAL pages ship every 10s.
+        sync-interval: 10s
+        # A full snapshot every 6h keeps restores fast; 3 days of point-in-time.
+        snapshot-interval: 6h
+        retention: 72h
