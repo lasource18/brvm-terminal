@@ -60,8 +60,13 @@ Time: about two hours the first time, most of it waiting on DNS.
   ~100 ms; Johannesburg is farther from West Africa than Paris is. Cloudflare
   serves the static assets from its edge either way.
 - **SSH:** add your key on the create form and, after first login, set
-  `PasswordAuthentication no` in `/etc/ssh/sshd_config.d/kodji.conf` and
+  `PasswordAuthentication no` in `/etc/ssh/sshd_config.d/00-kodji.conf` and
   `systemctl reload ssh`. Vultr images allow root password login by default.
+  The `00-` prefix matters: sshd takes the *first* value it reads, and the
+  image ships `50-cloud-init.conf` saying `yes`.
+- **Hostname:** if you `hostnamectl set-hostname`, add `127.0.1.1 <name>` to
+  `/etc/hosts` too, or `sudo` complains on every call.
+- **Swap:** the Vultr image already has a swap file; skip §2b.
 - **Firewall:** Vultr's network firewall (Products → Firewall) can sit in
   front of `ufw`. If you use it, one rule for SSH from your IP and one for
   TCP 443 with **Cloudflare** as the source — Vultr maintains that IP list
@@ -193,10 +198,11 @@ ls .venv/bin/uvicorn                # the path the systemd unit uses
 From the **Mac**, push the snapshot from §1b:
 
 ```bash
+ssh kodji@<VPS-IP> 'mkdir -p /opt/kodji-terminal/data/filings'   # data/ is git-ignored, not in the clone
 scp /tmp/kodji-seed.sqlite kodji@<VPS-IP>:/opt/kodji-terminal/data/kodji.sqlite
 ```
 
-(`data/` exists in the clone via `.gitkeep`.) Optional — the 4.5 GB filings
+Optional — the 4.5 GB filings
 corpus. Not needed for the app to work; extracted numbers are already in the
 SQLite. It feeds future OCR/extraction runs. Resumable, so start it and
 forget it:
@@ -242,10 +248,13 @@ disagree on it).
 ### 3d. Migrate
 
 ```bash
-uv run python scripts/migrate.py --check      # lists what is pending
-uv run python scripts/migrate.py              # applies it
-uv run python scripts/migrate.py --check      # "[migrate] up to date"
+uv run --no-dev python scripts/migrate.py --check      # lists what is pending
+uv run --no-dev python scripts/migrate.py              # applies it
+uv run --no-dev python scripts/migrate.py --check      # "[migrate] up to date"
 ```
+
+`--no-dev` on every `uv run` on the box: without it uv quietly syncs the
+dev group (pytest, ruff, mypy — 30 MB) into the production venv.
 
 The seed came from a machine already at the current schema, so expect
 "up to date" straight away. The app refuses to start if this ever says
@@ -260,9 +269,11 @@ your first sign-in would create a fresh *free* account and none of your
 data would be in it.
 
 ```bash
-just claim-owner you@example.com
+uv run --no-dev python scripts/claim_owner.py you@example.com
 # [claim-owner] you@example.com (user 1) now owns account 1 [paid]
 ```
+
+(`just claim-owner` is the same thing, minus `--no-dev`.)
 
 Use the exact address you will sign in with. Idempotent; run it again if
 unsure.
@@ -270,7 +281,7 @@ unsure.
 ### 3f. First run, in the foreground
 
 ```bash
-uv run uvicorn kodji.apps.web.main:app --host 127.0.0.1 --port 8765
+uv run --no-dev uvicorn kodji.apps.web.main:app --host 127.0.0.1 --port 8765
 ```
 
 You want to see, in order: no `PendingMigrations`, then
@@ -453,7 +464,7 @@ On the VPS:
 ```bash
 journalctl -u kodji-terminal -n 50 --no-pager | grep -E "login|session|scheduler"
 #   "challenge sent to ...", "session minted for ... (account=1)"
-sudo -iu kodji bash -c 'cd /opt/kodji-terminal && uv run python scripts/migrate.py --check'
+sudo -iu kodji bash -c 'cd /opt/kodji-terminal && uv run --no-dev python scripts/migrate.py --check'
 #   [migrate] up to date
 ```
 
@@ -474,9 +485,9 @@ sudo -iu kodji
 cd /opt/kodji-terminal
 git pull --ff-only
 uv sync --no-dev
-if ! uv run python scripts/migrate.py --check; then
+if ! uv run --no-dev python scripts/migrate.py --check; then
   sqlite3 data/kodji.sqlite ".backup data/pre-migrate-$(date +%F-%H%M).sqlite"
-  uv run python scripts/migrate.py
+  uv run --no-dev python scripts/migrate.py
 fi
 exit
 sudo systemctl restart kodji-terminal && journalctl -u kodji-terminal -n 20 --no-pager
