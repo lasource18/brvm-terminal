@@ -5,8 +5,9 @@ process, one SQLite file, Cloudflare in front. Written 2026-09-09 against
 `main`; follow it top to bottom the first time. Every step ends with a check —
 do not move on until the check passes.
 
-Deferred on purpose to PR-AB (ops hardening): Cloudflare Tunnel, Litestream
-replication, job-missed alerting. §8 has the interim versions.
+Litestream replication to R2 landed 10 Sep 2026 (§8). Still deferred:
+Cloudflare Tunnel (ufw + the origin cert already close the origin off) and
+job-missed alerting.
 
 ## Shape
 
@@ -73,10 +74,10 @@ Time: about two hours the first time, most of it waiting on DNS.
   for you, which removes the "re-run the ufw loop when ranges change" chore.
   Keep `ufw` anyway; belt and braces.
 - **Backups:** skip the paid automatic-backup add-on. What it protects is
-  rebuildable from this runbook in an hour, and the data is covered off-box
-  by §8 (nightly `.backup` + rsync) and, later, Litestream. Do take **one
-  manual snapshot** right after §7 passes — billed per GB stored, cents a
-  month for this box — so a restore is a click instead of a runbook.
+  rebuildable from this runbook in an hour, and the data is replicated
+  off-box continuously by Litestream (§8). Do take **one manual snapshot**
+  right after §7 passes — billed per GB stored, cents a month for this box
+  — so a restore is a click instead of a runbook.
 
 ## 1. Snapshot what exists
 
@@ -512,22 +513,67 @@ sudo -iu kodji cp /opt/kodji-terminal/data/pre-migrate-<stamp>.sqlite /opt/kodji
 sudo systemctl start kodji-terminal
 ```
 
-### Backups (interim, until Litestream in PR-AB)
+### Backups — Litestream to R2 (continuous) + a nightly local copy
 
-Nightly consistent copy on the box, 14 days retained. As `kodji`,
-`crontab -e`:
-
-```
-15 3 * * * mkdir -p /opt/kodji-terminal/backups && sqlite3 /opt/kodji-terminal/data/kodji.sqlite ".backup /opt/kodji-terminal/backups/kodji-$(date +\%F).sqlite" && find /opt/kodji-terminal/backups -name 'kodji-*.sqlite' -mtime +14 -delete
-```
-
-And from the Mac, whenever you think of it (weekly is fine pre-launch):
+**Litestream** ships every WAL change to a Cloudflare R2 bucket within
+10 seconds and keeps 3 days of point-in-time history. Installed 10 Sep
+2026; this is the backup that counts. Setup on a fresh box, as root:
 
 ```bash
-rsync -avz kodji@<VPS-IP>:/opt/kodji-terminal/backups/ ~/kodji-backups/
+V=0.5.17
+curl -fsSLO https://github.com/benbjohnson/litestream/releases/download/v$V/litestream-$V-linux-x86_64.deb
+curl -fsSLO https://github.com/benbjohnson/litestream/releases/download/v$V/checksums.txt
+grep "linux-x86_64.deb" checksums.txt | sha256sum -c - && dpkg -i litestream-$V-linux-x86_64.deb
+
+cp /opt/kodji-terminal/deploy/litestream/litestream.yml.example /etc/litestream.yml
+sed -i 's/<R2_ACCOUNT_ID>/<your account id>/' /etc/litestream.yml
+printf 'LITESTREAM_ACCESS_KEY_ID=...\nLITESTREAM_SECRET_ACCESS_KEY=...\n' > /etc/litestream.env && chmod 600 /etc/litestream.env
+install -d /etc/systemd/system/litestream.service.d
+cp /opt/kodji-terminal/deploy/litestream/override.conf /etc/systemd/system/litestream.service.d/
+systemctl daemon-reload && systemctl enable --now litestream
+journalctl -u litestream -n 5      # "replicating to ... bucket=kodji-litestream", then "snapshot complete"
 ```
 
-A backup that only lives on the box is not a backup.
+R2 side: bucket `kodji-litestream`, and an R2 API token with *Object Read &
+Write* on that bucket only. The account id is in the R2 dashboard URL.
+
+**Prove it restores** — do this once after setup and again whenever you
+touch the config. Never trust a backup you haven't restored:
+
+```bash
+set -a; . /etc/litestream.env; set +a
+sudo -u kodji --preserve-env=LITESTREAM_ACCESS_KEY_ID,LITESTREAM_SECRET_ACCESS_KEY \
+  litestream restore -config /etc/litestream.yml -o /tmp/restore-test.sqlite /opt/kodji-terminal/data/kodji.sqlite
+sqlite3 /tmp/restore-test.sqlite "PRAGMA integrity_check; SELECT count(*) FROM securities;"
+rm /tmp/restore-test.sqlite
+```
+
+**Disaster restore** (box gone, new box built through §2–§4 but *before*
+starting the service): install Litestream as above, then
+
+```bash
+systemctl stop kodji-terminal 2>/dev/null || true
+sudo -u kodji --preserve-env=LITESTREAM_ACCESS_KEY_ID,LITESTREAM_SECRET_ACCESS_KEY \
+  litestream restore -config /etc/litestream.yml -o /opt/kodji-terminal/data/kodji.sqlite /opt/kodji-terminal/data/kodji.sqlite
+systemctl start litestream kodji-terminal
+```
+
+Add `-timestamp 2026-09-10T15:00:00Z` to restore to a point in time within
+the 3-day window (a bad migration, a script that deleted the wrong rows).
+
+**Nightly local copy** stays as belt-and-braces — a consistent `.backup`
+on the box at 03:15 UTC, 14 days kept, in `/opt/kodji-terminal/backups/`.
+It is what you reach for first when the mistake is small and recent; it
+is not off-box, so it is not the disaster plan. As `kodji`, `crontab -l`
+shows the line; recreate it with `crontab -e` if missing:
+
+```
+15 3 * * * sqlite3 /opt/kodji-terminal/data/kodji.sqlite ".backup /opt/kodji-terminal/backups/kodji-$(date +\%F).sqlite" && find /opt/kodji-terminal/backups -name "kodji-*.sqlite" -mtime +14 -delete
+```
+
+Litestream and the cron coexist: `.backup` is a reader, and Litestream
+owns checkpointing — never run `PRAGMA wal_checkpoint(TRUNCATE)` by hand
+while it is running.
 
 ### Watching it
 
