@@ -25,6 +25,7 @@ def test_closed_on_saturday():
 
 def test_scheduler_builds():
     # Import late so freezegun doesn't apply to module import (not needed here).
+    from kodji.jobs import scheduler
     from kodji.jobs.scheduler import build_scheduler
 
     sched = build_scheduler()
@@ -55,6 +56,33 @@ def test_scheduler_builds():
     cron = brief.trigger
     assert str(cron.fields[cron.FIELD_NAMES.index("hour")]) == "15"
     assert str(cron.fields[cron.FIELD_NAMES.index("minute")]) == "45"
+    # PR-AB: the watchdog itself, every 15 min.
+    assert "job_watchdog" in ids
+    # PR-AB: daily jobs run late rather than not at all when the executor
+    # was busy at the cron minute; frequent jobs keep a short grace.
+    assert brief.misfire_grace_time == 30 * 60
+    # A pending job (scheduler not started) only carries the options it
+    # was given explicitly; the frequent jobs take the scheduler defaults.
+    deliver = next(j for j in sched.get_jobs() if j.id == "alerts_deliver_every_5min")
+    assert not hasattr(deliver, "misfire_grace_time")
+    assert sched._job_defaults["coalesce"] is True
+    assert sched._job_defaults["misfire_grace_time"] == 60
+    # PR-AB: every body is wrapped by `tracked` (functools.wraps keeps
+    # the original name so the log lines still say which job).
+    assert brief.func.__name__ == "_brief_job"
+    assert brief.func is not scheduler._brief_job
+
+
+@freeze_time("2026-01-01 15:45:00", tz_offset=0)  # New Year's Day
+def test_brief_job_returns_skipped_on_holiday():
+    """PR-AB: the holiday no-op is recorded as 'skipped', not 'ok', so
+    the status table says why there is no brief."""
+    from kodji.jobs import scheduler
+    from kodji.services.watchdog import Skipped
+
+    result = scheduler._brief_job()
+    assert isinstance(result, Skipped)
+    assert "2026-01-01" in result.reason
 
 
 @freeze_time("2026-01-01 15:45:00", tz_offset=0)  # New Year's Day

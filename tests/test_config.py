@@ -33,3 +33,16 @@ def test_llm_flag_and_cap_override(monkeypatch, tmp_path):
     s = Settings()
     assert s.has_llm
     assert s.llm_daily_cap_cents == 25
+
+
+def test_ops_alerting_defaults_are_off(monkeypatch, tmp_path):
+    """PR-AB: no channel by default — the watchdog then logs at ERROR."""
+    monkeypatch.chdir(tmp_path)
+    s = Settings()
+    assert s.ops_alert_email == ""
+    assert s.ops_alert_repeat_hours == 24
+    monkeypatch.setenv("OPS_ALERT_EMAIL", "ops@example.ci")
+    monkeypatch.setenv("OPS_ALERT_REPEAT_HOURS", "6")
+    s = Settings()
+    assert s.ops_alert_email == "ops@example.ci"
+    assert s.ops_alert_repeat_hours == 6

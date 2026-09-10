@@ -249,7 +249,10 @@ def test_watchlist_page_empty(client):
 def test_health_json(client):
     r = client.get("/health")
     assert r.status_code == 200
-    assert r.json()["status"] == "ok"
+    body = r.json()
+    assert body["status"] == "ok"
+    # PR-AB: migrated DB, no open problems, process just started → ok.
+    assert body["jobs"] == {"status": "ok", "open": [], "checked_utc": None}
 
 
 def test_topbar_search_input_present(client):

@@ -21,3 +21,8 @@ def test_health_endpoint():
     body = r.json()
     assert body["status"] == "ok"
     assert "version" in body
+    # PR-AB: the scheduler's verdict rides along. No lifespan ran here,
+    # so whatever DB the settings point at may not exist or be migrated;
+    # the block must still be present and well-formed, never a 500.
+    assert body["jobs"]["status"] in {"ok", "degraded", "stale", "unknown"}
+    assert isinstance(body["jobs"]["open"], list)

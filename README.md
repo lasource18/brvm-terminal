@@ -135,7 +135,8 @@ Available pages:
   with HTMX pagination
 - `/watchlists` — create and manage named watchlists
 - `/watchlists/{slug}` — quote board for one list, add/remove tickers inline
-- `/health` — JSON liveness
+- `/health` — JSON liveness, plus the scheduler's verdict under `jobs`
+  (see *Ops — the job watchdog* below)
 
 ## Try it (Phase 3a demo)
 
@@ -739,6 +740,61 @@ SGBC     SGBCI                               39,200.00   -0.25%        7,088    
 ...
 ```
 
+
+## Ops — the job watchdog (PR-AB)
+
+An uptime monitor on `/health` says whether the process answers. It says
+nothing about whether the 15:45 brief actually ran. The watchdog does.
+
+Every scheduled job is wrapped so each run lands in `job_runs` (start,
+finish, `ok` / `skipped` / `failed`, a one-line note). Every 15 minutes
+the `job_watchdog` job asks each job's **own cron trigger** for its
+recent due times and compares them with that table, so a job added to
+`build_scheduler` is covered automatically. It reports three kinds of
+problem:
+
+- **missed** — the due time passed and no run was recorded. Typically a
+  restart across the cron minute: APScheduler's in-memory store forgets
+  a fire time the moment the process dies.
+- **failed** — the job raised. Daily and weekly jobs are reported on the
+  first failure; jobs that fire at least hourly get three strikes so a
+  single scraper timeout is not an alert.
+- **stuck** — a run started and never finished (hung, or the process was
+  killed mid-run — the next pass closes such runs as `interrupted`).
+
+Each problem is announced once when it appears, once a day while it
+lasts (`OPS_ALERT_REPEAT_HOURS`), and once when it clears. Channels:
+
+```bash
+OPS_ALERT_EMAIL=you@example.ci      # through the sign-in mailer (Resend)
+DISCORD_WEBHOOK_URL=https://...     # the alerts webhook doubles as ops
+```
+
+With neither set, the alert is an `ERROR` line in the journal. Look at
+the state from the shell any time — both are read-only and safe beside
+the running service:
+
+```bash
+just jobs-status    # every job: next due, last run, status, duration, note
+just jobs-check     # what the watchdog would flag right now; exit 1 if anything
+```
+
+`/health` carries the summary for the external monitor:
+
+```json
+"jobs": {"status": "ok", "open": [], "checked_utc": "2026-09-10T15:45:12Z"}
+```
+
+`status` is `degraded` while a problem is open, `stale` when the
+watchdog's own heartbeat is older than 45 minutes (the scheduler thread
+died while uvicorn kept answering), and `unknown` when the DB cannot be
+read. Point a keyword monitor at it (see the deploy runbook). Only
+problem keys are exposed — the endpoint is public and failure notes can
+contain exception text.
+
+Daily and weekly jobs also get a 30-minute misfire grace, so a job whose
+cron minute fell while the executor was busy runs late instead of
+tomorrow.
 
 ## Deploy
 

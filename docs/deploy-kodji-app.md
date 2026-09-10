@@ -5,9 +5,9 @@ process, one SQLite file, Cloudflare in front. Written 2026-09-09 against
 `main`; follow it top to bottom the first time. Every step ends with a check —
 do not move on until the check passes.
 
-Litestream replication to R2 landed 10 Sep 2026 (§8). Still deferred:
-Cloudflare Tunnel (ufw + the origin cert already close the origin off) and
-job-missed alerting.
+Litestream replication to R2 landed 10 Sep 2026 (§8), and the job-missed
+watchdog the same day (§8, *Watching it*). Cloudflare Tunnel is dropped for
+good: ufw + the origin cert already close the origin off.
 
 ## Shape
 
@@ -595,8 +595,42 @@ Lines worth a look: `global send cap hit` (someone spraying `/login`, or a
 launch), `rejected cross-origin POST`, `scheduled ... failed`.
 
 Point a free uptime monitor (UptimeRobot, Better Stack) at
-`https://kodji.app/health` every 5 minutes. That covers "the box is down";
-"a job silently didn't run" is PR-AB.
+`https://kodji.app/health` every 5 minutes. That covers "the box is down".
+
+**"A job silently didn't run"** is the watchdog (PR-AB part 2, 10 Sep
+2026). Every scheduled job records its runs in `job_runs`; the
+`job_watchdog` job checks them against each job's cron every 15 minutes
+and alerts on a **missed**, **failed** or **stuck** job — once when it
+appears, once a day while it lasts, once when it clears. It needs one
+of these in `.env` (both is fine):
+
+```bash
+OPS_ALERT_EMAIL=cmguinan@yahoo.fr     # sent through the Resend sign-in sender
+DISCORD_WEBHOOK_URL=https://...       # same webhook the alerts use
+```
+
+then `systemctl restart kodji-terminal`. With neither, the alert is only
+an `ERROR` line in the journal. Ship it in the same step as migration
+`0020_job_runs` — the app refuses to start until that is applied.
+
+The verdict is also on `/health` as `"jobs": {"status": "ok", ...}`, which
+lets the uptime monitor be the second channel for free: add a second
+UptimeRobot monitor of type *Keyword* on the same URL, keyword
+`"status": "ok", "open"`, alert when the keyword is **absent**. It fires
+on `degraded` (a problem is open), `stale` (the scheduler thread died
+while uvicorn kept answering) and `unknown` (DB unreadable).
+
+From the shell, as `kodji` in `/opt/kodji-terminal`:
+
+```bash
+just jobs-status     # every job: next due, last run, status, duration, note
+just jobs-check      # what the watchdog would flag now; exit 1 if anything
+```
+
+Both are read-only and safe beside the running service. Typical
+follow-up to a `brief_daily missed` alert: `just brief-run` by hand. The
+watchdog only sees runs that went through the scheduler, so the problem
+clears — with a recovery notice — at the next scheduled run that succeeds.
 
 ### After a week
 
@@ -632,8 +666,10 @@ FILINGS_ROOT=/opt/kodji-terminal/data/filings
 # Leave the binary name as-is; without it installed the OCR job no-ops.
 OCR_BINARY=ocrmypdf
 
-# --- alerts ---
+# --- alerts + ops (the job watchdog uses either; set at least one) ---
 DISCORD_WEBHOOK_URL=
+OPS_ALERT_EMAIL=cmguinan@yahoo.fr
+OPS_ALERT_REPEAT_HOURS=24
 
 # --- auth + email ---
 RESEND_API_KEY=re_...
