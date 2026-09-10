@@ -65,6 +65,14 @@ Time: about two hours the first time, most of it waiting on DNS.
   `systemctl reload ssh`. Vultr images allow root password login by default.
   The `00-` prefix matters: sshd takes the *first* value it reads, and the
   image ships `50-cloud-init.conf` saying `yes`.
+- **Two logins.** Vultr installs your key for `root` only. After §2c, copy it
+  to the app user too (`install -d -o kodji -g kodji -m 700 /home/kodji/.ssh
+  && install -o kodji -g kodji -m 600 /root/.ssh/authorized_keys
+  /home/kodji/.ssh/authorized_keys`) and add both to `~/.ssh/config` on the
+  Mac: `kodji-vps` (User `kodji` — git pull, uv, just) and `kodji-root`
+  (User `root` — systemd, caddy, litestream, ufw). `kodji` deliberately has
+  no sudo: the app runs as that user, and a compromised app must not be a
+  root shell.
 - **Hostname:** if you `hostnamectl set-hostname`, add `127.0.1.1 <name>` to
   `/etc/hosts` too, or `sudo` complains on every call.
 - **Swap:** the Vultr image already has a swap file; skip §2b.
