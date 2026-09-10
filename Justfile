@@ -193,3 +193,13 @@ analyst-notes-run *args:
 # Same, without spending anything: reports the plan per ticker.
 analyst-notes-run-dry *args:
     uv run python -m kodji.jobs.analyst_notes_run --once --dry-run {{args}}
+
+# PR-AB: every scheduled job with its next due time and last recorded run
+# (from `job_runs`). Read-only; safe to run beside the live service.
+jobs-status:
+    uv run python -m kodji.jobs.watchdog
+
+# PR-AB: what the watchdog would flag right now — missed / failed / stuck
+# jobs. Exit 1 if anything is wrong, so it chains in a shell check.
+jobs-check:
+    uv run python -m kodji.jobs.watchdog --check

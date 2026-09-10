@@ -172,6 +172,16 @@ class Settings(BaseSettings):
     # you — see `services/accounts.current_account_id`.
     auth_required: bool = False
 
+    # --- Ops alerting (PR-AB) ---
+    # Where the job watchdog sends "a scheduled job silently didn't run".
+    # Goes out through the same mailer as sign-in mail (a few messages a
+    # month, not a bulk stream). Blank → no email; if the Discord webhook
+    # is blank too, the alert is an ERROR line in the journal.
+    ops_alert_email: str = ""
+    # A problem that stays open is re-announced this often. One nag a day
+    # is enough for a job that runs once a day.
+    ops_alert_repeat_hours: int = 24
+
     http_user_agent: str = Field(default="kodji-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 

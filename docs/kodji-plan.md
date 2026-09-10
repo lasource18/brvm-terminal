@@ -260,7 +260,7 @@ Continuing the PR-letter convention from where PR-U left off.
 | **PR-Y** | Plan gating | `TabSpec.min_plan`, the 10-security watchlist cap, plus route-level enforcement on pages/fragments/API, with the leak test. **Shipped (#77).** |
 | **PR-Z** | Flutterwave billing | Provider-agnostic subscriptions, webhook adapter, XOF integer pricing. |
 | **PR-AA** | PWA shell and Web Push | Manifest, service worker, push subscriptions; Discord demoted to ops-only. |
-| **PR-AB** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. **Litestream → R2 live 10 Sep 2026 (restore verified); Tunnel dropped — ufw + Origin CA already close the origin; job-missed alerting still open.** |
+| **PR-AB** | Ops hardening | Litestream, Cloudflare Tunnel, job-missed alerting. Before you take money. **Shipped: Litestream → R2 live 10 Sep 2026 (restore verified); job watchdog 10 Sep 2026 (`job_runs` + `job_watchdog`, missed/failed/stuck → email or Discord, `/health` `jobs` block, `just jobs-status`); Tunnel dropped — ufw + Origin CA already close the origin.** |
 | **PR-AC** | TUI sync client | Post-launch. `kodji sync` plus packaging. |
 
 ## Answered (2026-08-30)

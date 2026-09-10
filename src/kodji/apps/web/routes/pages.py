@@ -26,6 +26,7 @@ from kodji.services import bonds as bonds_svc
 from kodji.services import brief as brief_svc
 from kodji.services import company, directory, fundamentals, market, ratios, watchlist
 from kodji.services import news as news_svc
+from kodji.services import watchdog as watchdog_svc
 
 router = APIRouter()
 
@@ -412,11 +413,19 @@ def pricing_page(request: Request):
 
 @router.get("/health")
 def health():
+    """Liveness plus the scheduler's own verdict.
+
+    Always 200 while the process answers — `jobs.status` is the
+    scheduled-work signal (`ok` / `degraded` / `stale` / `unknown`), which
+    an uptime monitor keyword-matches separately from "is it up". Only
+    problem keys are exposed; the endpoint is public.
+    """
     return JSONResponse(
         {
             "status": "ok",
             "version": __version__,
             "utc": utc_iso(),
             "market_open": is_market_open(),
+            "jobs": watchdog_svc.health_summary(),
         }
     )
