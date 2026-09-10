@@ -359,7 +359,9 @@ is inert from here on — all edits happen in Cloudflare.
 
 **SSL/TLS → Origin Server → Create Certificate.** Private key type RSA
 (2048), hostnames `kodji.app` and `*.kodji.app`, validity 15 years. It
-shows the certificate and the private key **once**. On the VPS as root:
+shows the certificate and the private key **once** — save both before
+closing the dialog; there is no way to retrieve the key afterwards, only to
+create a new certificate. On the VPS as root:
 
 ```bash
 mkdir -p /etc/caddy/certs
@@ -437,7 +439,9 @@ curl -sI https://kodji.app | head -8
 curl -s https://kodji.app/health
 #   {"status":"ok",...}
 curl -sI http://kodji.app | head -3
-#   301 → https://kodji.app/  (Always Use HTTPS)
+#   301 → https://kodji.app/  (Always Use HTTPS). A *timeout* here means that
+#   setting is still off: Cloudflare then tries the origin on :80, which ufw
+#   drops.
 curl -sI https://www.kodji.app | head -3
 #   308 → https://kodji.app/  (Caddy)
 curl -m 5 -sk https://<VPS-IP>/health || echo "blocked, as intended"
@@ -446,9 +450,12 @@ curl -m 5 -sk https://<VPS-IP>/health || echo "blocked, as intended"
 
 Then in a browser:
 
-1. `https://kodji.app` → redirected to `/login` (that's `AUTH_REQUIRED`).
-2. Enter the address you claimed in §3e → "Check your email" page, showing
-   the 20-minute expiry.
+1. `https://kodji.app` → the overview renders **without** signing in. That
+   is by design: public market data is the free tier, gating doesn't put a
+   login wall in front of it. `https://kodji.app/watchlists` is the one
+   that must bounce you to `/login` — that's `AUTH_REQUIRED` working.
+2. On `/login`, enter the address you claimed in §3e → "Check your email"
+   page, showing the 20-minute expiry.
 3. The mail: from `Kodji <connexion@mail.kodji.app>`, Reply-To
    `support@kodji.app`, link starting `https://kodji.app/login/t/`.
    **In the inbox, not spam** — if spam, see Appendix C.
