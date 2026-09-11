@@ -154,6 +154,9 @@ def _client(monkeypatch, tmp_path, *, sign_in: bool):
     monkeypatch.setenv("FLW_PUBLIC_KEY", "")
     monkeypatch.setenv("FLW_SECRET_KEY", "")
     monkeypatch.setenv("FLW_WEBHOOK_HASH", "")
+    monkeypatch.setenv("BILLING_PROVIDER", "flutterwave")
+    monkeypatch.setenv("PAYSTACK_SECRET_KEY", "")
+    monkeypatch.setenv("PAYSTACK_PUBLIC_KEY", "")
     reset_module_state()
     _seed(db_path)
 

@@ -182,7 +182,20 @@ class Settings(BaseSettings):
     # is enough for a job that runs once a day.
     ops_alert_repeat_hours: int = 24
 
-    # --- Billing (PR-Z) — Flutterwave, XOF, pay per period ---
+    # --- Billing (PR-Z) — XOF, pay per period, one of two gateways ---
+    # `flutterwave` or `paystack`. The provider that issued a checkout is
+    # stored on the payment row, so switching this mid-flight is safe.
+    billing_provider: str = "flutterwave"
+    # Paystack (Côte d'Ivoire): sk_test_/pk_test_ keys from the dashboard.
+    # The webhook is authenticated with the secret key itself (HMAC), so
+    # there is no separate hash to configure — just set the URL to
+    # <PUBLIC_BASE_URL>/billing/webhook/paystack on Settings → Webhooks.
+    paystack_secret_key: str = ""
+    paystack_public_key: str = ""
+    paystack_api_base: str = "https://api.paystack.co"
+    # Hosted-page channels, comma separated. Paystack bills XOF in
+    # hundredths; the adapter handles the x100.
+    paystack_channels: str = "card,mobile_money"
     # Test keys are prefixed FLWPUBK_TEST / FLWSECK_TEST; live keys have no
     # suffix. Blank → checkout is closed (pricing page says so), the
     # webhook answers 401, and nothing else changes.
@@ -229,8 +242,19 @@ class Settings(BaseSettings):
         return bool(self.resend_api_key and self.email_from)
 
     @property
-    def has_billing(self) -> bool:
+    def has_flutterwave(self) -> bool:
         return bool(self.flw_secret_key and self.flw_public_key)
+
+    @property
+    def has_paystack(self) -> bool:
+        return bool(self.paystack_secret_key)
+
+    @property
+    def has_billing(self) -> bool:
+        """Checkout open: the *configured* provider has its keys."""
+        if self.billing_provider.lower() == "paystack":
+            return self.has_paystack
+        return self.has_flutterwave
 
     @property
     def cookie_secure(self) -> bool:

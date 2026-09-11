@@ -654,6 +654,12 @@ open and nothing else changes. To open it:
    and the webhook hash, restart, and make one real 12 000 XOF payment
    yourself before announcing.
 3. Prices are `PRICE_MONTH_XOF` / `PRICE_YEAR_XOF`, integer francs.
+4. **Paystack instead** (Flutterwave declined sub-$5M CI merchants in
+   Sep 2026): `BILLING_PROVIDER=paystack`, `PAYSTACK_SECRET_KEY`,
+   `PAYSTACK_PUBLIC_KEY`; dashboard → Settings → Webhooks →
+   `https://kodji.app/billing/webhook/paystack`. No hash to copy — the
+   webhook is HMAC-signed with the secret key. Live keys need the
+   business verified (RCCM, tax id, local bank account, director id).
 
 Support questions: `/billing` for the customer's view; on the box,
 `sqlite3 data/kodji.sqlite "select tx_ref,status,amount_xof,paid_utc,period_end_utc from payments order by id desc limit 20"`.
@@ -704,6 +710,9 @@ FLW_PUBLIC_KEY=
 FLW_SECRET_KEY=
 FLW_ENCRYPTION_KEY=
 FLW_WEBHOOK_HASH=
+BILLING_PROVIDER=paystack
+PAYSTACK_SECRET_KEY=
+PAYSTACK_PUBLIC_KEY=
 PRICE_MONTH_XOF=12000
 PRICE_YEAR_XOF=120000
 
