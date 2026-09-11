@@ -25,6 +25,8 @@ from kodji.services.alerts import deliver_pending as deliver_alerts
 from kodji.services.alerts import evaluate_all as evaluate_alerts
 from kodji.services.analyst_notes import generate_for_all as generate_analyst_notes
 from kodji.services.auth import purge_expired as purge_expired_sessions
+from kodji.services.billing import expire_lapsed as expire_lapsed_plans
+from kodji.services.billing import remind_expiring as remind_expiring_plans
 from kodji.services.brief import generate_for as generate_brief
 from kodji.services.company_facts import refresh_all as refresh_company_facts
 from kodji.services.enrichment import enrich_sectors
@@ -168,6 +170,17 @@ def _sessions_purge_job() -> dict:
     """
     sessions, tokens = purge_expired_sessions()
     return {"sessions": sessions, "login_tokens": tokens}
+
+
+def _billing_expire_job() -> dict:
+    """PR-Z: stamp lapsed paid periods `expired` and tell the customer
+    once. Access was already cut by `plan_for`; this is the books."""
+    return expire_lapsed_plans()
+
+
+def _billing_remind_job() -> dict:
+    """PR-Z: the 7-day and 1-day renewal reminders, once each."""
+    return remind_expiring_plans()
 
 
 def _watchdog_job(sched: BackgroundScheduler):
@@ -340,6 +353,11 @@ def build_scheduler() -> BackgroundScheduler:
     # Session/challenge purge: daily at 03:30 Abidjan, deep in the quiet
     # window between the hourly snapshot and the morning jobs.
     _add(sched, "sessions_purge_daily", _sessions_purge_job, _cron(hour="3", minute="30"), **daily)
+    # PR-Z: lapsed paid periods, hourly at :50 — cheap indexed query, and
+    # an expiry should not wait a day to be acknowledged. Reminders once a
+    # day at 08:00 Abidjan, when a renewal is most likely to be acted on.
+    _add(sched, "billing_expire_hourly", _billing_expire_job, _cron(minute="50"))
+    _add(sched, "billing_remind_daily", _billing_remind_job, _cron(hour="8", minute="0"), **daily)
     # PR-AB: the watchdog. Every 15 min, plus one pass shortly after boot
     # so `/health` has a fresh heartbeat and a run interrupted by the
     # restart is closed right away rather than at the next quarter-hour.

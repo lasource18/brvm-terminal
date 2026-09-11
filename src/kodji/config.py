@@ -182,6 +182,25 @@ class Settings(BaseSettings):
     # is enough for a job that runs once a day.
     ops_alert_repeat_hours: int = 24
 
+    # --- Billing (PR-Z) — Flutterwave, XOF, pay per period ---
+    # Test keys are prefixed FLWPUBK_TEST / FLWSECK_TEST; live keys have no
+    # suffix. Blank → checkout is closed (pricing page says so), the
+    # webhook answers 401, and nothing else changes.
+    flw_public_key: str = ""
+    flw_secret_key: str = ""
+    # Needed only for direct card charges (not the hosted checkout); kept
+    # so the dashboard's three keys have a home.
+    flw_encryption_key: str = ""
+    # The "secret hash" set on the dashboard's webhook page. Flutterwave
+    # sends it back in the `verif-hash` header on every event.
+    flw_webhook_hash: str = ""
+    flw_api_base: str = "https://api.flutterwave.com/v3"
+    # Prices in INTEGER francs — XOF is zero-decimal. Positioned just above
+    # Sikafinance Premium (100 000/yr) and Richbourse (79 000/yr); see
+    # docs/kodji-plan.md "Answered".
+    price_month_xof: int = 12_000
+    price_year_xof: int = 120_000
+
     http_user_agent: str = Field(default="kodji-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 
@@ -202,6 +221,10 @@ class Settings(BaseSettings):
         """Both halves are needed: a key without a verified sender address
         produces a 422 from Resend on every message."""
         return bool(self.resend_api_key and self.email_from)
+
+    @property
+    def has_billing(self) -> bool:
+        return bool(self.flw_secret_key and self.flw_public_key)
 
     @property
     def cookie_secure(self) -> bool:

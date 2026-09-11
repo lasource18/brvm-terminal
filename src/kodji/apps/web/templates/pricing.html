@@ -22,7 +22,9 @@
 
     <div class="plan-card{% if plan == 'paid' %} current{% endif %}">
       <h2>{{ "Paid"|t }}</h2>
-      {% if plan == 'paid' %}<div class="plan-badge">{{ "Your plan"|t }}</div>{% endif %}
+      {% if plan == 'paid' %}
+        <div class="plan-badge">{{ "Your plan"|t }}{% if period_end_day %} · {{ "Active until"|t }} {{ period_end_day }}{% endif %}</div>
+      {% endif %}
       <ul>
         <li>{{ "Charts — 25 years of daily history"|t }}</li>
         <li>{{ "Financials and ratios"|t }}</li>
@@ -33,14 +35,45 @@
         <li>{{ "Alerts"|t }}</li>
         <li>{{ "Unlimited watchlists"|t }}</li>
       </ul>
+      <p class="plan-price">
+        <strong>{{ price_month }}</strong> {{ "per month"|t }}
+        <span class="dim">·</span>
+        <strong>{{ price_year }}</strong> {{ "per year"|t }}
+      </p>
+
+      {% if billing_open %}
+        {% if signed_in %}
+          {# PR-Z: one payment per period through the hosted Flutterwave
+             checkout. POST so a prefetch can't start a checkout; the
+             account and email come from the session, not the form. #}
+          <div class="plan-buy">
+            <form method="post" action="/billing/checkout">
+              <input type="hidden" name="period" value="month">
+              <button type="submit" class="upgrade-cta">
+                {{ ("Extend by 1 month" if plan == 'paid' else "Pay 1 month")|t }} · {{ price_month }}
+              </button>
+            </form>
+            <form method="post" action="/billing/checkout">
+              <input type="hidden" name="period" value="year">
+              <button type="submit" class="upgrade-cta">
+                {{ ("Extend by 12 months" if plan == 'paid' else "Pay 12 months")|t }} · {{ price_year }}
+              </button>
+            </form>
+          </div>
+          <p class="dim plan-note">
+            {{ "Orange Money, Wave, MTN MoMo or card. One payment, no automatic renewal — "
+               "we email you before the period ends."|t }}
+            <a href="/billing">{{ "Payment history"|t }}</a>
+          </p>
+        {% else %}
+          <p class="plan-buy"><a class="upgrade-cta" href="/login">{{ "Sign in to subscribe"|t }}</a></p>
+        {% endif %}
+      {% else %}
+        <p class="dim plan-note">
+          {{ "Checkout is not open yet. Mobile money and card payment arrive "
+             "with the billing release."|t }}
+        </p>
+      {% endif %}
     </div>
   </div>
-
-  {# Checkout lands with PR-Z (Flutterwave). Saying so beats a button
-     that does nothing, and beats no page at all behind every upgrade
-     link in the app. #}
-  <p class="dim" style="margin-top: 20px;">
-    {{ "Checkout is not open yet. Mobile money and card payment arrive "
-       "with the billing release."|t }}
-  </p>
 {% endblock %}

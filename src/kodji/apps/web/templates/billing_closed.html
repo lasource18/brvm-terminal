@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ "Checkout unavailable"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    <h1 class="page-title">{{ "Checkout unavailable"|t }}</h1>
+    <p class="auth-lede">
+      {{ "Payments are not available right now. Nothing was charged. Please try again in a few minutes."|t }}
+    </p>
+    <a class="upgrade-cta" href="/pricing">{{ "Back to plans"|t }}</a>
+  </div>
+{% endblock %}

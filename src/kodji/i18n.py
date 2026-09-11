@@ -84,6 +84,70 @@ _FR: dict[str, str] = {
         "référence obligataires restent gratuits.",
     "See plans": "Voir les offres",
     "Plans": "Offres",
+    # ---- billing (PR-Z) ----
+    "Billing": "Facturation",
+    "Payment": "Paiement",
+    "Payment received": "Paiement reçu",
+    "Your paid plan is active": "Votre abonnement est actif",
+    "until": "jusqu'au",
+    "Charts, ratios, the daily brief, the analyst view and alerts are open.":
+        "Graphiques, ratios, résumé quotidien, vue analyste et alertes sont ouverts.",
+    "Go to the terminal": "Aller au terminal",
+    "Payment in progress": "Paiement en cours",
+    "Your payment has not been confirmed yet. Mobile money can take a minute; "
+    "the plan activates automatically once it is.":
+        "Votre paiement n'est pas encore confirmé. Le mobile money peut prendre "
+        "une minute ; l'abonnement s'active automatiquement dès confirmation.",
+    "Check status": "Voir l'état",
+    "Payment not completed": "Paiement non abouti",
+    "The payment was cancelled or declined. Nothing was charged.":
+        "Le paiement a été annulé ou refusé. Rien n'a été débité.",
+    "Try again": "Réessayer",
+    "Payment could not be verified": "Paiement non vérifiable",
+    "We could not confirm this payment with the provider. If you were charged, "
+    "it will be applied automatically; otherwise contact support with your reference.":
+        "Nous n'avons pas pu confirmer ce paiement auprès du prestataire. Si vous "
+        "avez été débité, il sera appliqué automatiquement ; sinon contactez le "
+        "support avec votre référence.",
+    "Checkout unavailable": "Paiement indisponible",
+    "Payments are not available right now. Nothing was charged. Please try again "
+    "in a few minutes.":
+        "Le paiement est indisponible pour le moment. Rien n'a été débité. "
+        "Réessayez dans quelques minutes.",
+    "Back to plans": "Retour aux offres",
+    "Plan": "Offre",
+    "paid": "payante",
+    "free": "gratuite",
+    "active until": "active jusqu'au",
+    "expired": "expirée",
+    "Extend or upgrade": "Prolonger ou passer à l'offre payante",
+    "Payments": "Paiements",
+    "Date": "Date",
+    "Period": "Période",
+    "Amount": "Montant",
+    "Method": "Moyen",
+    "Status": "État",
+    "Covers": "Couvre",
+    "Reference": "Référence",
+    "1 month": "1 mois",
+    "12 months": "12 mois",
+    "pending": "en attente",
+    "successful": "réussi",
+    "failed": "échoué",
+    "No payments yet.": "Aucun paiement pour l'instant.",
+    "per month": "par mois",
+    "per year": "par an",
+    "Pay 1 month": "Payer 1 mois",
+    "Pay 12 months": "Payer 12 mois",
+    "Extend by 1 month": "Prolonger d'1 mois",
+    "Extend by 12 months": "Prolonger de 12 mois",
+    "Orange Money, Wave, MTN MoMo or card. One payment, no automatic renewal — "
+    "we email you before the period ends.":
+        "Orange Money, Wave, MTN MoMo ou carte. Un seul paiement, sans "
+        "renouvellement automatique : nous vous écrivons avant la fin de la période.",
+    "Sign in to subscribe": "Connectez-vous pour vous abonner",
+    "Active until": "Actif jusqu'au",
+    "Payment history": "Historique des paiements",
     "Free": "Gratuit",
     "Paid": "Payant",
     "Your plan": "Votre offre",

@@ -24,6 +24,7 @@ from kodji.services import (
     alerts as alerts_svc,
 )
 from kodji.services import analyst_notes as notes_svc
+from kodji.services import billing as billing_svc
 from kodji.services import bonds as bonds_svc
 from kodji.services import brief as brief_svc
 from kodji.services import company, directory, fundamentals, market, ratios, watchlist
@@ -402,6 +403,10 @@ def pricing_page(request: Request):
     Ungated on purpose: it is the destination of every upgrade link in
     the app, and a paywalled pricing page would be a loop.
     """
+    identity = accounts_svc.identity_for(request)
+    period_end_day = None
+    if identity is not None:
+        period_end_day = billing_svc.status_for(identity.account_id).period_end_day
     return templates.TemplateResponse(
         request,
         "pricing.html",
@@ -409,6 +414,13 @@ def pricing_page(request: Request):
             **base_ctx(request),
             "plan": "paid" if is_paid(request) else "free",
             "free_watchlist_limit": watchlist.FREE_WATCHLIST_LIMIT,
+            # PR-Z: the buttons. Signed-in + keys configured → checkout
+            # forms; signed out → sign-in link; no keys → "not open yet".
+            "billing_open": settings.has_billing,
+            "signed_in": identity is not None,
+            "period_end_day": period_end_day,
+            "price_month": billing_svc.fmt_xof(billing_svc.PERIODS["month"].price_xof),
+            "price_year": billing_svc.fmt_xof(billing_svc.PERIODS["year"].price_xof),
         },
     )
 

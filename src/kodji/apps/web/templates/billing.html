@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ "Billing"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <h1 class="page-title">{{ "Billing"|t }}</h1>
+  <p class="auth-lede">
+    {{ "Plan"|t }}: <strong>{{ billing.plan|t }}</strong>
+    {% if billing.plan == "paid" and billing.period_end_day %}
+      · {{ "active until"|t }} <strong>{{ billing.period_end_day }}</strong>
+    {% elif billing.status == "expired" %}
+      · {{ "expired"|t }}
+    {% endif %}
+  </p>
+  <p><a class="upgrade-cta" href="/pricing">{{ "Extend or upgrade"|t }}</a></p>
+
+  <h2 class="section-title" style="margin-top: 24px;">{{ "Payments"|t }}</h2>
+  {% if billing.payments %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>{{ "Date"|t }}</th>
+            <th>{{ "Period"|t }}</th>
+            <th class="num">{{ "Amount"|t }}</th>
+            <th>{{ "Method"|t }}</th>
+            <th>{{ "Status"|t }}</th>
+            <th>{{ "Covers"|t }}</th>
+            <th>{{ "Reference"|t }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in billing.payments %}
+            <tr>
+              <td>{{ (p["paid_utc"] or p["created_utc"])[:10] }}</td>
+              <td>{{ ("1 month" if p["period"] == "month" else "12 months")|t }}</td>
+              <td class="num">{{ fmt_xof(p["amount_xof"]) }}</td>
+              <td>{{ p["payment_type"] or "—" }}</td>
+              <td>{{ p["status"]|t }}</td>
+              <td>{% if p["period_end_utc"] %}{{ p["period_start_utc"][:10] }} → {{ p["period_end_utc"][:10] }}{% else %}—{% endif %}</td>
+              <td class="dim">{{ p["tx_ref"] }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="dim">{{ "No payments yet."|t }}</p>
+  {% endif %}
+{% endblock %}

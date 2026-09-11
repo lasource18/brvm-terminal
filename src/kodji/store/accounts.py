@@ -198,6 +198,12 @@ def plan_for(conn: sqlite3.Connection, account_id: int) -> str:
         return FREE_PLAN
     if row["status"] not in _ACTIVE_STATUSES:
         return FREE_PLAN
+    # PR-Z: a paid period that has ended is free the moment it ends, not
+    # when the hourly expiry job gets round to stamping it. NULL means no
+    # end (the operator's account from 0019).
+    end = row["current_period_end_utc"]
+    if end and end < utc_iso():
+        return FREE_PLAN
     return str(row["plan"] or FREE_PLAN)
 
 
@@ -230,3 +236,65 @@ def set_plan(
          current_period_end_utc, now, now),
     )
     conn.commit()
+
+
+def member_emails(conn: sqlite3.Connection, account_id: int) -> list[str]:
+    """Every member's address — who billing mail goes to."""
+    return [
+        str(r["email"])
+        for r in conn.execute(
+            """
+            SELECT u.email FROM users u
+            JOIN account_members m ON m.user_id = u.id
+            WHERE m.account_id = ?
+            ORDER BY m.created_utc, u.id
+            """,
+            (account_id,),
+        ).fetchall()
+    ]
+
+
+def lapsed_paid_subscriptions(conn: sqlite3.Connection, now_utc: str) -> list[sqlite3.Row]:
+    """Paid, still marked active, but the period ended before `now_utc`."""
+    return list(
+        conn.execute(
+            """
+            SELECT * FROM subscriptions
+            WHERE plan = ? AND status IN ('active', 'past_due')
+              AND current_period_end_utc IS NOT NULL
+              AND current_period_end_utc < ?
+            ORDER BY current_period_end_utc
+            """,
+            (PAID_PLAN, now_utc),
+        ).fetchall()
+    )
+
+
+def paid_subscriptions_ending_before(
+    conn: sqlite3.Connection, horizon_utc: str, now_utc: str
+) -> list[sqlite3.Row]:
+    """Paid and active, ending between now and `horizon_utc` — the
+    reminder window."""
+    return list(
+        conn.execute(
+            """
+            SELECT * FROM subscriptions
+            WHERE plan = ? AND status = 'active'
+              AND current_period_end_utc IS NOT NULL
+              AND current_period_end_utc >= ? AND current_period_end_utc <= ?
+            ORDER BY current_period_end_utc
+            """,
+            (PAID_PLAN, now_utc, horizon_utc),
+        ).fetchall()
+    )
+
+
+def mark_expired(conn: sqlite3.Connection, account_id: int) -> int:
+    """Bookkeeping for a lapsed period. The plan column is left at 'paid'
+    so the history reads correctly; `plan_for` already returns free."""
+    cur = conn.execute(
+        "UPDATE subscriptions SET status = 'expired', updated_utc = ? WHERE account_id = ?",
+        (utc_iso(), account_id),
+    )
+    conn.commit()
+    return cur.rowcount
