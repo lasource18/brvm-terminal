@@ -253,6 +253,15 @@ def test_health_json(client):
     assert body["status"] == "ok"
     # PR-AB: migrated DB, no open problems, process just started → ok.
     assert body["jobs"] == {"status": "ok", "open": [], "checked_utc": None}
+    assert r.headers["content-type"].startswith("application/json")
+
+
+def test_health_keyword_contract(client):
+    """The production UptimeRobot keyword monitor matches this exact
+    substring (spaces included) and alerts when it is absent. FastAPI's
+    default JSONResponse is compact and would break it silently."""
+    r = client.get("/health")
+    assert '"status": "ok", "open"' in r.text
 
 
 def test_topbar_search_input_present(client):
