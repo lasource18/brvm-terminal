@@ -778,6 +778,29 @@ price, same `tx_ref`. Activation is idempotent, so redirect and webhook
 can both arrive in any order. `/billing` shows the account's plan, period
 end and payment history.
 
+**Two gateways, one setting.** `BILLING_PROVIDER=flutterwave|paystack`.
+Both adapters answer the same three calls (checkout link, verify a
+reference, authenticate a webhook) and normalise to one shape, so the
+plan lifecycle, pages and jobs are provider-blind. A payment remembers
+which provider issued it, so the switch is safe mid-flight. Paystack
+(Côte d'Ivoire: Orange Money, Wave, MTN MoMo, cards):
+
+```bash
+BILLING_PROVIDER=paystack
+PAYSTACK_SECRET_KEY=sk_test_...
+PAYSTACK_PUBLIC_KEY=pk_test_...
+PAYSTACK_CHANNELS=card,mobile_money
+# dashboard → Settings → Webhooks: https://kodji.app/billing/webhook/paystack
+# (authenticated by HMAC-SHA512 with the secret key — no separate hash)
+```
+
+Paystack bills XOF in hundredths (its checkout shows "XOF 120" for an
+amount of 12000); the adapter multiplies by 100 on the way out and divides
+on the way back, so prices stay integer francs everywhere else. Each
+provider has its own webhook URL (`/billing/webhook/flutterwave`,
+`/billing/webhook/paystack`); the bare `/billing/webhook` is whichever
+`BILLING_PROVIDER` names.
+
 Signed in and paid, the topbar link becomes **My plan** (`/billing`):
 period end, the two extend buttons, payment history, and the note that
 there is no automatic renewal and nothing to cancel — the plan simply ends
