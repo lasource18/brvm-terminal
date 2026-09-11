@@ -616,8 +616,9 @@ an `ERROR` line in the journal. Ship it in the same step as migration
 The verdict is also on `/health` as `"jobs": {"status": "ok", ...}`, which
 lets the uptime monitor be the second channel for free: add a second
 UptimeRobot monitor of type *Keyword* on the same URL, keyword
-`"status":"ok","open"` — **no spaces**, the JSON is serialised compact —
-alert when the keyword is **absent**. It fires
+`"status": "ok", "open"` (with the spaces — the endpoint deliberately
+uses standard `json.dumps` spacing and a test pins it), alert when the
+keyword is **absent**. It fires
 on `degraded` (a problem is open), `stale` (the scheduler thread died
 while uvicorn kept answering) and `unknown` (DB unreadable).
 

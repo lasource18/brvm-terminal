@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from kodji import __version__
 from kodji.apps.web import tabs
@@ -420,12 +422,15 @@ def health():
     an uptime monitor keyword-matches separately from "is it up". Only
     problem keys are exposed; the endpoint is public.
     """
-    return JSONResponse(
-        {
-            "status": "ok",
-            "version": __version__,
-            "utc": utc_iso(),
-            "market_open": is_market_open(),
-            "jobs": watchdog_svc.health_summary(),
-        }
-    )
+    payload = {
+        "status": "ok",
+        "version": __version__,
+        "utc": utc_iso(),
+        "market_open": is_market_open(),
+        "jobs": watchdog_svc.health_summary(),
+    }
+    # Standard `json.dumps` spacing on purpose, not FastAPI's compact
+    # JSONResponse: the external keyword monitor matches the literal
+    # substring `"status": "ok", "open"` and cannot be re-pointed cheaply.
+    # `test_health_keyword_contract` pins this.
+    return Response(content=json.dumps(payload), media_type="application/json")
