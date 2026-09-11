@@ -634,6 +634,29 @@ follow-up to a `brief_daily missed` alert: `just brief-run` by hand. The
 watchdog only sees runs that went through the scheduler, so the problem
 clears — with a recovery notice — at the next scheduled run that succeeds.
 
+### Billing — Flutterwave (PR-Z)
+
+Ships closed: with no `FLW_*` keys the pricing page says checkout is not
+open and nothing else changes. To open it:
+
+1. **Sandbox first.** Create the sandbox account
+   (`onboarding.flutterwave.com`), copy the three `_TEST` keys into `.env`,
+   and on the dashboard set *Settings → Webhooks* to
+   `https://kodji.app/billing/webhook` with a random secret hash
+   (`openssl rand -hex 24`); put the same value in `FLW_WEBHOOK_HASH`.
+   Restart. A test payment from `/pricing` (any mobile number, OTP
+   `123456`) must land as `successful` on `/billing`.
+2. **Live keys** need the Côte d'Ivoire merchant account (sales-assisted;
+   see the requirements page in Flutterwave's help center). Swap the keys
+   and the webhook hash, restart, and make one real 12 000 XOF payment
+   yourself before announcing.
+3. Prices are `PRICE_MONTH_XOF` / `PRICE_YEAR_XOF`, integer francs.
+
+Support questions: `/billing` for the customer's view; on the box,
+`sqlite3 data/kodji.sqlite "select tx_ref,status,amount_xof,paid_utc,period_end_utc from payments order by id desc limit 20"`.
+A payment stuck `pending` with a successful charge on the dashboard is
+re-verified by hitting `https://kodji.app/billing/return?tx_ref=<ref>&transaction_id=<id>`.
+
 ### After a week
 
 - DMARC: change `_dmarc` from `p=none` to `p=quarantine` once the reports
@@ -672,6 +695,14 @@ OCR_BINARY=ocrmypdf
 DISCORD_WEBHOOK_URL=
 OPS_ALERT_EMAIL=cmguinan@yahoo.fr
 OPS_ALERT_REPEAT_HOURS=24
+
+# --- billing (PR-Z) — live keys have no _TEST; webhook hash from the dashboard ---
+FLW_PUBLIC_KEY=
+FLW_SECRET_KEY=
+FLW_ENCRYPTION_KEY=
+FLW_WEBHOOK_HASH=
+PRICE_MONTH_XOF=12000
+PRICE_YEAR_XOF=120000
 
 # --- auth + email ---
 RESEND_API_KEY=re_...

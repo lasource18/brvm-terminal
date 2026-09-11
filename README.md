@@ -741,6 +741,47 @@ SGBC     SGBCI                               39,200.00   -0.25%        7,088    
 ```
 
 
+## Try it (PR-Z demo — Flutterwave billing)
+
+Paid periods are bought through Flutterwave's hosted checkout, in XOF,
+**one payment per period**. Flutterwave's recurring "payment plans" pin the
+checkout to card, which would exclude Orange Money, Wave and MTN MoMo —
+most customers here — so nothing auto-renews: a customer pays for 1 month
+or 12 months, paying again *extends* the current period, and reminder
+mail goes out 7 days and 1 day before it ends. The plan reads as free the
+moment the period ends; an hourly job stamps it `expired` and says so
+once by email.
+
+```bash
+# .env — test keys from the sandbox account (prefixed _TEST); prices in
+# INTEGER francs, XOF is zero-decimal.
+FLW_PUBLIC_KEY=FLWPUBK_TEST-...
+FLW_SECRET_KEY=FLWSECK_TEST-...
+FLW_ENCRYPTION_KEY=FLWSECK_TEST...
+FLW_WEBHOOK_HASH=<the "secret hash" you set on Settings → Webhooks>
+PRICE_MONTH_XOF=12000
+PRICE_YEAR_XOF=120000
+```
+
+```bash
+just migrate                # 0021_payments
+just dev                    # sign in, then /pricing → "Pay 1 month"
+```
+
+The flow: `POST /billing/checkout` (signed in, Origin-checked) records a
+`pending` payment with a `tx_ref` we mint and 303s to the hosted page.
+The customer comes back on `GET /billing/return`; the webhook lands on
+`POST /billing/webhook` authenticated by the `verif-hash` header. **Both
+are hints, not proof**: the plan is activated only after
+`GET /v3/transactions/{id}/verify` says `successful`, `XOF`, amount ≥
+price, same `tx_ref`. Activation is idempotent, so redirect and webhook
+can both arrive in any order. `/billing` shows the account's plan, period
+end and payment history.
+
+Test mode: any mobile number with OTP `123456` mocks a successful mobile
+money payment; test cards are in Flutterwave's docs. Without keys the
+pricing page says checkout is not open and the webhook answers 401.
+
 ## Ops — the job watchdog (PR-AB)
 
 An uptime monitor on `/health` says whether the process answers. It says

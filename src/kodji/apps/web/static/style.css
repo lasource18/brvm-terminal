@@ -559,3 +559,10 @@ article.brief-body strong { color: var(--fg); }
 .topbar .plan-link:hover { background: var(--bg-hover); }
 .wl-limit { color: var(--accent); }
 .wl-limit a { color: var(--accent); }
+
+/* PR-Z: pricing buttons */
+.plan-price { margin: 12px 0 6px; font-size: 13px; }
+.plan-buy { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.plan-buy form { margin: 0; }
+.plan-buy button.upgrade-cta { background: transparent; font: inherit; cursor: pointer; }
+.plan-note { margin-top: 10px; font-size: 12px; }

@@ -137,6 +137,11 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("EMAIL_FROM", "")
     monkeypatch.setenv("PUBLIC_BASE_URL", "")
     monkeypatch.setenv("AUTH_REQUIRED", "false")
+    # PR-Z: real Flutterwave keys in a developer's .env would open the
+    # checkout buttons in rendered pages and make tests hit the API.
+    monkeypatch.setenv("FLW_PUBLIC_KEY", "")
+    monkeypatch.setenv("FLW_SECRET_KEY", "")
+    monkeypatch.setenv("FLW_WEBHOOK_HASH", "")
     reset_module_state()
     _seed(db_path)
 

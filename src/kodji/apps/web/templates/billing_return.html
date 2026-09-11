@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ "Payment"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <div class="auth-card">
+    {% if outcome in ("activated", "already") %}
+      <h1 class="page-title">{{ "Payment received"|t }}</h1>
+      <p class="auth-lede">
+        {{ "Your paid plan is active"|t }}{% if period_end_day %} {{ "until"|t }} <strong>{{ period_end_day }}</strong>{% endif %}.
+      </p>
+      <p class="dim">{{ "Charts, ratios, the daily brief, the analyst view and alerts are open."|t }}</p>
+      <a class="upgrade-cta" href="/">{{ "Go to the terminal"|t }}</a>
+    {% elif outcome == "pending" %}
+      <h1 class="page-title">{{ "Payment in progress"|t }}</h1>
+      <p class="auth-lede">
+        {{ "Your payment has not been confirmed yet. Mobile money can take a minute; the plan activates automatically once it is."|t }}
+      </p>
+      <a class="upgrade-cta" href="/billing">{{ "Check status"|t }}</a>
+    {% elif outcome == "failed" %}
+      <h1 class="page-title">{{ "Payment not completed"|t }}</h1>
+      <p class="auth-lede">{{ "The payment was cancelled or declined. Nothing was charged."|t }}</p>
+      <a class="upgrade-cta" href="/pricing">{{ "Try again"|t }}</a>
+    {% else %}
+      <h1 class="page-title">{{ "Payment could not be verified"|t }}</h1>
+      <p class="auth-lede">
+        {{ "We could not confirm this payment with the provider. If you were charged, it will be applied automatically; otherwise contact support with your reference."|t }}
+      </p>
+      <a class="upgrade-cta" href="/billing">{{ "Check status"|t }}</a>
+    {% endif %}
+  </div>
+{% endblock %}
