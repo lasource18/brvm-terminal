@@ -644,6 +644,9 @@ open and nothing else changes. To open it:
    and on the dashboard set *Settings → Webhooks* to
    `https://kodji.app/billing/webhook` with a random secret hash
    (`openssl rand -hex 24`); put the same value in `FLW_WEBHOOK_HASH`.
+   Also **uncheck "Enable Dashboard Payment Options"** under the account
+   settings, or the hosted page ignores our `payment_options`
+   (`card, mobilemoneyxof`) and shows card only.
    Restart. A test payment from `/pricing` (any mobile number, OTP
    `123456`) must land as `successful` on `/billing`.
 2. **Live keys** need the Côte d'Ivoire merchant account (sales-assisted;

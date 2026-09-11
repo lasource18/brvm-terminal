@@ -186,8 +186,10 @@ def start_checkout(
 
     The pending row is written *before* the provider call so a redirect
     for a `tx_ref` we have no record of can be refused outright.
-    `payment_options` is deliberately not sent: the dashboard's enabled
-    methods for XOF (cards, Orange Money, Wave, MTN MoMo) then all show.
+    `payment_options` names the methods the hosted page should offer
+    (`FLW_PAYMENT_OPTIONS`, default card + XOF mobile money); Flutterwave
+    only honours it once "Enable Dashboard Payment Options" is unchecked
+    on the dashboard, otherwise a fresh sandbox shows card alone.
     """
     period = PERIODS[period_key]
     tx_ref = new_tx_ref(account_id, period_key)
@@ -210,6 +212,8 @@ def start_checkout(
         "customizations": {"title": "Kodji Terminal"},
         "meta": {"account_id": str(account_id), "period": period.key},
     }
+    if settings.flw_payment_options:
+        payload["payment_options"] = settings.flw_payment_options
     fw, owns = _client(client)
     try:
         link = fw.create_checkout(payload)
