@@ -1,0 +1,35 @@
+{#
+  PR-Z: the two "pay a period" forms. Included by /pricing and /billing.
+  Expects: billing_open, signed_in, plan, price_month, price_year.
+  POST so a prefetch can't start a checkout; the account and email come
+  from the session, not the form.
+#}
+{% if billing_open %}
+  {% if signed_in %}
+    <div class="plan-buy">
+      <form method="post" action="/billing/checkout">
+        <input type="hidden" name="period" value="month">
+        <button type="submit" class="upgrade-cta">
+          {{ ("Extend by 1 month" if plan == 'paid' else "Pay 1 month")|t }} · {{ price_month }}
+        </button>
+      </form>
+      <form method="post" action="/billing/checkout">
+        <input type="hidden" name="period" value="year">
+        <button type="submit" class="upgrade-cta">
+          {{ ("Extend by 12 months" if plan == 'paid' else "Pay 12 months")|t }} · {{ price_year }}
+        </button>
+      </form>
+    </div>
+    <p class="dim plan-note">
+      {{ "Orange Money, Wave, MTN MoMo or card. One payment, no automatic renewal — "
+         "we email you before the period ends."|t }}
+    </p>
+  {% else %}
+    <p class="plan-buy"><a class="upgrade-cta" href="/login">{{ "Sign in to subscribe"|t }}</a></p>
+  {% endif %}
+{% else %}
+  <p class="dim plan-note">
+    {{ "Checkout is not open yet. Mobile money and card payment arrive "
+       "with the billing release."|t }}
+  </p>
+{% endif %}

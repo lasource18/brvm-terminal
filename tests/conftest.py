@@ -121,7 +121,19 @@ def _seed(db_path: Path) -> None:
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    """TestClient over a fresh, seeded SQLite DB with the APScheduler mocked."""
+    """TestClient over a fresh, seeded SQLite DB with the APScheduler
+    mocked, signed in as the operator on account 1 (paid)."""
+    yield from _client(monkeypatch, tmp_path, sign_in=True)
+
+
+@pytest.fixture
+def anon_client(monkeypatch, tmp_path):
+    """Same app and DB, but no operator user, session or cookie — for
+    tests that count users/sessions or start from a blank slate."""
+    yield from _client(monkeypatch, tmp_path, sign_in=False)
+
+
+def _client(monkeypatch, tmp_path, *, sign_in: bool):
     from fastapi.testclient import TestClient
 
     db_path = tmp_path / "kodji.sqlite"
@@ -150,6 +162,42 @@ def client(monkeypatch, tmp_path):
     with patch("kodji.apps.web.main.build_scheduler") as bs:
         bs.return_value.get_jobs.return_value = []
         with TestClient(app) as c:
+            if sign_in:
+                _sign_in_as_operator(c, db_path)
             yield c
 
     reset_module_state()
+
+
+OPERATOR_EMAIL = "owner@example.ci"
+
+
+def _sign_in_as_operator(client, db_path: Path) -> None:
+    """Give the client a session on account 1 — the operator's paid
+    account from migration 0019.
+
+    PR-Z made an anonymous web request the free tier no matter what
+    account 1 holds, so the many tests that exercise paid pages need a
+    real session, exactly like the operator has in production. Tests
+    that want a signed-out visitor call `client.cookies.clear()`.
+    """
+    from datetime import timedelta
+
+    from kodji.clock import utc_iso, utcnow
+    from kodji.db import connect
+    from kodji.store import accounts as accounts_repo
+    from kodji.store import auth as auth_repo
+    from kodji.store.accounts import DEFAULT_ACCOUNT_ID
+    from kodji.store.auth import SESSION_COOKIE, hash_secret, new_token
+
+    token = new_token()
+    with connect(db_path) as conn:
+        user_id, _ = accounts_repo.attach_user_to_account(conn, OPERATOR_EMAIL, DEFAULT_ACCOUNT_ID)
+        auth_repo.create_session(
+            conn,
+            token_hash=hash_secret(token),
+            user_id=user_id,
+            account_id=DEFAULT_ACCOUNT_ID,
+            expires_utc=utc_iso(utcnow() + timedelta(days=1)),
+        )
+    client.cookies.set(SESSION_COOKIE, token)

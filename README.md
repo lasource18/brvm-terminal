@@ -778,6 +778,16 @@ price, same `tx_ref`. Activation is idempotent, so redirect and webhook
 can both arrive in any order. `/billing` shows the account's plan, period
 end and payment history.
 
+Signed in and paid, the topbar link becomes **My plan** (`/billing`):
+period end, the two extend buttons, payment history, and the note that
+there is no automatic renewal and nothing to cancel — the plan simply ends
+on the date unless extended. Signed out (or free) it stays **Plans**.
+
+**A visitor with no session is always the free tier**, whatever plan
+account 1 holds and whether or not `AUTH_REQUIRED` is on. Before PR-Z an
+anonymous request with the flag off resolved to account 1 — paid since
+migration 0019 — and saw the whole paid product. Sign in to see yours.
+
 The hosted page offers what `FLW_PAYMENT_OPTIONS` names (default
 `card, mobilemoneyxof` — Orange Money, Wave, MTN MoMo, Moov for XOF), but
 Flutterwave honours that only after you **uncheck "Enable Dashboard

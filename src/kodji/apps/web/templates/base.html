@@ -51,7 +51,12 @@
     </span>
     {# Signed-in identity, or the way in. `identity` comes from base_ctx,
        so it's present on every full-page render and absent on fragments. #}
-    {% if not is_paid %}
+    {# Free and anonymous readers get the offer; a paying account gets its
+       plan page (period end, extend, history). Never hidden: PR-Z's first
+       bug report was "once paid I can't find the plans page". #}
+    {% if is_paid %}
+      <a class="plan-link" href="/billing">{{ "My plan"|t }}</a>
+    {% else %}
       <a class="plan-link" href="/pricing">{{ "Plans"|t }}</a>
     {% endif %}
     <span class="account">

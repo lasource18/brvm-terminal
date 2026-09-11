@@ -32,7 +32,7 @@ def two_accounts(client):
     return DEFAULT_ACCOUNT_ID, other
 
 
-def test_migration_seeds_the_default_account(client):
+def test_migration_seeds_the_default_account(anon_client):
     with connect(settings.db_path) as conn:
         row = accounts_repo.get_account(conn, DEFAULT_ACCOUNT_ID)
         assert row is not None
@@ -171,7 +171,7 @@ def test_plan_reads_free_when_the_subscription_is_not_live(
         assert accounts_repo.plan_for(conn, b) == expected
 
 
-def test_signup_is_idempotent_on_email(client):
+def test_signup_is_idempotent_on_email(anon_client):
     from kodji.services import accounts as accounts_svc
 
     first = accounts_svc.signup("Trader@Example.CI")
@@ -186,7 +186,7 @@ def test_signup_is_idempotent_on_email(client):
 # --- claiming the operator account (scripts/claim_owner.py) ----------------
 
 
-def test_attach_user_to_account_hands_the_operator_account_1(client):
+def test_attach_user_to_account_hands_the_operator_account_1(anon_client):
     with connect(settings.db_path) as conn:
         user_id, created = accounts_repo.attach_user_to_account(
             conn, "owner@example.ci", DEFAULT_ACCOUNT_ID
@@ -202,7 +202,7 @@ def test_attach_user_to_account_hands_the_operator_account_1(client):
         ) == (user_id, False)
 
 
-def test_attach_wins_over_a_personal_account_created_by_signing_in_too_early(client):
+def test_attach_wins_over_a_personal_account_created_by_signing_in_too_early(anon_client):
     """The operator signed in once before running the claim: a personal
     account now exists. Account 1 sorts first in `accounts_for_user`, so
     the next sign-in still lands on their real data."""
