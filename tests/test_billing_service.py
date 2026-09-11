@@ -526,3 +526,63 @@ def test_abandon_closes_only_a_pending_row(db):
     # ...after which abandon is a no-op.
     assert billing.abandon(out.tx_ref).outcome == "already"
     assert billing.abandon("kodji-1-month-nope").outcome == "unknown"
+
+
+def test_not_found_at_the_provider_is_pending_not_unknown(db):
+    """The sandbox records a mobile money charge a few seconds after the
+    redirect; until then verify answers 400 'No transaction was found'."""
+    _, account_id = db
+    fw = FakeFlutterwave()
+    out = start_checkout(
+        account_id, EMAIL, "month", base_url="https://kodji.test", client=fw.client()
+    )
+
+    def not_found(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400, json={"status": "error", "message": "No transaction was found for this id"}
+        )
+
+    late = FlutterwaveClient(
+        "k", base_url=API, client=httpx.Client(transport=httpx.MockTransport(not_found))
+    )
+    res = confirm(out.tx_ref, client=late)
+    assert res.outcome == "pending" and res.note == "not_yet_recorded"
+
+
+def test_confirm_retries_while_pending(db, monkeypatch):
+    _, account_id = db
+    fw = FakeFlutterwave()
+    out = start_checkout(
+        account_id, EMAIL, "month", base_url="https://kodji.test", client=fw.client()
+    )
+    answers = iter(
+        [
+            httpx.Response(
+                400, json={"status": "error", "message": "No transaction was found for this id"}
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "success",
+                    "data": _paid_payload(out.tx_ref, 12_000, status="pending"),
+                },
+            ),
+            httpx.Response(
+                200, json={"status": "success", "data": _paid_payload(out.tx_ref, 12_000)}
+            ),
+        ]
+    )
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return next(answers)
+
+    slept = []
+    monkeypatch.setattr(billing.time, "sleep", lambda s: slept.append(s))
+    flaky = FlutterwaveClient(
+        "k", base_url=API, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    res = confirm(out.tx_ref, client=flaky, attempts=4, delay_s=2.0)
+    assert res.outcome == "activated"
+    assert len(calls) == 3 and slept == [2.0, 2.0]

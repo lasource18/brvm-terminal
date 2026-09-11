@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{{ "Payment"|t }} · kodji-terminal{% endblock %}
+{% block head_extra %}
+  {% if outcome == "pending" %}
+    {# Re-run the verification every 8 s while the provider settles. #}
+    <meta http-equiv="refresh" content="8; url={{ recheck_url }}">
+  {% endif %}
+{% endblock %}
 {% block content %}
   <div class="auth-card">
     {% if outcome in ("activated", "already") %}
@@ -14,7 +20,8 @@
       <p class="auth-lede">
         {{ "Your payment has not been confirmed yet. Mobile money can take a minute; the plan activates automatically once it is."|t }}
       </p>
-      <a class="upgrade-cta" href="/billing">{{ "Check status"|t }}</a>
+      <p class="dim">{{ "This page checks again on its own every few seconds."|t }}</p>
+      <a class="upgrade-cta" href="{{ recheck_url }}">{{ "Check now"|t }}</a>
     {% elif outcome == "failed" %}
       <h1 class="page-title">{{ "Payment not completed"|t }}</h1>
       <p class="auth-lede">{{ "The payment was cancelled or declined. Nothing was charged."|t }}</p>

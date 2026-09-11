@@ -99,6 +99,9 @@ _FR: dict[str, str] = {
         "Votre paiement n'est pas encore confirmé. Le mobile money peut prendre "
         "une minute ; l'abonnement s'active automatiquement dès confirmation.",
     "Check status": "Voir l'état",
+    "Check now": "Vérifier maintenant",
+    "This page checks again on its own every few seconds.":
+        "Cette page revérifie d'elle-même toutes les quelques secondes.",
     "Payment not completed": "Paiement non abouti",
     "The payment was cancelled or declined. Nothing was charged.":
         "Le paiement a été annulé ou refusé. Rien n'a été débité.",
