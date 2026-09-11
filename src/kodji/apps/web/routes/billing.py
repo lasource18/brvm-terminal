@@ -113,5 +113,14 @@ def billing_page(request: Request):
     return templates.TemplateResponse(
         request,
         "billing.html",
-        {**base_ctx(request), "billing": status, "fmt_xof": billing_svc.fmt_xof},
+        {
+            **base_ctx(request),
+            "billing": status,
+            "fmt_xof": billing_svc.fmt_xof,
+            "billing_open": settings.has_billing,
+            "signed_in": True,
+            "plan": status.plan,
+            "price_month": billing_svc.fmt_xof(billing_svc.PERIODS["month"].price_xof),
+            "price_year": billing_svc.fmt_xof(billing_svc.PERIODS["year"].price_xof),
+        },
     )

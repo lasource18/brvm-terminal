@@ -151,6 +151,17 @@ _FR: dict[str, str] = {
     "Sign in to subscribe": "Connectez-vous pour vous abonner",
     "Active until": "Actif jusqu'au",
     "Payment history": "Historique des paiements",
+    "My plan": "Mon abonnement",
+    "My plan and payment history": "Mon abonnement et l'historique des paiements",
+    "Expired": "Expiré",
+    "No automatic renewal and nothing to cancel: the plan simply ends on that date "
+    "unless you extend it. Extending adds time to the end of the current period.":
+        "Pas de renouvellement automatique et rien à résilier : l'abonnement prend "
+        "simplement fin à cette date sauf si vous le prolongez. Prolonger ajoute du "
+        "temps à la fin de la période en cours.",
+    "Your last paid period has ended. Pay again to reopen the paid features.":
+        "Votre dernière période payée est terminée. Payez à nouveau pour rouvrir "
+        "les fonctions payantes.",
     "Free": "Gratuit",
     "Paid": "Payant",
     "Your plan": "Votre offre",

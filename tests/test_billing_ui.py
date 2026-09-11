@@ -27,6 +27,7 @@ def outbox(monkeypatch):
 
 
 def _sign_in(client, outbox, email: str = EMAIL) -> None:
+    client.cookies.clear()  # drop the operator session from conftest
     client.post("/login", data={"email": email})
     text = outbox.sent[-1].text
     link = next(w for w in text.split() if "/login/t/" in w)
@@ -73,11 +74,16 @@ def _free_default():
         accounts_repo.set_plan(conn, DEFAULT_ACCOUNT_ID, "free")
 
 
+def _signed_out(client):
+    client.cookies.clear()
+
+
 # --- pricing page -----------------------------------------------------------
 
 
 def test_pricing_without_keys_says_checkout_is_closed(client):
     _free_default()
+    _signed_out(client)
     r = client.get("/pricing")
     assert r.status_code == 200
     assert "Checkout is not open yet" in r.text
@@ -87,6 +93,7 @@ def test_pricing_without_keys_says_checkout_is_closed(client):
 
 def test_pricing_signed_out_with_keys_points_to_sign_in(client, billing_on):
     _free_default()
+    _signed_out(client)
     r = client.get("/pricing")
     assert "Sign in to subscribe" in r.text
     assert 'action="/billing/checkout"' not in r.text
@@ -106,6 +113,7 @@ def test_pricing_signed_in_with_keys_shows_both_buttons(client, billing_on, outb
 
 
 def test_checkout_requires_a_session(client, billing_on, fake):
+    _signed_out(client)
     r = client.post("/billing/checkout", data={"period": "month"}, follow_redirects=False)
     assert r.status_code == 303
     assert r.headers["location"] == "/login"
@@ -261,6 +269,7 @@ def test_webhook_activates_without_a_browser(client, billing_on, fake, outbox):
 
 
 def test_billing_page_lists_payments(client, billing_on, fake, outbox):
+    _signed_out(client)
     assert client.get("/billing", follow_redirects=False).status_code == 303
     _sign_in(client, outbox)
     tx_ref = _start(client, fake, "year")
@@ -279,7 +288,9 @@ def test_billing_page_lists_payments(client, billing_on, fake, outbox):
     assert "120 000 XOF" in r.text
     assert tx_ref in r.text
     assert "successful" in r.text
-    assert "active until" in r.text
+    assert "Active until" in r.text
+    assert r.text.count('action="/billing/checkout"') == 2   # extend from here too
+    assert "nothing to cancel" in r.text
 
 
 def test_scheduler_registers_the_billing_jobs():

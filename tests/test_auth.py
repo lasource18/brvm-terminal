@@ -66,7 +66,7 @@ def test_code_signs_in_too(client, mailer):
     assert grant is not None
 
 
-def test_returning_user_keeps_one_account(client, mailer):
+def test_returning_user_keeps_one_account(anon_client, mailer):
     first = auth_svc.complete_with_token(_challenge(mailer).token)
     second = auth_svc.complete_with_token(_challenge(mailer).token)
 
@@ -80,7 +80,7 @@ def test_returning_user_keeps_one_account(client, mailer):
         assert n == 1
 
 
-def test_email_is_normalized(client, mailer):
+def test_email_is_normalized(anon_client, mailer):
     grant = auth_svc.complete_with_token(_challenge(mailer, "  Trader@Example.CI ").token)
     assert grant is not None
     with connect(settings.db_path) as conn:
@@ -311,7 +311,7 @@ def test_bad_addresses_are_rejected_before_anything_is_stored(client, mailer):
         assert conn.execute("SELECT count(*) FROM login_tokens").fetchone()[0] == 0
 
 
-def test_requesting_a_link_creates_no_user(client, mailer):
+def test_requesting_a_link_creates_no_user(anon_client, mailer):
     """Enumeration probes must not populate the users table — the account
     is created when a challenge is consumed, not when one is asked for."""
     _challenge(mailer)
@@ -381,7 +381,7 @@ def test_expired_session_stops_resolving(client, mailer):
     assert accounts_svc.identity_for(request) is None
 
 
-def test_purge_drops_expired_sessions_and_spent_challenges(client, mailer):
+def test_purge_drops_expired_sessions_and_spent_challenges(anon_client, mailer):
     spent = _challenge(mailer)
     grant = auth_svc.complete_with_token(spent.token)
     assert grant is not None

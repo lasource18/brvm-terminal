@@ -33,8 +33,18 @@ def free(client):
 
 @pytest.fixture
 def paid(client):
+    """The shared client is signed in on account 1; make that account paid."""
     with connect(settings.db_path) as conn:
         accounts_repo.set_plan(conn, DEFAULT_ACCOUNT_ID, "paid")
+    return client
+
+
+@pytest.fixture
+def anonymous(client):
+    """PR-Z: no session is the free tier, whatever account 1 holds."""
+    with connect(settings.db_path) as conn:
+        accounts_repo.set_plan(conn, DEFAULT_ACCOUNT_ID, "paid")
+    client.cookies.clear()
     return client
 
 
@@ -198,3 +208,27 @@ class TestWatchlistCap:
         r = free.post("/_frag/watchlists/main/items", data={"ticker": "EXTRA"})
         assert r.status_code == 402
         assert str(wl_svc.FREE_WATCHLIST_LIMIT) in r.text
+
+
+class TestAnonymousIsFree:
+    """PR-Z: with AUTH_REQUIRED off an anonymous request used to resolve
+    to account 1 — paid since 0019 — and see the whole paid product.
+    Now no session means the free tier, full stop."""
+
+    def test_paid_page_is_refused(self, anonymous):
+        _seed_security()
+        assert anonymous.get("/s/SNTS/chart").status_code == PAID
+
+    def test_history_api_is_refused(self, anonymous):
+        _seed_security()
+        assert anonymous.get("/api/history/SNTS").status_code == PAID
+
+    def test_topbar_offers_plans_not_paid_links(self, anonymous):
+        body = anonymous.get("/").text
+        assert 'href="/pricing"' in body
+        assert 'href="/alerts"' not in body
+        assert 'href="/brief"' not in body
+
+    def test_paid_topbar_links_to_my_plan(self, paid):
+        body = paid.get("/").text
+        assert 'href="/billing"' in body

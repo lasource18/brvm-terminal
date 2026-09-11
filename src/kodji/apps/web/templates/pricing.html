@@ -41,38 +41,9 @@
         <strong>{{ price_year }}</strong> {{ "per year"|t }}
       </p>
 
-      {% if billing_open %}
-        {% if signed_in %}
-          {# PR-Z: one payment per period through the hosted Flutterwave
-             checkout. POST so a prefetch can't start a checkout; the
-             account and email come from the session, not the form. #}
-          <div class="plan-buy">
-            <form method="post" action="/billing/checkout">
-              <input type="hidden" name="period" value="month">
-              <button type="submit" class="upgrade-cta">
-                {{ ("Extend by 1 month" if plan == 'paid' else "Pay 1 month")|t }} · {{ price_month }}
-              </button>
-            </form>
-            <form method="post" action="/billing/checkout">
-              <input type="hidden" name="period" value="year">
-              <button type="submit" class="upgrade-cta">
-                {{ ("Extend by 12 months" if plan == 'paid' else "Pay 12 months")|t }} · {{ price_year }}
-              </button>
-            </form>
-          </div>
-          <p class="dim plan-note">
-            {{ "Orange Money, Wave, MTN MoMo or card. One payment, no automatic renewal — "
-               "we email you before the period ends."|t }}
-            <a href="/billing">{{ "Payment history"|t }}</a>
-          </p>
-        {% else %}
-          <p class="plan-buy"><a class="upgrade-cta" href="/login">{{ "Sign in to subscribe"|t }}</a></p>
-        {% endif %}
-      {% else %}
-        <p class="dim plan-note">
-          {{ "Checkout is not open yet. Mobile money and card payment arrive "
-             "with the billing release."|t }}
-        </p>
+      {% include "_frag/plan_buttons.html" %}
+      {% if signed_in %}
+        <p class="dim plan-note"><a href="/billing">{{ "My plan and payment history"|t }}</a></p>
       {% endif %}
     </div>
   </div>

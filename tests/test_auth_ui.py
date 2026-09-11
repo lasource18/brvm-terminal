@@ -15,6 +15,13 @@ from kodji.services.mailer import ConsoleMailer
 EMAIL = "trader@example.ci"
 
 
+@pytest.fixture(autouse=True)
+def signed_out(client):
+    """The shared client arrives signed in as the operator (conftest);
+    these tests are about getting *in*, so start from nothing."""
+    client.cookies.clear()
+
+
 @pytest.fixture()
 def outbox(monkeypatch):
     """Intercepts the mailer the route resolves, and hands back what it got."""
