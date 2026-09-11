@@ -195,6 +195,12 @@ class Settings(BaseSettings):
     # sends it back in the `verif-hash` header on every event.
     flw_webhook_hash: str = ""
     flw_api_base: str = "https://api.flutterwave.com/v3"
+    # Methods the hosted page offers, comma+space separated as Flutterwave
+    # expects. `mobilemoneyxof` is Orange Money / Wave / MTN MoMo / Moov for
+    # XOF. Honoured only after "Enable Dashboard Payment Options" is
+    # UNCHECKED under the dashboard's account settings; with it checked the
+    # page shows the dashboard's own selection (card only on a fresh sandbox).
+    flw_payment_options: str = "card, mobilemoneyxof"
     # Prices in INTEGER francs — XOF is zero-decimal. Positioned just above
     # Sikafinance Premium (100 000/yr) and Richbourse (79 000/yr); see
     # docs/kodji-plan.md "Answered".

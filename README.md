@@ -778,6 +778,12 @@ price, same `tx_ref`. Activation is idempotent, so redirect and webhook
 can both arrive in any order. `/billing` shows the account's plan, period
 end and payment history.
 
+The hosted page offers what `FLW_PAYMENT_OPTIONS` names (default
+`card, mobilemoneyxof` — Orange Money, Wave, MTN MoMo, Moov for XOF), but
+Flutterwave honours that only after you **uncheck "Enable Dashboard
+Payment Options"** in the dashboard's account settings; until then a
+fresh sandbox shows card alone.
+
 Test mode: any mobile number with OTP `123456` mocks a successful mobile
 money payment; test cards are in Flutterwave's docs. Without keys the
 pricing page says checkout is not open and the webhook answers 401.

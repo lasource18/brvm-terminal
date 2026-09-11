@@ -138,7 +138,7 @@ def test_start_checkout_records_pending_and_posts_the_right_payload(db):
     assert body["redirect_url"] == "https://kodji.test/billing/return"
     assert body["customer"] == {"email": EMAIL}
     assert body["meta"] == {"account_id": str(account_id), "period": "month"}
-    assert "payment_options" not in body  # dashboard decides the methods
+    assert body["payment_options"] == "card, mobilemoneyxof"
 
     with connect(path) as conn:
         row = payments_repo.get_by_tx_ref(conn, out.tx_ref)
