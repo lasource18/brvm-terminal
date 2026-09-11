@@ -74,12 +74,19 @@ def checkout_return(
     if status.lower() in ("cancelled", "canceled", "failed") and not transaction_id:
         result = billing_svc.abandon(tx_ref, reason=status.lower())
     else:
-        result = billing_svc.confirm(tx_ref, transaction_id=transaction_id or None)
+        # The customer is watching this page: ask a few times over ~6 s
+        # before saying "in progress", since a test-mode mobile money
+        # charge is recorded a few seconds after the redirect.
+        result = billing_svc.confirm(
+            tx_ref, transaction_id=transaction_id or None, attempts=4, delay_s=2.0
+        )
     ctx = {
         **base_ctx(request),
         "outcome": result.outcome,
         "period_end_day": (result.period_end_utc or "")[:10] or None,
         "provider_status": status,
+        # The pending page re-checks itself by reloading this URL.
+        "recheck_url": str(request.url),
     }
     code = 200 if result.outcome in ("activated", "already", "pending") else 402
     return templates.TemplateResponse(request, "billing_return.html", ctx, status_code=code)

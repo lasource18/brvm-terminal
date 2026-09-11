@@ -30,6 +30,7 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -89,6 +90,12 @@ class BillingError(RuntimeError):
     to log; it never contains the secret key."""
 
 
+class NotFound(BillingError):
+    """The provider has no transaction for that id/reference *yet*. In
+    test mode a mobile money charge is recorded a few seconds after the
+    customer is redirected, so this is usually "ask again", not "no"."""
+
+
 class FlutterwaveClient:
     """The three v3 calls this integration needs. Injectable so tests run
     against an `httpx.MockTransport`."""
@@ -119,7 +126,11 @@ class FlutterwaveClient:
         except ValueError as e:
             raise BillingError(f"http {resp.status_code}: non-JSON body") from e
         if resp.status_code >= 400 or body.get("status") != "success":
-            raise BillingError(f"http {resp.status_code}: {str(body.get('message', ''))[:200]}")
+            message = str(body.get("message", ""))[:200]
+            low = message.lower()
+            if resp.status_code in (400, 404) and ("not found" in low or "was found" in low):
+                raise NotFound(f"http {resp.status_code}: {message}")
+            raise BillingError(f"http {resp.status_code}: {message}")
         return body
 
     def create_checkout(self, payload: dict) -> str:
@@ -330,12 +341,35 @@ def confirm(
     transaction_id: str | None = None,
     client: FlutterwaveClient | None = None,
     now: datetime | None = None,
+    attempts: int = 1,
+    delay_s: float = 2.0,
 ) -> Confirmation:
     """Verify `tx_ref` with the provider and activate the plan if it paid.
 
     Safe to call from the browser redirect and the webhook alike, and
     repeatedly: only the first successful verification changes anything.
+
+    `attempts > 1` re-asks while the answer is `pending` (including "not
+    recorded yet"), sleeping `delay_s` between tries — for the browser
+    return, where the customer is looking at the page and the sandbox
+    settles a mobile money charge a few seconds after redirecting.
     """
+    result = _confirm_once(tx_ref, transaction_id=transaction_id, client=client, now=now)
+    for _ in range(max(0, attempts - 1)):
+        if result.outcome != "pending":
+            break
+        time.sleep(delay_s)
+        result = _confirm_once(tx_ref, transaction_id=transaction_id, client=client, now=now)
+    return result
+
+
+def _confirm_once(
+    tx_ref: str,
+    *,
+    transaction_id: str | None,
+    client: FlutterwaveClient | None,
+    now: datetime | None,
+) -> Confirmation:
     now = now or utcnow()
     with connect(_db_path()) as conn:
         payment = payments_repo.get_by_tx_ref(conn, tx_ref)
@@ -352,6 +386,12 @@ def confirm(
         return Confirmation("unknown", tx_ref, account_id, note=str(e))
     try:
         data = fw.verify_by_id(transaction_id) if transaction_id else fw.verify_by_ref(tx_ref)
+    except NotFound as e:
+        # Nothing recorded for this reference yet — the customer may still
+        # be on the hosted page, or the charge is a few seconds behind the
+        # redirect. Pending, not unknown: nothing has gone wrong.
+        log.info("billing: %s not recorded at the provider yet (%s)", tx_ref, e)
+        return Confirmation("pending", tx_ref, account_id, note="not_yet_recorded")
     except BillingError as e:
         log.warning("billing: verify failed for %s: %s", tx_ref, e)
         return Confirmation("unknown", tx_ref, account_id, note=str(e))

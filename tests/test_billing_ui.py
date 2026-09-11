@@ -175,7 +175,7 @@ def test_return_activates_and_shows_the_period_end(client, billing_on, fake, out
     assert "Active until" in client.get("/pricing").text
 
 
-def test_return_reports_pending_failed_and_unknown(client, billing_on, fake, outbox):
+def test_return_reports_pending_failed_and_unknown(client, billing_on, fake, outbox, monkeypatch):
     _sign_in(client, outbox)
     tx_ref = _start(client, fake)
     fake.verified = {
@@ -185,8 +185,11 @@ def test_return_reports_pending_failed_and_unknown(client, billing_on, fake, out
         "currency": "XOF",
         "status": "pending",
     }
+    monkeypatch.setattr(billing.time, "sleep", lambda s: None)
     r = client.get(f"/billing/return?status=pending&tx_ref={tx_ref}")
     assert r.status_code == 200 and "Payment in progress" in r.text
+    # The pending page re-checks itself against the same URL.
+    assert 'http-equiv="refresh"' in r.text and f"tx_ref={tx_ref}" in r.text
 
     fake.verified["status"] = "failed"
     r = client.get(f"/billing/return?status=failed&tx_ref={tx_ref}")
