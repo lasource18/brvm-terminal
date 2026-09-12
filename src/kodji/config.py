@@ -70,12 +70,27 @@ class Settings(BaseSettings):
     ocr_max_pages: int = 400           # skip filings larger than this (heavy)
     ocr_max_files_per_run: int = 20    # limit one pass to ~20 files (~1-2h)
 
-    # --- Alerts (Phase 6a) ---
-    # Optional Discord webhook. Empty → alerts still fire and land in
-    # alert_events, but nothing is pushed out (delivery worker no-ops with
-    # a warning). Any legitimate webhook URL is fine — we don't parse it,
-    # just POST JSON.
+    # --- Alerts (Phase 6a; delivery reshaped by PR-AA) ---
+    # Ops-only since PR-AA: the job watchdog posts "a scheduled job did
+    # not run" here. User-facing alerts go out by Web Push (below) and
+    # by email, never to Discord. Any legitimate webhook URL is fine —
+    # we don't parse it, just POST JSON.
     discord_webhook_url: str = ""
+    # Web Push (PR-AA). `just vapid-keygen` prints a pair; both halves
+    # are required. Blank → the /alerts page says notifications are not
+    # configured and delivery falls back to email for everyone. Rotating
+    # the pair invalidates every stored subscription: browsers reject a
+    # message signed by a key other than the one they subscribed with.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    # The `sub` claim of every VAPID token — how a push service reaches
+    # the operator if we misbehave. `mailto:` or an https URL. Blank →
+    # derived from EMAIL_REPLY_TO / EMAIL_FROM, else the contact address
+    # in the User-Agent.
+    vapid_subject: str = ""
+    # How long a push service holds a message for an offline device.
+    # 12 h: a price move from the morning session is stale by the next.
+    push_ttl_s: int = 12 * 3600
     # A rule that keeps re-matching (e.g. SNTS holds a +6% day for hours)
     # only fires once per this window. Same (rule_id, dedupe_key) inside the
     # window is dropped at the store layer.
@@ -242,6 +257,25 @@ class Settings(BaseSettings):
     @property
     def has_discord(self) -> bool:
         return bool(self.discord_webhook_url)
+
+    @property
+    def has_push(self) -> bool:
+        return bool(self.vapid_public_key and self.vapid_private_key)
+
+    @property
+    def vapid_subject_effective(self) -> str:
+        """The `sub` claim for VAPID tokens — a bare `mailto:` or https URL.
+
+        `EMAIL_FROM` is a display-name address (`Kodji <x@y>`), and a
+        `sub` of `mailto:Kodji <x@y>` is rejected outright by Apple's
+        push service, so the address is unwrapped before use.
+        """
+        if self.vapid_subject:
+            return self.vapid_subject
+        raw = self.email_reply_to or self.email_from or "cmguinan@yahoo.fr"
+        if "<" in raw and ">" in raw:
+            raw = raw[raw.index("<") + 1 : raw.index(">")]
+        return f"mailto:{raw.strip()}"
 
     @property
     def has_email(self) -> bool:

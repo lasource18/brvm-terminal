@@ -246,7 +246,9 @@ EMAIL_FROM=Kodji <connexion@mail.kodji.app>
 EMAIL_REPLY_TO=support@kodji.app
 PUBLIC_BASE_URL=https://kodji.app              # REQUIRED here; blank only on a laptop
 AUTH_REQUIRED=true                             # see 3e first
-DISCORD_WEBHOOK_URL=                           # optional
+VAPID_PUBLIC_KEY=                              # `just vapid-keygen`, once, both lines (PR-AA)
+VAPID_PRIVATE_KEY=
+DISCORD_WEBHOOK_URL=                           # optional, ops only
 HTTP_USER_AGENT=kodji-terminal/0.1 (+contact: support@kodji.app)
 ```
 
@@ -606,7 +608,7 @@ of these in `.env` (both is fine):
 
 ```bash
 OPS_ALERT_EMAIL=cmguinan@yahoo.fr     # sent through the Resend sign-in sender
-DISCORD_WEBHOOK_URL=https://...       # same webhook the alerts use
+DISCORD_WEBHOOK_URL=https://...       # ops only — user alerts go by Web Push / email
 ```
 
 then `systemctl restart kodji-terminal`. With neither, the alert is only
@@ -633,6 +635,31 @@ Both are read-only and safe beside the running service. Typical
 follow-up to a `brief_daily missed` alert: `just brief-run` by hand. The
 watchdog only sees runs that went through the scheduler, so the problem
 clears — with a recovery notice — at the next scheduled run that succeeds.
+
+### Notifications — Web Push (PR-AA)
+
+User alerts leave by Web Push to every phone or browser a member enabled
+on `/alerts`, and by email to members with no device on file. Discord is
+ops-only. To turn push on, once per deployment, as `kodji`:
+
+```bash
+cd /opt/kodji-terminal && export PATH="$HOME/.local/bin:$PATH"
+uv run --no-dev python scripts/vapid_keygen.py     # prints the two .env lines
+nano .env                                          # paste VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
+uv run --no-dev python scripts/migrate.py          # 0022_push_subscriptions
+```
+
+then `systemctl restart kodji-terminal` as root. **Keep the pair.** The
+public key is baked into every browser subscription, so a rotated pair
+means every device must enable notifications again. Check with
+`curl -s https://kodji.app/api/push/config` (`"enabled": true`), then
+open `/alerts` on a phone and tap "Enable on this device".
+
+iPhone and iPad only receive Web Push from an app on the Home Screen
+(Share → Add to Home Screen), and only on iOS 16.4+; the page says so.
+Android Chrome and desktop browsers work from the plain tab. The push
+services involved are Google (FCM), Apple and Mozilla; nothing runs on
+the box beyond the POST.
 
 ### Billing — Flutterwave (PR-Z)
 
@@ -700,7 +727,12 @@ FILINGS_ROOT=/opt/kodji-terminal/data/filings
 # Leave the binary name as-is; without it installed the OCR job no-ops.
 OCR_BINARY=ocrmypdf
 
-# --- alerts + ops (the job watchdog uses either; set at least one) ---
+# --- alerts (PR-AA) — `just vapid-keygen` once; both lines required ---
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:support@kodji.app
+
+# --- ops (the job watchdog uses either; set at least one) ---
 DISCORD_WEBHOOK_URL=
 OPS_ALERT_EMAIL=cmguinan@yahoo.fr
 OPS_ALERT_REPEAT_HOURS=24

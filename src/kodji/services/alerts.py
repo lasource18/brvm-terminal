@@ -1,7 +1,8 @@
 """Alerts (Phase 6a).
 
-Three evaluators + one delivery worker + one filesystem-less notification
-sink (a Discord webhook). Everything routes through the same
+Three evaluators + one delivery worker that fans each event out to the
+owning account's members — Web Push to every device they enabled, email
+for members with none (PR-AA). Everything routes through the same
 `(rule_id, dedupe_key)` UNIQUE at the store layer so a rule that keeps
 matching only produces one row per underlying event.
 
@@ -17,30 +18,44 @@ Design notes
 * **News** is keyed on `news_items.id`. Un-tagged rows (relevance IS NULL)
   are ignored — the min-relevance gate has nothing to compare against yet.
 * **Delivery** is idempotent by design: `delivered_utc IS NULL` is the
-  queue, and the worker only marks rows delivered after a 2xx from the
-  webhook. A webhook outage does not lose events.
-* **No Discord? Still safe.** With `DISCORD_WEBHOOK_URL` unset, delivery
-  no-ops (marks events `skipped`) so a fresh install doesn't accumulate
-  a growing queue.
+  queue, and the worker only marks a row delivered after a push service
+  or the mailer accepted at least one send. An outage does not lose
+  events.
+* **No channel? Still safe.** With neither VAPID keys nor email
+  configured, delivery marks events `skipped` so a fresh install doesn't
+  accumulate a growing queue.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from html import escape
 from pathlib import Path
-
-import httpx
+from typing import Protocol
 
 from kodji.clock import ABIDJAN, utc_iso
 from kodji.config import settings
 from kodji.db import connect
 from kodji.logging import get
-from kodji.models import AlertEvent, AlertRule
+from kodji.models import AlertEvent, AlertRule, PushSubscription
+from kodji.services import webpush
+from kodji.services.mailer import EmailMessage, Mailer, get_mailer
+from kodji.store import accounts as accounts_repo
 from kodji.store import alerts as alerts_repo
+from kodji.store import push as push_repo
 
 log = get(__name__)
+
+
+class PushSenderLike(Protocol):
+    """What delivery needs from a push sender — `WebPushSender` in
+    production, a scripted stub in tests."""
+
+    def send(self, sub: PushSubscription, payload: dict[str, object]) -> webpush.PushResult: ...
+
+    def close(self) -> None: ...
 
 
 @dataclass
@@ -64,9 +79,11 @@ class EvalCounts:
 @dataclass
 class DeliveryCounts:
     considered: int = 0
-    delivered: int = 0
+    delivered: int = 0          # events with at least one successful send
     failed: int = 0
     skipped: int = 0
+    pushed: int = 0             # individual push sends that landed
+    emailed: int = 0            # individual emails that went out
     reason: str = ""
 
     def as_dict(self) -> dict[str, str | int]:
@@ -75,6 +92,8 @@ class DeliveryCounts:
             "delivered": self.delivered,
             "failed": self.failed,
             "skipped": self.skipped,
+            "pushed": self.pushed,
+            "emailed": self.emailed,
         }
         if self.reason:
             d["reason"] = self.reason
@@ -429,73 +448,127 @@ def evaluate_all() -> EvalCounts:
 
 
 # ---------------------------------------------------------------------------
-# Delivery
+# Delivery (PR-AA: Web Push to every member device, email otherwise)
 # ---------------------------------------------------------------------------
+#
+# An event belongs to a rule, a rule to an account, an account to its
+# members, and each member to zero or more devices that enabled
+# notifications. One queued row therefore fans out to N sends:
+#
+#   * a member with devices on file gets a push on each of them;
+#   * a member with none gets an email, when email is configured;
+#   * an account with no members reachable either way is `skipped`.
+#
+# The event row keeps one status. It is `ok` as soon as one send lands —
+# a phone that was off gets nothing, but the person was reached — and
+# stays queued only when every attempt failed transiently (push service
+# or mailer down), in which case the pass stops so a down provider is not
+# hammered with the rest of the batch. All-permanent failures leave the
+# queue as `permanent_failure`, exactly as the Discord path did.
+#
+# Discord is not a user channel any more; the job watchdog still posts
+# there (services/watchdog).
 
 
-def _format_discord(event: AlertEvent) -> dict[str, object]:
-    """Discord webhook accepts `content` (plain text) or `embeds`.
-    Terminal aesthetic stays simpler with plain content — the subject
-    goes bold via markdown, then a codeblock-friendly body."""
+def _link_path(event: AlertEvent) -> str:
+    """Where a reader should land: the security if the event names one,
+    the alerts queue otherwise. Same target on both channels."""
+    return f"/s/{event.ticker}" if event.ticker else "/alerts"
+
+
+def _push_payload(event: AlertEvent) -> dict[str, object]:
+    """What the service worker shows. Bodies are clipped so a long filing
+    title cannot push the record over the push service's 4 KB cap."""
     return {
-        "content": f"**{event.subject}**\n{event.body}",
-        "username": "kodji-terminal",
+        "title": event.subject[:120],
+        "body": event.body[:400],
+        "url": _link_path(event),
+        "tag": f"kodji-alert-{event.id or event.dedupe_key}",
+        "kind": event.kind,
     }
 
 
+def _email_for(event: AlertEvent, to: str) -> EmailMessage:
+    base = settings.public_base_url.rstrip("/")
+    link = f"{base}{_link_path(event)}" if base else ""
+    text = event.body + (f"\n\n{link}" if link else "")
+    html = (
+        f"<p><strong>{escape(event.subject)}</strong></p>"
+        f"<p>{escape(event.body).replace(chr(10), '<br>')}</p>"
+        + (f'<p><a href="{escape(link)}">{escape(link)}</a></p>' if link else "")
+    )
+    return EmailMessage(to=to, subject=f"[kodji] {event.subject}"[:200], text=text, html=html)
+
+
 @dataclass
-class SendResult:
+class _Attempt:
     ok: bool
+    permanent: bool
     note: str
-    permanent: bool = False
 
 
-@dataclass
-class _DiscordSender:
-    webhook_url: str
-    client: httpx.Client | None = None
-    _owned: bool = field(default=False, init=False, repr=False)
+def _deliver_one(
+    conn: sqlite3.Connection,
+    event: AlertEvent,
+    *,
+    sender: PushSenderLike | None,
+    mailer: Mailer | None,
+    counts: DeliveryCounts,
+) -> list[_Attempt]:
+    """Fan one event out. Returns every attempt; the caller decides the
+    row's status from the set."""
+    account_id = alerts_repo.account_for_rule(conn, event.rule_id)
+    if account_id is None:
+        return []
+    subs_by_user: dict[int, list[PushSubscription]] = {}
+    if sender is not None:
+        for sub in push_repo.list_for_account(conn, account_id):
+            subs_by_user.setdefault(sub.user_id, []).append(sub)
 
-    def __post_init__(self) -> None:
-        if self.client is None:
-            self.client = httpx.Client(timeout=settings.http_timeout_s)
-            self._owned = True
-
-    def close(self) -> None:
-        if self._owned and self.client is not None:
-            self.client.close()
-
-    def send(self, event: AlertEvent) -> SendResult:
-        # Never surface the webhook URL in a return value: httpx wraps it
-        # into the exception's message and the caller logs the note.
-        assert self.client is not None
-        try:
-            resp = self.client.post(self.webhook_url, json=_format_discord(event))
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            code = e.response.status_code
-            # 4xx (except 429 rate-limit) is permanent — a revoked webhook
-            # or an oversize payload will never succeed on retry, and
-            # leaving it at head-of-queue wedges everything behind it.
-            permanent = 400 <= code < 500 and code != 429
-            return SendResult(
-                ok=False, note=f"http_{code}", permanent=permanent,
-            )
-        except httpx.HTTPError as e:
-            return SendResult(
-                ok=False, note=f"transport_error: {type(e).__name__}",
-            )
-        return SendResult(ok=True, note="ok")
+    attempts: list[_Attempt] = []
+    for member in accounts_repo.members(conn, account_id):
+        user_id, email = int(member["user_id"]), str(member["email"])
+        devices = subs_by_user.get(user_id, [])
+        if devices and sender is not None:
+            for sub in devices:
+                r = sender.send(sub, _push_payload(event))
+                attempts.append(_Attempt(r.ok, r.permanent, r.note))
+                if r.ok:
+                    counts.pushed += 1
+                    push_repo.mark_result(conn, sub.id or 0, ok=True, commit=False)
+                elif r.gone:
+                    # 404/410: the browser revoked or rotated it. Keeping
+                    # the row would fail every pass forever.
+                    push_repo.delete_by_id(conn, sub.id or 0, commit=False)
+                    log.info("alerts deliver: dropped dead push subscription %s (%s)", sub.id, r.note)
+                else:
+                    push_repo.mark_result(conn, sub.id or 0, ok=False, note=r.note, commit=False)
+                    log.warning("alerts deliver: push to subscription %s failed: %s", sub.id, r.note)
+            continue
+        if mailer is not None:
+            r = mailer.send(_email_for(event, email))
+            attempts.append(_Attempt(r.ok, r.permanent, r.note))
+            if r.ok:
+                counts.emailed += 1
+            else:
+                log.warning("alerts deliver: email for event %s failed: %s", event.id, r.note)
+    conn.commit()
+    return attempts
 
 
 def deliver_pending(
     *,
-    sender: _DiscordSender | None = None,
+    sender: PushSenderLike | None = None,
+    mailer: Mailer | None = None,
     limit: int | None = None,
 ) -> DeliveryCounts:
-    """Drain the un-delivered queue via Discord. Callers can pass a fake
-    sender to unit-test the flow; production wires `sender=None` and
-    reads the webhook URL from settings."""
+    """Drain the un-delivered queue.
+
+    Production passes nothing and builds the channels from settings:
+    a `WebPushSender` when VAPID keys exist, the Resend mailer when
+    email does. Tests inject fakes. With neither channel configured the
+    batch is marked `skipped` so the queue does not grow forever.
+    """
     counts = DeliveryCounts()
     batch = limit or settings.alerts_delivery_batch
     with connect(_db_path()) as conn:
@@ -504,59 +577,57 @@ def deliver_pending(
         if not events:
             return counts
 
-        # No webhook configured → mark events skipped so we don't keep
-        # scanning the same queue forever. Manual delivery would clear
-        # them later.
-        if sender is None and not settings.has_discord:
+        owns_sender = owns_mailer = False
+        if sender is None and settings.has_push:
+            sender = webpush.sender_from_settings()
+            owns_sender = True
+        if mailer is None and settings.has_email:
+            mailer = get_mailer()
+            owns_mailer = True
+        if sender is None and mailer is None:
             counts.skipped = len(events)
-            counts.reason = "no_webhook"
-            alerts_repo.mark_delivered(
-                conn, [e.id or 0 for e in events], status="skipped"
+            counts.reason = "no_channel"
+            alerts_repo.mark_delivered(conn, [e.id or 0 for e in events], status="skipped")
+            log.warning(
+                "alerts deliver: no VAPID keys and no email sender — %d events skipped",
+                len(events),
             )
-            log.warning("alerts deliver: no DISCORD_WEBHOOK_URL — %d events skipped",
-                        len(events))
             return counts
-
-        owns_sender = sender is None
-        if sender is None:
-            sender = _DiscordSender(webhook_url=settings.discord_webhook_url)
 
         try:
             delivered_ids: list[int] = []
-            transient_failed_ids: list[int] = []
+            skipped_ids: list[int] = []
             permanent_failed_ids: list[int] = []
+            transient_failed_ids: list[int] = []
             reasons: list[str] = []
             for event in events:
-                result = sender.send(event)
-                if result.ok:
+                attempts = _deliver_one(conn, event, sender=sender, mailer=mailer, counts=counts)
+                if not attempts:
+                    skipped_ids.append(event.id or 0)
+                    continue
+                if any(a.ok for a in attempts):
                     delivered_ids.append(event.id or 0)
                     continue
-                log.warning("alerts deliver: event %s failed: %s",
-                            event.id, result.note)
-                reasons.append(result.note)
-                if result.permanent:
-                    # Head-of-queue must not wedge on a 4xx that will
-                    # never succeed (revoked webhook, oversize payload).
-                    # Stamp `delivered_utc` so the row leaves the queue
-                    # and try the next event on this same pass.
+                reasons.extend(a.note for a in attempts)
+                if all(a.permanent for a in attempts):
                     permanent_failed_ids.append(event.id or 0)
                     continue
-                # Transient (5xx/timeout/429) — retry the whole batch
-                # next pass; break to avoid spamming a down webhook.
+                # Something is down. Leave the row queued and stop the
+                # pass; the rest of the batch retries in five minutes.
                 transient_failed_ids.append(event.id or 0)
                 break
 
             if delivered_ids:
                 alerts_repo.mark_delivered(conn, delivered_ids, status="ok")
                 counts.delivered = len(delivered_ids)
+            if skipped_ids:
+                alerts_repo.mark_delivered(conn, skipped_ids, status="skipped")
+                counts.skipped = len(skipped_ids)
+                counts.reason = counts.reason or "no_recipients"
             if permanent_failed_ids:
-                alerts_repo.mark_delivered(
-                    conn, permanent_failed_ids, status="permanent_failure",
-                )
+                alerts_repo.mark_delivered(conn, permanent_failed_ids, status="permanent_failure")
                 counts.failed += len(permanent_failed_ids)
             if transient_failed_ids:
-                # Leave `delivered_utc` NULL so the next pass re-tries;
-                # stamp status for diagnostics only.
                 conn.execute(
                     "UPDATE alert_events SET delivery_status = 'failed' "
                     f"WHERE id IN ({','.join('?' * len(transient_failed_ids))})",
@@ -565,10 +636,12 @@ def deliver_pending(
                 conn.commit()
                 counts.failed += len(transient_failed_ids)
             if counts.failed:
-                counts.reason = reasons[0] if reasons else "http_error"
+                counts.reason = reasons[0] if reasons else "send_error"
         finally:
-            if owns_sender:
+            if owns_sender and sender is not None:
                 sender.close()
+            if owns_mailer and mailer is not None:
+                mailer.close()
 
     log.info("alerts deliver: %s", counts.as_dict())
     return counts

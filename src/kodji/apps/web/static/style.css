@@ -614,3 +614,10 @@ table.kv th, table.kv td { white-space: normal; }
   .prose { font-size: 12.5px; }
   .auth-card { margin: 16px auto; }
 }
+
+/* --- Web Push panel on /alerts (PR-AA) --- */
+.push-panel { margin: 0 0 20px; padding: 12px; background: var(--bg-panel); border: 1px solid var(--border); }
+.push-panel .section-title { margin-top: 0; }
+.push-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 12px; }
+.push-row button { font-size: 12px; padding: 4px 10px; }
+.offline-wall { text-align: center; }

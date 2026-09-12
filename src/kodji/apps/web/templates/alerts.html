@@ -5,12 +5,40 @@
 
   <p class="dim" style="margin: -4px 0 16px;">
     {{ "Rules evaluate every 15 min during market hours, hourly otherwise. "
-        "Fired events land in the queue below and get pushed to Discord "
-        "within ~5 min when"|t }} <code>DISCORD_WEBHOOK_URL</code> {{ "is configured."|t }}
-    {% if not has_discord %}
-      <span class="badge closed" style="margin-left: 8px;">{{ "no webhook"|t }}</span>
-    {% endif %}
+        "Fired events land in the queue below and reach you within ~5 min: "
+        "as a notification on every device you enable here, by email otherwise."|t }}
   </p>
+
+  {# Web Push (PR-AA). The buttons are driven by app.js, which reads the
+     VAPID key and the status strings off this element so the copy stays
+     server-side and translated. Without keys the panel only explains. #}
+  <section class="push-panel" id="push-panel"
+           data-public-key="{{ vapid_public_key }}"
+           data-enabled="{{ 'true' if has_push else 'false' }}"
+           data-s-unsupported="{{ 'This browser cannot receive notifications.'|t }}"
+           data-s-ios="{{ 'On iPhone and iPad, add kodji to the Home Screen first (Share → Add to Home Screen) and open it from there — iOS only delivers notifications to installed apps.'|t }}"
+           data-s-denied="{{ 'Notifications are blocked for this site in the browser settings.'|t }}"
+           data-s-on="{{ 'Notifications are on for this device.'|t }}"
+           data-s-off="{{ 'Notifications are off for this device.'|t }}"
+           data-s-error="{{ 'Could not enable notifications.'|t }}">
+    <h2 class="section-title">{{ "Notifications"|t }}
+      {% if not has_push %}
+        <span class="badge closed" style="margin-left: 8px;">{{ "not configured"|t }}</span>
+      {% endif %}
+    </h2>
+    {% if has_push %}
+      <div class="push-row">
+        <span id="push-status" class="dim">…</span>
+        <button type="button" id="push-enable" class="btn-toggle" hidden>{{ "Enable on this device"|t }}</button>
+        <button type="button" id="push-disable" class="btn-del" hidden>{{ "Disable on this device"|t }}</button>
+        <span class="dim"><span id="push-devices">{{ push_devices }}</span> {{ "devices on file"|t }}</span>
+      </div>
+    {% else %}
+      <p class="dim">
+        {{ "Web Push is off on this server: set VAPID keys in .env (just vapid-keygen). Until then, alerts go out by email."|t }}
+      </p>
+    {% endif %}
+  </section>
 
   <h2 class="section-title">{{ "Rules"|t }}</h2>
   <div id="alert-rules-wrap">

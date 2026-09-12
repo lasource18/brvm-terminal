@@ -11,7 +11,11 @@ def test_alerts_page_empty_state(client):
     body = r.text
     assert "Alerts" in body
     assert "No rules yet" in body
-    assert "no webhook" in body  # DISCORD_WEBHOOK_URL is unset in tests
+    # VAPID keys are pinned empty in the fixture, so the notifications
+    # panel explains rather than offering the enable button.
+    assert "not configured" in body
+    assert "vapid-keygen" in body
+    assert 'id="push-enable"' not in body
 
 
 def test_topbar_carries_alerts_link(client):

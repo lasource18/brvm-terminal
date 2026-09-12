@@ -18,6 +18,7 @@ from kodji.apps.web._common import (
 from kodji.apps.web._gating import is_paid, refuse_if_unpaid
 from kodji.clock import is_market_open, utc_iso
 from kodji.config import settings
+from kodji.db import connect
 from kodji.i18n import normalize
 from kodji.services import accounts as accounts_svc
 from kodji.services import (
@@ -345,9 +346,23 @@ def alerts_page(request: Request):
             **base_ctx(request),
             "rules": alerts_svc.list_rules(accounts_svc.current_account_id(request)),
             "events": alerts_svc.list_recent_events(limit=25),
-            "has_discord": settings.has_discord,
+            "has_push": settings.has_push,
+            "vapid_public_key": settings.vapid_public_key,
+            "push_devices": _push_device_count(request),
         },
     )
+
+
+def _push_device_count(request: Request) -> int:
+    """How many devices the signed-in user has enabled — the number on
+    the alerts page. Zero for the (gated-out anyway) anonymous case."""
+    identity = accounts_svc.identity_for(request)
+    if identity is None:
+        return 0
+    from kodji.store import push as push_repo
+
+    with connect(settings.db_path) as conn:
+        return push_repo.count_for_user(conn, identity.user_id)
 
 
 def _render_brief_page(request: Request, brief) -> HTMLResponse:

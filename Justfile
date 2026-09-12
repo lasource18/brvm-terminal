@@ -34,6 +34,12 @@ migrate-check:
 claim-owner email:
     uv run python scripts/claim_owner.py {{email}}
 
+# PR-AA: print a fresh VAPID key pair for .env (VAPID_PUBLIC_KEY /
+# VAPID_PRIVATE_KEY). Generate once per deployment; rotating the pair
+# silently invalidates every device that already enabled notifications.
+vapid-keygen:
+    uv run python scripts/vapid_keygen.py
+
 # Run tests (offline, fixture-based)
 test:
     uv run pytest

@@ -9,9 +9,10 @@ Covers:
   re-run.
 * News evaluator: only tagged rows (relevance not NULL), min_relevance
   gate, ticker attribution via ticker_hint OR tickers_llm CSV.
-* Delivery: happy path, http failure, no-webhook skip, batch cap.
+* Delivery (PR-AA): push fan-out per member device, email fallback,
+  gone-subscription cleanup, transient vs permanent failure, batch cap.
 
-Uses a scripted Discord sender so no real network is touched. The
+Uses scripted push and mail senders so no real network is touched. The
 `_setup` helper points settings at a tmp DB via the lazy proxy — no
 importlib reloads needed (see Phase 6a's settings refactor).
 """
@@ -21,23 +22,26 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-import httpx
-
 from kodji.config import reset_settings_cache
 from kodji.db import connect
 from kodji.models import (
-    AlertEvent,
     AlertRule,
     Filing,
     NewsItem,
+    PushSubscription,
     Quote,
     Security,
 )
 from kodji.services.accounts import DEFAULT_ACCOUNT_ID
+from kodji.services.mailer import EmailMessage
+from kodji.services.mailer import SendResult as MailSendResult
+from kodji.services.webpush import PushResult
 from kodji.sources._dedupe import news_hash
+from kodji.store import accounts as accounts_repo
 from kodji.store import alerts as alerts_repo
 from kodji.store import filings as filings_repo
 from kodji.store import news as news_repo
+from kodji.store import push as push_repo
 from kodji.store import quotes as quotes_repo
 from kodji.store import securities as sec_repo
 
@@ -48,7 +52,12 @@ def _setup(monkeypatch, tmp_path: Path):
     """Fresh DB + a handful of securities. Returns (db_path, alerts_svc)."""
     db_path = tmp_path / "kodji.sqlite"
     monkeypatch.setenv("DB_PATH", str(db_path))
-    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")  # off unless a test flips it
+    # No channel unless a test injects one: a developer's VAPID pair or
+    # Resend key must not turn a unit test into a live send.
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", "")
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "")
+    monkeypatch.setenv("RESEND_API_KEY", "")
+    monkeypatch.setenv("EMAIL_FROM", "")
     reset_settings_cache()
     from kodji.services import alerts as svc
 
@@ -358,32 +367,74 @@ def test_news_matches_via_tickers_llm_csv(monkeypatch, tmp_path):
 
 
 # --- delivery --------------------------------------------------------------
+#
+# PR-AA: an event fans out to the owning account's members — a push to
+# every device they enabled, an email to members with none. The stubs
+# below script both channels; no network is touched.
 
 
 class _StubSender:
     def __init__(
-        self, *, ok: bool = True, permanent: bool = False, note: str | None = None
+        self,
+        *,
+        ok: bool = True,
+        permanent: bool = False,
+        gone: bool = False,
+        note: str | None = None,
+        fail_endpoints: set[str] | None = None,
     ) -> None:
         self.ok = ok
-        self.permanent = permanent
+        self.permanent = permanent or gone
+        self.gone = gone
         self.note = note
-        self.sent: list[AlertEvent] = []
+        # Endpoints that fail transiently while the rest succeed.
+        self.fail_endpoints = fail_endpoints or set()
+        self.sent: list[tuple[PushSubscription, dict]] = []
         self.closed = False
 
-    def send(self, event: AlertEvent):
-        from kodji.services.alerts import SendResult
-
-        self.sent.append(event)
+    def send(self, sub: PushSubscription, payload: dict) -> PushResult:
+        self.sent.append((sub, payload))
+        if sub.endpoint in self.fail_endpoints:
+            return PushResult(ok=False, note="http_503")
         if self.ok:
-            return SendResult(ok=True, note="ok")
-        return SendResult(
-            ok=False,
-            note=self.note or ("http_400" if self.permanent else "http_500"),
-            permanent=self.permanent,
+            return PushResult(ok=True, note="ok")
+        default = "http_410" if self.gone else ("http_400" if self.permanent else "http_503")
+        return PushResult(
+            ok=False, note=self.note or default, permanent=self.permanent, gone=self.gone,
         )
 
     def close(self) -> None:
         self.closed = True
+
+
+class _StubMailer:
+    def __init__(self, *, ok: bool = True, permanent: bool = False) -> None:
+        self.ok = ok
+        self.permanent = permanent
+        self.sent: list[EmailMessage] = []
+
+    def send(self, msg: EmailMessage) -> MailSendResult:
+        self.sent.append(msg)
+        if self.ok:
+            return MailSendResult(ok=True, note="ok")
+        return MailSendResult(ok=False, note="http_500", permanent=self.permanent)
+
+    def close(self) -> None:
+        return None
+
+
+def _member(db_path: Path, email: str = "owner@example.ci") -> int:
+    """A user on account 1 (the one every rule here belongs to)."""
+    with connect(db_path) as conn:
+        user_id, _ = accounts_repo.attach_user_to_account(conn, email, DEFAULT_ACCOUNT_ID)
+    return user_id
+
+
+def _device(db_path: Path, user_id: int, endpoint: str) -> int:
+    with connect(db_path) as conn:
+        return push_repo.upsert(
+            conn, user_id=user_id, endpoint=endpoint, p256dh="BPk", auth="auth",
+        )
 
 
 def _fire_one(db_path: Path, svc) -> int:
@@ -393,78 +444,199 @@ def _fire_one(db_path: Path, svc) -> int:
     return svc.list_recent_events()[0].id or 0
 
 
-def test_delivery_happy_path_marks_events_ok(monkeypatch, tmp_path):
+def _fire_three(db_path: Path, svc) -> None:
+    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
+    _seed_snap(db_path, "SNTS", 5.0)
+    _seed_snap(db_path, "ORAC", 4.0)
+    _seed_snap(db_path, "SPHC", 3.0)
+    svc.evaluate_all()
+
+
+def test_delivery_pushes_to_a_member_device(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/dev-1")
     _fire_one(db_path, svc)
-    sender = _StubSender(ok=True)
+    sender = _StubSender()
 
     counts = svc.deliver_pending(sender=sender)
     assert counts.delivered == 1
+    assert counts.pushed == 1
     assert counts.failed == 0
-    events = svc.list_recent_events()
-    assert events[0].delivery_status == "ok"
-    assert events[0].delivered_utc is not None
+    event = svc.list_recent_events()[0]
+    assert event.delivery_status == "ok"
+    assert event.delivered_utc is not None
+    sub, payload = sender.sent[0]
+    assert sub.endpoint == "https://push.example/dev-1"
+    assert payload["title"] == event.subject
+    assert payload["url"] == "/s/SNTS"
+    assert payload["tag"] == f"kodji-alert-{event.id}"
+    with connect(db_path) as conn:
+        assert push_repo.list_for_user(conn, uid)[0].last_used_utc is not None
 
 
-def test_delivery_failure_leaves_events_undelivered(monkeypatch, tmp_path):
+def test_delivery_fans_out_to_every_device_of_every_member(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    a = _member(db_path, "a@example.ci")
+    b = _member(db_path, "b@example.ci")
+    _device(db_path, a, "https://push.example/a-phone")
+    _device(db_path, a, "https://push.example/a-laptop")
+    _device(db_path, b, "https://push.example/b-phone")
+    _fire_one(db_path, svc)
+    sender = _StubSender()
+
+    counts = svc.deliver_pending(sender=sender)
+    assert counts.delivered == 1        # one event…
+    assert counts.pushed == 3           # …three sends
+    assert {s.endpoint for s, _ in sender.sent} == {
+        "https://push.example/a-phone",
+        "https://push.example/a-laptop",
+        "https://push.example/b-phone",
+    }
+
+
+def test_delivery_emails_members_without_a_device(monkeypatch, tmp_path):
+    """The iOS-user-who-never-installed case: no push subscription, so
+    the alert goes by email. A member WITH a device gets no email."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    with_device = _member(db_path, "installed@example.ci")
+    _member(db_path, "browser-only@example.ci")
+    _device(db_path, with_device, "https://push.example/x")
+    _fire_one(db_path, svc)
+    sender, mailer = _StubSender(), _StubMailer()
+
+    counts = svc.deliver_pending(sender=sender, mailer=mailer)
+    assert counts.delivered == 1
+    assert counts.pushed == 1
+    assert counts.emailed == 1
+    assert [m.to for m in mailer.sent] == ["browser-only@example.ci"]
+    msg = mailer.sent[0]
+    assert msg.subject.startswith("[kodji] ")
+    assert "SNTS" in msg.text
+
+
+def test_delivery_email_only_when_push_is_not_configured(monkeypatch, tmp_path):
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/x")  # on file, but no sender
+    _fire_one(db_path, svc)
+    mailer = _StubMailer()
+
+    counts = svc.deliver_pending(mailer=mailer)
+    assert counts.delivered == 1
+    assert counts.pushed == 0
+    assert counts.emailed == 1
+
+
+def test_delivery_no_channel_skips_events(monkeypatch, tmp_path):
+    """Neither VAPID keys nor email: mark the batch skipped so the queue
+    doesn't grow forever on a bare install."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    _member(db_path)
+    _fire_one(db_path, svc)
+
+    counts = svc.deliver_pending()
+    assert counts.skipped == 1
+    assert counts.reason == "no_channel"
+    event = svc.list_recent_events()[0]
+    assert event.delivery_status == "skipped"
+    assert event.delivered_utc is not None
+
+
+def test_delivery_no_recipients_skips_the_event(monkeypatch, tmp_path):
+    """Account 1 has no members in a fresh DB: nothing to send to, and
+    the row must not sit in the queue for ever."""
     db_path, svc = _setup(monkeypatch, tmp_path)
     _fire_one(db_path, svc)
+    sender = _StubSender()
+
+    counts = svc.deliver_pending(sender=sender)
+    assert counts.skipped == 1
+    assert counts.reason == "no_recipients"
+    assert sender.sent == []
+    assert svc.list_recent_events()[0].delivery_status == "skipped"
+
+
+def test_delivery_drops_a_gone_subscription(monkeypatch, tmp_path):
+    """404/410 from the push service means the browser revoked it;
+    keeping the row would fail every pass."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/revoked")
+    _fire_one(db_path, svc)
+    sender = _StubSender(ok=False, gone=True)
+
+    counts = svc.deliver_pending(sender=sender)
+    assert counts.failed == 1
+    assert svc.list_recent_events()[0].delivery_status == "permanent_failure"
+    with connect(db_path) as conn:
+        assert push_repo.count_for_user(conn, uid) == 0
+
+
+def test_delivery_transient_failure_leaves_event_queued_and_stops(monkeypatch, tmp_path):
+    """A push service that's down shouldn't be hit with every queued
+    event on the same pass — retry the whole batch next time."""
+    db_path, svc = _setup(monkeypatch, tmp_path)
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/x")
+    _fire_three(db_path, svc)
     sender = _StubSender(ok=False)
 
     counts = svc.deliver_pending(sender=sender)
     assert counts.delivered == 0
     assert counts.failed == 1
+    assert len(sender.sent) == 1
+    assert counts.reason == "http_503"
     events = svc.list_recent_events()
-    assert events[0].delivered_utc is None  # queued for the next pass
-    assert events[0].delivery_status == "failed"
+    assert all(e.delivered_utc is None for e in events)  # queued for the next pass
+    assert any(e.delivery_status == "failed" for e in events)
+    with connect(db_path) as conn:
+        assert push_repo.list_for_user(conn, uid)[0].last_error == "http_503"
 
 
-def test_delivery_no_webhook_skips_events(monkeypatch, tmp_path):
+def test_delivery_is_ok_when_one_of_two_devices_fails(monkeypatch, tmp_path):
+    """The person was reached; the dead device keeps its error note."""
     db_path, svc = _setup(monkeypatch, tmp_path)
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/good")
+    _device(db_path, uid, "https://push.example/flaky")
     _fire_one(db_path, svc)
-    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "")
-    reset_settings_cache()
+    sender = _StubSender(fail_endpoints={"https://push.example/flaky"})
 
-    counts = svc.deliver_pending()
-    assert counts.skipped == 1
-    assert counts.reason == "no_webhook"
-    events = svc.list_recent_events()
-    assert events[0].delivery_status == "skipped"
-    assert events[0].delivered_utc is not None
+    counts = svc.deliver_pending(sender=sender)
+    assert counts.delivered == 1
+    assert counts.pushed == 1
+    assert counts.failed == 0
+    with connect(db_path) as conn:
+        errors = {s.endpoint: s.last_error for s in push_repo.list_for_user(conn, uid)}
+    assert errors == {"https://push.example/good": None, "https://push.example/flaky": "http_503"}
 
 
 def test_delivery_batch_cap_limits_a_single_pass(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    # Fire three events by seeding three tickers with a wildcard rule.
-    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
-    _seed_snap(db_path, "SNTS", 5.0)
-    _seed_snap(db_path, "ORAC", 4.0)
-    _seed_snap(db_path, "SPHC", 3.0)
-    svc.evaluate_all()
+    uid = _member(db_path)
+    _device(db_path, uid, "https://push.example/x")
+    _fire_three(db_path, svc)
+    sender = _StubSender()
 
-    sender = _StubSender(ok=True)
     counts = svc.deliver_pending(sender=sender, limit=2)
     assert counts.delivered == 2
-    # One event still queued for the next pass.
     with connect(db_path) as conn:
         remaining = alerts_repo.count_undelivered(conn)
     assert remaining == 1
 
 
-def test_delivery_stops_on_first_failure(monkeypatch, tmp_path):
-    """A webhook that's failing shouldn't be spammed with every queued
-    event on the same pass — retry the whole batch next time."""
+def test_delivery_email_failure_is_retried(monkeypatch, tmp_path):
     db_path, svc = _setup(monkeypatch, tmp_path)
-    svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
-    _seed_snap(db_path, "SNTS", 5.0)
-    _seed_snap(db_path, "ORAC", 4.0)
-    _seed_snap(db_path, "SPHC", 3.0)
-    svc.evaluate_all()
+    _member(db_path)
+    _fire_one(db_path, svc)
+    mailer = _StubMailer(ok=False)
 
-    sender = _StubSender(ok=False)
-    counts = svc.deliver_pending(sender=sender)
+    counts = svc.deliver_pending(mailer=mailer)
     assert counts.failed == 1
-    assert len(sender.sent) == 1
+    event = svc.list_recent_events()[0]
+    assert event.delivered_utc is None
+    assert event.delivery_status == "failed"
 
 
 # --- F-01: hour-bucket / session dedupe -----------------------------------
@@ -572,33 +744,7 @@ def test_price_move_evaluator_survives_null_last(monkeypatch, tmp_path):
     assert "—" in ev.subject
 
 
-# --- F-05: no webhook leak + no queue wedge on permanent 4xx --------------
-
-
-def test_delivery_result_note_never_contains_webhook_url(
-    monkeypatch, tmp_path
-):
-    """`str(httpx.HTTPError)` used to embed the full webhook URL —
-    including the token — into the log line. The sender must never
-    return the URL in the note."""
-    from kodji.services.alerts import SendResult, _DiscordSender
-
-    _db_path, _svc = _setup(monkeypatch, tmp_path)
-    secret_url = "https://discord.com/api/webhooks/12345/SUPER-SECRET-TOKEN"
-    sender = _DiscordSender(webhook_url=secret_url)
-
-    def _raise(*_a, **_kw):
-        # Emulate httpx.RequestError shape: the URL leaks through str(e).
-        raise httpx.ConnectError(f"connect failed for {secret_url}")
-
-    monkeypatch.setattr(sender.client, "post", _raise)
-    result: SendResult = sender.send(
-        AlertEvent(rule_id=1, kind="price_move", ticker="SNTS",
-                   subject="s", body="b", dedupe_key="k")
-    )
-    assert result.ok is False
-    assert "SUPER-SECRET" not in result.note
-    assert "discord.com" not in result.note
+# --- F-05: no queue wedge on permanent 4xx ---------------------------------
 
 
 def test_delivery_permanent_4xx_leaves_the_queue(monkeypatch, tmp_path):
@@ -606,6 +752,7 @@ def test_delivery_permanent_4xx_leaves_the_queue(monkeypatch, tmp_path):
     at head-of-queue would wedge everything behind it. The event must be
     stamped delivered_utc so the next event in the batch gets a chance."""
     db_path, svc = _setup(monkeypatch, tmp_path)
+    _device(db_path, _member(db_path), "https://push.example/x")
     svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)
@@ -627,6 +774,7 @@ def test_delivery_transient_5xx_keeps_queue_intact(monkeypatch, tmp_path):
     """Transient failures still stop-and-retry: the queue must stay
     intact for the next pass."""
     db_path, svc = _setup(monkeypatch, tmp_path)
+    _device(db_path, _member(db_path), "https://push.example/x")
     svc.create_rule(DEFAULT_ACCOUNT_ID, AlertRule(kind="price_move", ticker=None, threshold_pct=1.0))
     _seed_snap(db_path, "SNTS", 5.0)
     _seed_snap(db_path, "ORAC", 4.0)

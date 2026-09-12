@@ -319,12 +319,14 @@ below. `docs/phases.md` has the full writeup for both phases.
 ## Try it (Phase 6a demo — alerts)
 
 Phase 6a adds a rule engine over the existing snapshots / filings /
-tagged news, and pushes matched events to Discord (optional).
+tagged news. Since PR-AA matched events reach the account's members as
+Web Push notifications (every device they enabled on `/alerts`) or by
+email for members with no device on file — see the PR-AA demo below.
 
 ```bash
 just dev                    # /alerts — create + toggle + delete rules
 just alerts-eval            # one eval pass — fires matching events
-just alerts-deliver         # drain queue via DISCORD_WEBHOOK_URL
+just alerts-deliver         # drain queue: push per device, email otherwise
 ```
 
 Rule kinds:
@@ -341,11 +343,12 @@ Guarantees:
 
 - **Never re-fire.** `(rule_id, dedupe_key)` is UNIQUE at the store
   layer — a re-eval on the same snapshot / filing / news row is a no-op.
-- **Never lose an event.** `delivered_utc IS NULL` is the queue; a
-  webhook outage leaves rows for the next pass. Batch cap
+- **Never lose an event.** `delivered_utc IS NULL` is the queue; a push
+  service or mailer outage leaves rows for the next pass. Batch cap
   (`ALERTS_DELIVERY_BATCH=10`) keeps recovery from becoming a flood.
-- **Degrades quietly.** No `DISCORD_WEBHOOK_URL` → events are marked
-  `skipped` and stay visible on `/alerts` for manual review.
+- **Degrades quietly.** No VAPID keys and no email → events are marked
+  `skipped` and stay visible on `/alerts` for manual review. An account
+  with no reachable member is `skipped` too.
 
 Alerts also run on the scheduler: eval every 15 min during market hours
 (offset +11 from the news poll so tagged relevance has settled), hourly
@@ -820,6 +823,50 @@ fresh sandbox shows card alone.
 Test mode: any mobile number with OTP `123456` mocks a successful mobile
 money payment; test cards are in Flutterwave's docs. Without keys the
 pricing page says checkout is not open and the webhook answers 401.
+
+## Try it (PR-AA demo — installable app + Web Push)
+
+The web app is a PWA: `/manifest.webmanifest`, an icon set, and a service
+worker at `/sw.js` that precaches only the static shell and an `/offline`
+page. It deliberately caches **no data** — every page and HTMX fragment
+comes from the network — so a stale price can never look current.
+
+Alerts go out by Web Push. One-time setup:
+
+```bash
+just vapid-keygen            # prints VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY → paste into .env
+just migrate                 # 0022_push_subscriptions
+just dev
+```
+
+Then open <http://127.0.0.1:8765/alerts>, tap **Enable on this device**,
+accept the browser prompt, and:
+
+```bash
+just alerts-eval             # fire something (or wait for the scheduler)
+just alerts-deliver          # → a notification on that device
+```
+
+What to know:
+
+- **Per device, per user.** A member with two browsers gets two
+  notifications; an account with two members fans out to both. The
+  `devices on file` count on `/alerts` is the signed-in user's own.
+- **Email is the fallback**, not a second copy: a member with no device
+  on file gets the alert by email (needs `RESEND_API_KEY` + `EMAIL_FROM`).
+  That is the iPhone-user-who-never-installed case — iOS delivers Web Push
+  only to an app added to the Home Screen (16.4+); the page says so.
+- **Dead subscriptions clean themselves up.** A 404/410 from the push
+  service deletes the row; the browser's `pushsubscriptionchange` event
+  re-registers a rotated one.
+- **Keep the key pair.** The public key is inside every subscription, so
+  rotating it means every device must enable notifications again.
+- **Discord is ops-only now** (`DISCORD_WEBHOOK_URL` feeds the job
+  watchdog); user alerts never go there.
+
+`/api/push/config` reports whether push is configured; `/api/push/subscribe`
+(POST / DELETE) is what the button calls. Both need a session and the paid
+plan, like the alerts page.
 
 ## Ops — the job watchdog (PR-AB)
 

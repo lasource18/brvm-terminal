@@ -96,6 +96,12 @@ def get_rule(
     return _row_to_rule(r) if r else None
 
 
+def account_for_rule(conn: sqlite3.Connection, rule_id: int) -> int | None:
+    """Who owns a rule — delivery's first hop from an event to its readers."""
+    r = conn.execute("SELECT account_id FROM alert_rules WHERE id = ?", (rule_id,)).fetchone()
+    return int(r["account_id"]) if r else None
+
+
 def set_enabled(
     conn: sqlite3.Connection, account_id: int, rule_id: int, enabled: bool
 ) -> int:
