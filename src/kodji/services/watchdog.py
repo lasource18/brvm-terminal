@@ -281,6 +281,7 @@ def check(
     now: datetime,
     watch_since: datetime | None,
     streaks: Callable[[str], int] | None = None,
+    process_started: datetime | None = None,
 ) -> list[Problem]:
     """Compare every job's recent due times with its last recorded run.
 
@@ -290,6 +291,11 @@ def check(
     time before it is unjudgeable and skipped. Pure apart from those two
     inputs, so the tests drive it with real CronTriggers and a frozen
     clock.
+
+    A job that has *never* run is only held to due times after
+    `process_started`: a deploy that adds a job must not be reported for
+    the cron minutes that passed before the job existed. Once it has run
+    once, a gap across a restart counts like any other.
     """
     problems: list[Problem] = []
     for job in jobs:
@@ -307,6 +313,8 @@ def check(
             continue
 
         last = runs.get(job.id)
+        if last is None and process_started is not None and threshold < process_started:
+            continue
         if last is not None and last.status == "running":
             runtime = now - last.started
             if runtime > max_runtime(job.id):
@@ -350,6 +358,7 @@ def _scan(conn, jobs: Sequence[JobSpec], now: datetime) -> list[Problem]:
         now=now,
         watch_since=since,
         streaks=lambda job_id: runs_repo.failure_streak(conn, job_id),
+        process_started=PROCESS_STARTED,
     )
 
 
