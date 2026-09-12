@@ -425,6 +425,38 @@ def pricing_page(request: Request):
     )
 
 
+LEGAL_PAGES = ("terms", "privacy", "refunds")
+LEGAL_EFFECTIVE_DATE = "2026-09-12"
+
+
+@router.get("/legal/{page}", response_class=HTMLResponse)
+def legal_page(request: Request, page: str):
+    """Terms, privacy and refund policy — public, bilingual, and what a
+    payment provider's verification team reads first."""
+    if page not in LEGAL_PAGES:
+        raise HTTPException(status_code=404)
+    locale = base_ctx(request)["locale"]
+    month, year = billing_svc.PERIODS["month"], billing_svc.PERIODS["year"]
+    return templates.TemplateResponse(
+        request,
+        f"legal_{page}.html",
+        {
+            **base_ctx(request),
+            "effective_date": LEGAL_EFFECTIVE_DATE,
+            "entity": settings.legal_entity,
+            "address": settings.legal_address,
+            "contact": settings.email_reply_to or settings.email_from or "",
+            "base_url": settings.public_base_url or str(request.base_url).rstrip("/"),
+            "price_month": billing_svc.fmt_xof(month.price_xof),
+            "price_year": billing_svc.fmt_xof(year.price_xof),
+            "period_month": month.label_fr if locale == "fr" else month.label_en,
+            "period_year": year.label_fr if locale == "fr" else year.label_en,
+            "guarantee_days": settings.refund_guarantee_days,
+            "session_days": settings.session_ttl_days,
+        },
+    )
+
+
 @router.get("/health")
 def health():
     """Liveness plus the scheduler's own verdict.

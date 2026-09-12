@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ "Refund policy"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+<article class="prose">
+{% if locale == "fr" %}
+  <h1 class="page-title">Politique de remboursement</h1>
+  <p class="dim">Version du {{ effective_date }}.</p>
+
+  <h2>1. Ce que vous achetez</h2>
+  <p>Un paiement achète l'accès à l'offre payante pour une période fixe de {{ period_month }} ({{ price_month }}) ou de {{ period_year }} ({{ price_year }}), sans reconduction automatique. Un nouveau paiement prolonge la période en cours à partir de sa date de fin. Rien n'est prélevé sans une action de votre part.</p>
+
+  <h2>2. Garantie sur le premier paiement</h2>
+  <p>Si l'offre payante ne vous convient pas, votre <strong>premier</strong> paiement est remboursable intégralement sur simple demande dans les <strong>{{ guarantee_days }} jours</strong> qui suivent. L'accès payant prend fin au remboursement.</p>
+
+  <h2>3. Après cette garantie</h2>
+  <p>Les paiements suivants et les prolongations ne sont pas remboursables, la période ayant été mise à votre disposition. Vous pouvez laisser votre période se terminer sans rien faire : aucun autre paiement ne sera demandé.</p>
+
+  <h2>4. Erreurs et doublons</h2>
+  <p>Un paiement débité deux fois, un montant incorrect ou un paiement débité sans activation de l'offre est remboursé intégralement, ou corrigé par prolongation de la période, dès vérification auprès du prestataire de paiement.</p>
+
+  <h2>5. Comment demander</h2>
+  <p>Écrivez à <a href="mailto:{{ contact }}">{{ contact }}</a> depuis l'adresse de votre compte en indiquant la référence du paiement (visible sur votre page « Mon abonnement »). Nous répondons sous cinq jours ouvrés. Le remboursement est effectué vers le même moyen de paiement (même portefeuille mobile money ou même carte), généralement sous dix jours ouvrés selon le prestataire et l'opérateur.</p>
+
+  <h2>6. Droit applicable</h2>
+  <p>Cette politique est publiée par {{ entity }}, {{ address }}. Elle complète les <a href="/legal/terms">conditions générales d'utilisation</a> et est régie par le droit ivoirien.</p>
+{% else %}
+  <h1 class="page-title">Refund policy</h1>
+  <p class="dim">Version dated {{ effective_date }}.</p>
+
+  <h2>1. What you buy</h2>
+  <p>A payment buys access to the paid plan for a fixed period of {{ period_month }} ({{ price_month }}) or {{ period_year }} ({{ price_year }}), with no automatic renewal. A further payment extends the current period from its end date. Nothing is charged without an action on your part.</p>
+
+  <h2>2. Guarantee on the first payment</h2>
+  <p>If the paid plan is not for you, your <strong>first</strong> payment is fully refundable on request within <strong>{{ guarantee_days }} days</strong>. Paid access ends when the refund is issued.</p>
+
+  <h2>3. After the guarantee</h2>
+  <p>Subsequent payments and extensions are not refundable, the period having been made available to you. You may simply let your period end: no further payment will be requested.</p>
+
+  <h2>4. Errors and duplicates</h2>
+  <p>A payment charged twice, an incorrect amount, or a payment charged without the plan being activated is refunded in full, or corrected by extending the period, once verified with the payment provider.</p>
+
+  <h2>5. How to ask</h2>
+  <p>Write to <a href="mailto:{{ contact }}">{{ contact }}</a> from your account's address with the payment reference (shown on your "My plan" page). We answer within five working days. Refunds go back to the same payment method (same mobile money wallet or same card), usually within ten working days depending on the provider and operator.</p>
+
+  <h2>6. Governing law</h2>
+  <p>This policy is published by {{ entity }}, {{ address }}. It supplements the <a href="/legal/terms">terms of service</a> and is governed by the law of Côte d'Ivoire.</p>
+{% endif %}
+</article>
+{% endblock %}

@@ -220,6 +220,14 @@ class Settings(BaseSettings):
     price_month_xof: int = 12_000
     price_year_xof: int = 120_000
 
+    # --- Legal pages (/legal/*) ---
+    # Who operates the service, as printed on the terms, privacy and refund
+    # pages. Update when the Côte d'Ivoire company exists (name + RCCM).
+    legal_entity: str = "Kodji Terminal"
+    legal_address: str = "Abidjan, Côte d'Ivoire"
+    # Money-back window on a customer's FIRST paid period.
+    refund_guarantee_days: int = 7
+
     http_user_agent: str = Field(default="kodji-terminal/0.1 (+contact: cmguinan@yahoo.fr)")
     http_timeout_s: float = 15.0
 

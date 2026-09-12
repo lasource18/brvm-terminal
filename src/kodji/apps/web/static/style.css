@@ -566,3 +566,14 @@ article.brief-body strong { color: var(--fg); }
 .plan-buy form { margin: 0; }
 .plan-buy button.upgrade-cta { background: transparent; font: inherit; cursor: pointer; }
 .plan-note { margin-top: 10px; font-size: 12px; }
+
+/* Legal pages + footer */
+.prose { max-width: 760px; line-height: 1.6; font-size: 13px; }
+.prose h2 { color: var(--accent); font-size: 12px; margin: 22px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+.prose p, .prose li { margin: 6px 0; }
+.prose ul { padding-left: 18px; }
+.prose a { color: var(--accent); }
+.site-footer { margin: 32px 0 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.site-footer a { color: var(--fg-dim, inherit); text-decoration: none; }
+.site-footer a:hover { color: var(--accent); }
+.site-footer .footer-note { flex-basis: 100%; }
