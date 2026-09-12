@@ -19,6 +19,13 @@ hangs on macOS.
 **`--timeout` is what actually ends a capture.** These pages poll (HTMX
 auto-refresh, chart data), so `--virtual-time-budget` never expires and
 Chrome waits forever.
+
+**It captures as a signed-in, paid user.** Since PR-Z an anonymous
+request is the free tier, which hides Chart, Brief and Analyst behind a
+402 — the very pages the set exists to show. Headless Chrome has no
+cookie jar to hand a session to, so `identity_for` is replaced with one
+that answers "account 1, demo@kodji.app" for every request; account 1
+has been paid since migration 0019. The patch lives in this process only.
 """
 
 from __future__ import annotations
@@ -43,16 +50,20 @@ CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 # are sized to the content — French copy runs longer than English, so a
 # shot that gains a row needs its height bumped here, not cropped after.
 SHOTS = [
-    ("01-market-overview.png", "/", (1600, 800)),
+    ("01-market-overview.png", "/", (1600, 720)),
     ("02-security-chart-snts.png", "/s/SNTS/chart", (1600, 660)),
     ("03-financials-snts.png", "/s/SNTS/financials", (1600, 2290)),
     ("04-news-feed.png", "/news", (1600, 1312)),
-    ("06-daily-brief.png", "/brief", (1600, 860)),
-    # Narrower than the rest: at 1600 the prose column leaves half the
-    # frame empty. 1400 is the floor that still fits the FR topbar on one row.
-    ("07-analyst-note-snts.png", "/s/SNTS/analyst", (1400, 1610)),
+    ("06-daily-brief.png", "/brief", (1600, 770)),
+    # Same width as the rest: the signed-in topbar (email + sign-out) no
+    # longer fits on one row at 1400, and the archive column fills the
+    # right-hand side that used to sit empty.
+    ("07-analyst-note-snts.png", "/s/SNTS/analyst", (1600, 1500)),
 ]
 TUI_SHOT = "05-tui.png"
+# What the topbar shows as the signed-in user. A real-looking placeholder,
+# not a real mailbox.
+DEMO_EMAIL = "demo@kodji.app"
 
 
 def _free_port() -> int:
@@ -85,15 +96,22 @@ def _serve(port: int) -> threading.Thread:
     class _NoopScheduler:
         def start(self): ...
         def shutdown(self, wait=False): ...
-        def get_jobs(self): return []
+        def get_jobs(self):
+            return []
 
     sched_mod.build_scheduler = lambda *a, **k: _NoopScheduler()
 
+    # Every caller resolves identity through the module attribute (never
+    # `from ... import identity_for`), so one patch covers gating, the
+    # topbar email and the billing page alike.
+    from kodji.services import accounts as accounts_svc
+
+    demo = accounts_svc.Identity(user_id=1, account_id=1, email=DEMO_EMAIL)
+    accounts_svc.identity_for = lambda request=None: demo
+
     from kodji.apps.web.main import app
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    )
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
     t = threading.Thread(target=server.run, daemon=True)
     t.start()
     for _ in range(100):
@@ -108,10 +126,16 @@ def _serve(port: int) -> threading.Thread:
 def _capture(url: str, out: Path, size: tuple[int, int]) -> None:
     subprocess.run(
         [
-            CHROME, "--headless=old", "--no-sandbox", "--disable-gpu",
-            "--hide-scrollbars", "--force-device-scale-factor=2",
-            f"--window-size={size[0]},{size[1]}", "--timeout=12000",
-            f"--screenshot={out}", url,
+            CHROME,
+            "--headless=old",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            "--force-device-scale-factor=2",
+            f"--window-size={size[0]},{size[1]}",
+            "--timeout=12000",
+            f"--screenshot={out}",
+            url,
         ],
         check=True,
         capture_output=True,
@@ -123,22 +147,31 @@ def _capture_tui(out: Path, locale: str) -> None:
     widget tree against the real database and writes an SVG we rasterise."""
     import asyncio
 
-    from kodji.apps.tui.app import KodjiApp
+    from kodji.apps.tui.app import KodjiTerminalApp
 
     svg = out.with_suffix(".svg")
 
     async def run() -> None:
-        app = KodjiApp()
+        app = KodjiTerminalApp()
         async with app.run_test(size=(190, 46)):
             await asyncio.sleep(3)
             app.save_screenshot(str(svg))
 
     asyncio.run(run())
     subprocess.run(
-        [CHROME, "--headless=old", "--no-sandbox", "--disable-gpu",
-         "--force-device-scale-factor=2", "--window-size=2336,1173",
-         "--timeout=8000", f"--screenshot={out}", svg.as_uri()],
-        check=True, capture_output=True,
+        [
+            CHROME,
+            "--headless=old",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--force-device-scale-factor=2",
+            "--window-size=2336,1173",
+            "--timeout=8000",
+            f"--screenshot={out}",
+            svg.as_uri(),
+        ],
+        check=True,
+        capture_output=True,
     )
     svg.unlink()
 
