@@ -181,6 +181,34 @@ def test_weekly_job_missed_last_saturday():
     assert "due 2026-09-05T20:00:00Z" in problems[0].note
 
 
+def test_a_job_added_by_a_deploy_is_not_missed_for_the_past():
+    """The billing jobs shipped with PR-Z: on the first pass after that
+    deploy the watchdog reported them missed for cron minutes that
+    predated their existence, and emailed. A never-run job is judged
+    only against due times after the process that registered it came up."""
+    booted = at("2026-09-09T15:50:00")
+    # Due 15:45 today, before boot: not judged.
+    problems = check(
+        [BRIEF], {}, now=at("2026-09-09T16:00:00"), watch_since=SINCE, process_started=booted
+    )
+    assert problems == []
+    # Next day's 15:45 is after boot and still unrun: reported.
+    problems = check(
+        [BRIEF], {}, now=at("2026-09-10T16:00:00"), watch_since=SINCE, process_started=booted
+    )
+    assert [p.key for p in problems] == ["brief_daily:missed"]
+    # A job that HAS run before is still held across a restart.
+    ran = run("brief_daily", "2026-09-08T15:45:02")
+    problems = check(
+        [BRIEF],
+        {ran.job_id: ran},
+        now=at("2026-09-09T16:00:00"),
+        watch_since=SINCE,
+        process_started=booted,
+    )
+    assert [p.key for p in problems] == ["brief_daily:missed"]
+
+
 def test_watchdog_never_checks_itself():
     assert _check([WATCHDOG], [], at("2026-09-09T12:00:00")) == []
 
