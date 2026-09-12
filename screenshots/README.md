@@ -30,6 +30,13 @@ to the live DB or fire a job. It is not offline, though: routes that fetch on
 demand (the chart tab pulls history) still reach the network — they just land in
 the throwaway copy.
 
+The shots are taken **as a signed-in, paid user** (`demo@kodji.app` in the
+topbar). Since PR-Z an anonymous request is the free tier, which would turn the
+Chart, Brief and Analyst pages into a 402 upgrade wall. Headless Chrome has no
+cookie jar to hand a session to, so the script swaps `identity_for` for one that
+answers "account 1" for every request — account 1 has been paid since migration
+0019. The patch lives in the capture process only.
+
 Per-shot window sizes live in the `SHOTS` table at the top of the script. French
 copy runs longer than English, so a shot that gains a row needs its height bumped
 there rather than cropped afterwards.
