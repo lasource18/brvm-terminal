@@ -28,6 +28,27 @@ LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+def _static_version() -> str:
+    """Short digest of the shipped CSS/JS, appended as `?v=` to their URLs.
+
+    Cloudflare caches /static for hours per edge location and phones
+    cache it longer; without this a deploy that changes the stylesheet
+    leaves users on the old layout until the caches expire. A new digest
+    is a new URL, fetched fresh everywhere. Computed once at import.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for name in ("style.css", "app.js"):
+        f = STATIC_DIR / name
+        if f.is_file():
+            h.update(f.read_bytes())
+    return h.hexdigest()[:10]
+
+
+STATIC_VERSION = _static_version()
+
+
 def _ctx_locale(ctx: Context) -> Locale:
     """The effective locale for one render, in priority order:
 
@@ -126,4 +147,5 @@ def base_ctx(request: Request) -> dict:
         "is_paid": _plan_for(identity) == PAID_PLAN,
         # Footer: support address (the sign-in reply-to) and the legal links.
         "contact_email": settings.email_reply_to,
+        "static_v": STATIC_VERSION,
     }

@@ -268,3 +268,13 @@ def test_topbar_search_input_present(client):
     r = client.get("/")
     assert 'id="search-input"' in r.text
     assert 'hx-get="/_frag/search"' in r.text
+
+
+def test_static_assets_are_version_stamped(client):
+    """Cloudflare and phones cache /static for hours; a deploy that changes
+    the CSS must change its URL or users keep the old layout."""
+    from kodji.apps.web._common import STATIC_VERSION
+
+    body = client.get("/").text
+    assert f'href="/static/style.css?v={STATIC_VERSION}"' in body
+    assert len(STATIC_VERSION) == 10
