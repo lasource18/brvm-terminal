@@ -11,6 +11,7 @@ from jinja2.runtime import Context
 
 from kodji import __version__
 from kodji.clock import is_market_open, now_abidjan
+from kodji.config import settings
 from kodji.i18n import DEFAULT_LOCALE, Locale, normalize, translate
 from kodji.services import accounts as accounts_svc
 from kodji.store.accounts import FREE_PLAN, PAID_PLAN
@@ -123,4 +124,6 @@ def base_ctx(request: Request) -> dict:
         # Drives which nav links the topbar offers (PR-Y). Resolved from
         # the identity already in hand rather than re-reading the cookie.
         "is_paid": _plan_for(identity) == PAID_PLAN,
+        # Footer: support address (the sign-in reply-to) and the legal links.
+        "contact_email": settings.email_reply_to,
     }

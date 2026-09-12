@@ -151,6 +151,16 @@ _FR: dict[str, str] = {
     "Sign in to subscribe": "Connectez-vous pour vous abonner",
     "Active until": "Actif jusqu'au",
     "Payment history": "Historique des paiements",
+    # ---- legal + footer ----
+    "Terms": "Conditions",
+    "Privacy": "Confidentialité",
+    "Refunds": "Remboursements",
+    "Terms of service": "Conditions générales d'utilisation",
+    "Privacy policy": "Politique de confidentialité",
+    "Refund policy": "Politique de remboursement",
+    "Data from public sources (BRVM, Sikafinance, AFX), delayed. Not investment advice.":
+        "Données issues de sources publiques (BRVM, Sikafinance, AFX), différées. "
+        "Ceci n'est pas un conseil en investissement.",
     "My plan": "Mon abonnement",
     "My plan and payment history": "Mon abonnement et l'historique des paiements",
     "Expired": "Expiré",

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ "Privacy policy"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+<article class="prose">
+{% if locale == "fr" %}
+  <h1 class="page-title">Politique de confidentialité</h1>
+  <p class="dim">Version du {{ effective_date }}.</p>
+
+  <h2>1. Responsable du traitement</h2>
+  <p>{{ entity }}, {{ address }}. Contact : <a href="mailto:{{ contact }}">{{ contact }}</a>. Le traitement est soumis à la loi ivoirienne n° 2013-450 relative à la protection des données à caractère personnel.</p>
+
+  <h2>2. Ce que nous collectons</h2>
+  <ul>
+    <li><strong>Adresse e-mail</strong> : pour créer votre compte, vous connecter et vous envoyer les messages liés au service (lien de connexion, rappels d'échéance, fin d'abonnement).</li>
+    <li><strong>Cookies</strong> : un cookie de session (identifiant aléatoire, jamais votre e-mail en clair) et un cookie de langue. Aucun cookie publicitaire ni de suivi tiers.</li>
+    <li><strong>Vos données d'usage</strong> : listes de suivi, règles d'alerte, préférences. Elles vous appartiennent et servent uniquement à faire fonctionner le service.</li>
+    <li><strong>Paiements</strong> : la référence, le montant, la période, le moyen de paiement (par ex. « mobile money ») et l'identifiant de transaction transmis par le prestataire de paiement. Nous ne recevons jamais votre numéro de carte ni votre numéro mobile money ; ils sont saisis chez le prestataire.</li>
+    <li><strong>Journaux techniques</strong> : adresses IP et requêtes, conservés brièvement à des fins de sécurité et de diagnostic.</li>
+  </ul>
+
+  <h2>3. Ce que nous ne faisons pas</h2>
+  <p>Nous ne vendons ni ne louons vos données. Nous ne faisons pas de publicité ciblée. Nous n'envoyons pas de messages commerciaux sans votre accord.</p>
+
+  <h2>4. Sous-traitants</h2>
+  <ul>
+    <li>Hébergement : serveur privé chez Vultr (Union européenne), derrière Cloudflare (réseau mondial, protection et diffusion).</li>
+    <li>E-mails transactionnels : Resend.</li>
+    <li>Paiements : le prestataire indiqué sur la page de paiement (Paystack ou Flutterwave), qui applique sa propre politique de confidentialité.</li>
+    <li>Sauvegardes chiffrées : Cloudflare R2.</li>
+  </ul>
+
+  <h2>5. Durée de conservation</h2>
+  <p>Votre compte et vos données d'usage sont conservés tant que le compte existe. Les sessions expirent après {{ session_days }} jours. Les enregistrements de paiement sont conservés dix ans pour les obligations comptables. Les journaux techniques sont conservés au plus quelques semaines.</p>
+
+  <h2>6. Vos droits</h2>
+  <p>Vous pouvez demander l'accès, la rectification ou la suppression de vos données, ou la fermeture de votre compte, en écrivant à <a href="mailto:{{ contact }}">{{ contact }}</a> depuis l'adresse du compte. Nous répondons sous trente jours. Vous pouvez saisir l'Autorité de Régulation des Télécommunications/TIC de Côte d'Ivoire (ARTCI) en cas de désaccord.</p>
+
+  <h2>7. Sécurité</h2>
+  <p>Connexions chiffrées (HTTPS), jetons de session hachés, accès serveur restreint, sauvegardes chiffrées. Aucun mot de passe n'est stocké puisqu'il n'y en a pas.</p>
+
+  <h2>8. Modifications</h2>
+  <p>La version en vigueur est celle publiée ici avec sa date. Une modification substantielle vous sera signalée par e-mail.</p>
+{% else %}
+  <h1 class="page-title">Privacy policy</h1>
+  <p class="dim">Version dated {{ effective_date }}.</p>
+
+  <h2>1. Controller</h2>
+  <p>{{ entity }}, {{ address }}. Contact: <a href="mailto:{{ contact }}">{{ contact }}</a>. Processing is subject to Côte d'Ivoire's law no. 2013-450 on the protection of personal data.</p>
+
+  <h2>2. What we collect</h2>
+  <ul>
+    <li><strong>Email address</strong>: to create your account, sign you in, and send service messages (sign-in link, renewal reminders, end of plan).</li>
+    <li><strong>Cookies</strong>: a session cookie (a random identifier, never your email in clear) and a language cookie. No advertising or third-party tracking cookies.</li>
+    <li><strong>Your usage data</strong>: watchlists, alert rules, preferences. They are yours and are used only to run the service.</li>
+    <li><strong>Payments</strong>: the reference, amount, period, payment method (e.g. "mobile money") and transaction id passed back by the payment provider. We never receive your card number or mobile money number; they are entered at the provider.</li>
+    <li><strong>Technical logs</strong>: IP addresses and requests, kept briefly for security and diagnostics.</li>
+  </ul>
+
+  <h2>3. What we do not do</h2>
+  <p>We do not sell or rent your data. We do not run targeted advertising. We do not send marketing messages without your consent.</p>
+
+  <h2>4. Processors</h2>
+  <ul>
+    <li>Hosting: a private server at Vultr (European Union), behind Cloudflare (global network, protection and delivery).</li>
+    <li>Transactional email: Resend.</li>
+    <li>Payments: the provider named on the payment page (Paystack or Flutterwave), under its own privacy policy.</li>
+    <li>Encrypted backups: Cloudflare R2.</li>
+  </ul>
+
+  <h2>5. Retention</h2>
+  <p>Your account and usage data are kept for as long as the account exists. Sessions expire after {{ session_days }} days. Payment records are kept for ten years for accounting obligations. Technical logs are kept for at most a few weeks.</p>
+
+  <h2>6. Your rights</h2>
+  <p>You may request access to, correction or deletion of your data, or closure of your account, by writing to <a href="mailto:{{ contact }}">{{ contact }}</a> from the account's address. We answer within thirty days. You may refer a disagreement to Côte d'Ivoire's telecommunications and ICT regulator (ARTCI).</p>
+
+  <h2>7. Security</h2>
+  <p>Encrypted connections (HTTPS), hashed session tokens, restricted server access, encrypted backups. No passwords are stored, because there are none.</p>
+
+  <h2>8. Changes</h2>
+  <p>The version in force is the one published here with its date. A material change will be announced by email.</p>
+{% endif %}
+</article>
+{% endblock %}

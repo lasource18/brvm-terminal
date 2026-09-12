@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}{{ "Terms of service"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+<article class="prose">
+{% if locale == "fr" %}
+  <h1 class="page-title">Conditions générales d'utilisation</h1>
+  <p class="dim">Version du {{ effective_date }}.</p>
+
+  <h2>1. Le service</h2>
+  <p>Kodji Terminal (« Kodji », « nous ») est un terminal d'information sur les valeurs cotées à la Bourse Régionale des Valeurs Mobilières (BRVM), accessible à l'adresse {{ base_url }}. Il est exploité par {{ entity }}, {{ address }}. Contact : <a href="mailto:{{ contact }}">{{ contact }}</a>.</p>
+  <p>Kodji présente des cotations, historiques, états financiers, opérations sur titres et actualités provenant de sources publiques (BRVM, Sikafinance, AFX et autres sites publics), ainsi que des traitements que nous réalisons sur ces données : graphiques, ratios, comparaisons, résumés et alertes, dont certains sont produits automatiquement par des modèles de langage.</p>
+
+  <h2>2. Pas un conseil en investissement</h2>
+  <p>Kodji est un outil d'information. Rien sur le service ne constitue un conseil en investissement, une recommandation d'achat ou de vente, ni une sollicitation. Les résumés et notes signalés comme générés automatiquement peuvent contenir des erreurs. Les décisions d'investissement relèvent de votre seule responsabilité ; consultez un conseiller agréé par l'AMF-UMOA si nécessaire.</p>
+
+  <h2>3. Données et sources</h2>
+  <p>Les données sont fournies « en l'état », sans garantie d'exactitude, d'exhaustivité ni de délai. Les cotations sont différées et peuvent différer des cours officiels publiés par la BRVM. Les sources restent titulaires de leurs droits sur leurs contenus ; Kodji les cite et ne prétend pas s'y substituer.</p>
+
+  <h2>4. Compte et accès</h2>
+  <p>La connexion se fait par lien ou code envoyé à votre adresse e-mail, sans mot de passe. Vous êtes responsable de l'accès à votre messagerie. Un compte est personnel ; le partage d'accès et l'extraction automatisée du service (scraping, robots) sont interdits.</p>
+
+  <h2>5. Offre gratuite et offre payante</h2>
+  <p>L'offre gratuite donne accès aux faits bruts du marché. L'offre payante donne accès aux traitements de Kodji, pour une période fixe de {{ period_month }} ({{ price_month }}) ou de {{ period_year }} ({{ price_year }}). Le paiement est unique et sans reconduction automatique : la période prend fin à la date indiquée sur votre page « Mon abonnement », sauf prolongation par un nouveau paiement. Les remboursements sont régis par la <a href="/legal/refunds">politique de remboursement</a>.</p>
+  <p>Les paiements sont traités par un prestataire de paiement tiers ; Kodji ne reçoit ni ne conserve vos numéros de carte ou identifiants mobile money.</p>
+
+  <h2>6. Disponibilité</h2>
+  <p>Nous nous efforçons de maintenir le service disponible mais ne garantissons pas une disponibilité continue. Une interruption ne donne pas lieu à indemnité, sauf prolongation de la période payée à notre discrétion en cas d'indisponibilité prolongée.</p>
+
+  <h2>7. Responsabilité</h2>
+  <p>Dans la limite permise par la loi, la responsabilité de Kodji au titre du service est limitée au montant payé pour la période en cours. Kodji n'est pas responsable des pertes liées à des décisions d'investissement, à l'inexactitude des données de source ou à l'indisponibilité du service.</p>
+
+  <h2>8. Résiliation</h2>
+  <p>Vous pouvez cesser d'utiliser le service à tout moment ; sans nouveau paiement, votre compte repasse en offre gratuite à l'échéance. Nous pouvons suspendre un compte en cas de violation des présentes conditions, notamment d'extraction automatisée.</p>
+
+  <h2>9. Droit applicable</h2>
+  <p>Les présentes conditions sont régies par le droit ivoirien. Tout litige relève des tribunaux compétents d'Abidjan, après tentative de résolution amiable par e-mail.</p>
+
+  <h2>10. Modifications</h2>
+  <p>Nous pouvons modifier ces conditions ; la version en vigueur est celle publiée à cette adresse, avec sa date. Une modification substantielle vous sera signalée par e-mail.</p>
+{% else %}
+  <h1 class="page-title">Terms of service</h1>
+  <p class="dim">Version dated {{ effective_date }}.</p>
+
+  <h2>1. The service</h2>
+  <p>Kodji Terminal ("Kodji", "we") is an information terminal for securities listed on the Bourse Régionale des Valeurs Mobilières (BRVM), available at {{ base_url }}. It is operated by {{ entity }}, {{ address }}. Contact: <a href="mailto:{{ contact }}">{{ contact }}</a>.</p>
+  <p>Kodji presents quotes, price history, financial statements, corporate actions and news from public sources (BRVM, Sikafinance, AFX and other public sites), together with our own processing of that data: charts, ratios, comparisons, summaries and alerts, some of which are generated automatically by language models.</p>
+
+  <h2>2. Not investment advice</h2>
+  <p>Kodji is an information tool. Nothing on the service is investment advice, a recommendation to buy or sell, or a solicitation. Summaries and notes marked as machine-generated may contain errors. Investment decisions are your sole responsibility; consult an adviser licensed by AMF-UMOA where appropriate.</p>
+
+  <h2>3. Data and sources</h2>
+  <p>Data is provided "as is", with no warranty of accuracy, completeness or timeliness. Quotes are delayed and may differ from the official prices published by the BRVM. Sources retain their rights over their content; Kodji cites them and does not claim to replace them.</p>
+
+  <h2>4. Account and access</h2>
+  <p>Sign-in is by a link or code sent to your email address, with no password. You are responsible for access to your mailbox. An account is personal; sharing access and automated extraction of the service (scraping, bots) are prohibited.</p>
+
+  <h2>5. Free and paid plans</h2>
+  <p>The free plan gives access to raw market facts. The paid plan gives access to Kodji's own processing for a fixed period of {{ period_month }} ({{ price_month }}) or {{ period_year }} ({{ price_year }}). Payment is one-off with no automatic renewal: the period ends on the date shown on your "My plan" page unless extended by a further payment. Refunds are governed by the <a href="/legal/refunds">refund policy</a>.</p>
+  <p>Payments are processed by a third-party payment provider; Kodji neither receives nor stores your card numbers or mobile money credentials.</p>
+
+  <h2>6. Availability</h2>
+  <p>We aim to keep the service available but do not guarantee uninterrupted availability. An outage gives no right to compensation, other than an extension of the paid period at our discretion in case of prolonged unavailability.</p>
+
+  <h2>7. Liability</h2>
+  <p>To the extent permitted by law, Kodji's liability in connection with the service is limited to the amount paid for the current period. Kodji is not liable for losses arising from investment decisions, from inaccuracies in source data, or from unavailability of the service.</p>
+
+  <h2>8. Termination</h2>
+  <p>You may stop using the service at any time; without a further payment your account returns to the free plan at the end of the period. We may suspend an account that breaches these terms, in particular for automated extraction.</p>
+
+  <h2>9. Governing law</h2>
+  <p>These terms are governed by the law of Côte d'Ivoire. Disputes fall under the competent courts of Abidjan, after an attempt at amicable resolution by email.</p>
+
+  <h2>10. Changes</h2>
+  <p>We may change these terms; the version in force is the one published at this address, with its date. A material change will be announced by email.</p>
+{% endif %}
+</article>
+{% endblock %}

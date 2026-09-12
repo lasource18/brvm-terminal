@@ -80,5 +80,19 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer">
+    <a href="/legal/terms">{{ "Terms"|t }}</a>
+    <span class="dim">·</span>
+    <a href="/legal/privacy">{{ "Privacy"|t }}</a>
+    <span class="dim">·</span>
+    <a href="/legal/refunds">{{ "Refunds"|t }}</a>
+    <span class="dim">·</span>
+    <a href="/pricing">{{ "Plans"|t }}</a>
+    {% if contact_email %}
+      <span class="dim">·</span>
+      <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+    {% endif %}
+    <span class="dim footer-note">{{ "Data from public sources (BRVM, Sikafinance, AFX), delayed. Not investment advice."|t }}</span>
+  </footer>
 </body>
 </html>
