@@ -22,11 +22,10 @@ would have to reconstruct which of the three it was from headers it
 doesn't otherwise care about. Mirrors `_refuse_cross_origin` in
 `routes/auth.py`, which solves the same problem for CSRF.
 
-**Anonymous readers are free-tier, not blocked.** `current_account_id`
-resolves a request with no session to the default account, whose
-subscription reads `free`. So gating works without `AUTH_REQUIRED` being
-on: a visitor sees the free product and an upgrade prompt, rather than a
-login wall in front of public market data.
+**Anonymous readers are free-tier, not blocked.** A request with no
+session is the free plan regardless of `AUTH_REQUIRED` — never account
+1's plan, which is paid. A visitor sees the free product and an upgrade
+prompt, rather than a login wall in front of public market data.
 """
 
 from __future__ import annotations
@@ -51,11 +50,14 @@ def plan_for_request(request: Request) -> str:
     otherwise blow up inside a gating check, and "we could not identify
     you" resolves to the free tier here — the safe direction.
     """
-    try:
-        account_id = accounts_svc.current_account_id(request)
-    except accounts_svc.NotAuthenticated:
+    identity = accounts_svc.identity_for(request)
+    if identity is None:
+        # PR-Z: no session means the free tier, whether or not
+        # AUTH_REQUIRED is on. Account 1 has been paid since 0019, so
+        # resolving an anonymous caller to it would sell the paid
+        # product to everyone the moment the flag was forgotten.
         return "free"
-    return accounts_svc.plan_for(account_id)
+    return accounts_svc.plan_for(identity.account_id)
 
 
 def is_paid(request: Request) -> bool:

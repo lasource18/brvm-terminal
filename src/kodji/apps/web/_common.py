@@ -13,7 +13,7 @@ from kodji import __version__
 from kodji.clock import is_market_open, now_abidjan
 from kodji.i18n import DEFAULT_LOCALE, Locale, normalize, translate
 from kodji.services import accounts as accounts_svc
-from kodji.store.accounts import DEFAULT_ACCOUNT_ID, PAID_PLAN
+from kodji.store.accounts import FREE_PLAN, PAID_PLAN
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -80,12 +80,16 @@ templates.env.globals["current_locale"] = _current_locale
 def _plan_for(identity: accounts_svc.Identity | None) -> str:
     """Plan for an already-resolved identity.
 
-    Anonymous readers fall to the default account, which matches
-    `current_account_id`'s behaviour with `AUTH_REQUIRED` off — the
-    single-user deployment keeps whatever plan account 1 holds.
+    Anonymous readers are the free tier, full stop (PR-Z). Before, with
+    `AUTH_REQUIRED` off, they fell to the default account — which has
+    been *paid* since migration 0019, so a deployment that forgot the
+    flag handed every visitor the paid product. Data access for the
+    anonymous case still resolves through `current_account_id`; only
+    what the product *shows* is decided here.
     """
-    account_id = identity.account_id if identity else DEFAULT_ACCOUNT_ID
-    return accounts_svc.plan_for(account_id)
+    if identity is None:
+        return FREE_PLAN
+    return accounts_svc.plan_for(identity.account_id)
 
 
 def resolve_locale(request: Request) -> Locale:

@@ -42,6 +42,7 @@ def db(monkeypatch, tmp_db_path: Path):
     monkeypatch.setenv("FLW_SECRET_KEY", "FLWSECK_TEST-secret")
     monkeypatch.setenv("FLW_WEBHOOK_HASH", "hash-123")
     monkeypatch.setenv("FLW_API_BASE", API)
+    monkeypatch.setenv("BILLING_PROVIDER", "flutterwave")
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://kodji.test")
     monkeypatch.setenv("RESEND_API_KEY", "")
     monkeypatch.setenv("EMAIL_FROM", "")
@@ -138,7 +139,7 @@ def test_start_checkout_records_pending_and_posts_the_right_payload(db):
     assert body["redirect_url"] == "https://kodji.test/billing/return"
     assert body["customer"] == {"email": EMAIL}
     assert body["meta"] == {"account_id": str(account_id), "period": "month"}
-    assert "payment_options" not in body  # dashboard decides the methods
+    assert body["payment_options"] == "card, mobilemoneyxof"
 
     with connect(path) as conn:
         row = payments_repo.get_by_tx_ref(conn, out.tx_ref)
@@ -364,11 +365,12 @@ def _event(tx_ref: str, **over) -> bytes:
 def test_webhook_rejects_bad_or_missing_hash(db):
     fw = FakeFlutterwave()
     assert (
-        billing.handle_webhook(None, _event("kodji-1-month-x"), client=fw.client()).accepted
-        is False
+        billing.handle_webhook({}, _event("kodji-1-month-x"), client=fw.client()).accepted is False
     )
     assert (
-        billing.handle_webhook("wrong", _event("kodji-1-month-x"), client=fw.client()).accepted
+        billing.handle_webhook(
+            {"verif-hash": "wrong"}, _event("kodji-1-month-x"), client=fw.client()
+        ).accepted
         is False
     )
     assert fw.requests == []
@@ -379,7 +381,10 @@ def test_webhook_rejects_everything_when_no_hash_is_configured(db, monkeypatch):
     reset_settings_cache()
     fw = FakeFlutterwave()
     assert (
-        billing.handle_webhook("", _event("kodji-1-month-x"), client=fw.client()).accepted is False
+        billing.handle_webhook(
+            {"verif-hash": ""}, _event("kodji-1-month-x"), client=fw.client()
+        ).accepted
+        is False
     )
 
 
@@ -391,7 +396,7 @@ def test_webhook_reverifies_rather_than_trusting_the_body(db):
     )
     # The body claims success, but the provider says the charge failed.
     fw.verified = _paid_payload(out.tx_ref, 12_000, status="failed")
-    res = billing.handle_webhook("hash-123", _event(out.tx_ref), client=fw.client())
+    res = billing.handle_webhook({"verif-hash": "hash-123"}, _event(out.tx_ref), client=fw.client())
     assert res.accepted and res.action == "verified"
     assert res.confirmation.outcome == "failed"
     with connect(path) as conn:
@@ -402,7 +407,9 @@ def test_webhook_reverifies_rather_than_trusting_the_body(db):
         account_id, EMAIL, "month", base_url="https://kodji.test", client=fw.client()
     )
     fw.verified = _paid_payload(out2.tx_ref, 12_000)
-    res = billing.handle_webhook("hash-123", _event(out2.tx_ref), client=fw.client())
+    res = billing.handle_webhook(
+        {"verif-hash": "hash-123"}, _event(out2.tx_ref), client=fw.client()
+    )
     assert res.confirmation.outcome == "activated"
     assert fw.requests[-1].url.path == "/v3/transactions/987654/verify"
 
@@ -410,13 +417,19 @@ def test_webhook_reverifies_rather_than_trusting_the_body(db):
 def test_webhook_ignores_other_events_and_foreign_refs(db):
     fw = FakeFlutterwave()
     other = json.dumps({"event": "transfer.completed", "data": {"id": 1}}).encode()
-    assert billing.handle_webhook("hash-123", other, client=fw.client()).action == "ignored"
     assert (
-        billing.handle_webhook("hash-123", _event("Links-616626414629"), client=fw.client()).action
+        billing.handle_webhook({"verif-hash": "hash-123"}, other, client=fw.client()).action
         == "ignored"
     )
     assert (
-        billing.handle_webhook("hash-123", b"not json", client=fw.client()).action == "bad_payload"
+        billing.handle_webhook(
+            {"verif-hash": "hash-123"}, _event("Links-616626414629"), client=fw.client()
+        ).action
+        == "ignored"
+    )
+    assert (
+        billing.handle_webhook({"verif-hash": "hash-123"}, b"not json", client=fw.client()).action
+        == "bad_payload"
     )
     assert fw.requests == []
 
@@ -526,3 +539,63 @@ def test_abandon_closes_only_a_pending_row(db):
     # ...after which abandon is a no-op.
     assert billing.abandon(out.tx_ref).outcome == "already"
     assert billing.abandon("kodji-1-month-nope").outcome == "unknown"
+
+
+def test_not_found_at_the_provider_is_pending_not_unknown(db):
+    """The sandbox records a mobile money charge a few seconds after the
+    redirect; until then verify answers 400 'No transaction was found'."""
+    _, account_id = db
+    fw = FakeFlutterwave()
+    out = start_checkout(
+        account_id, EMAIL, "month", base_url="https://kodji.test", client=fw.client()
+    )
+
+    def not_found(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400, json={"status": "error", "message": "No transaction was found for this id"}
+        )
+
+    late = FlutterwaveClient(
+        "k", base_url=API, client=httpx.Client(transport=httpx.MockTransport(not_found))
+    )
+    res = confirm(out.tx_ref, client=late)
+    assert res.outcome == "pending" and res.note == "not_yet_recorded"
+
+
+def test_confirm_retries_while_pending(db, monkeypatch):
+    _, account_id = db
+    fw = FakeFlutterwave()
+    out = start_checkout(
+        account_id, EMAIL, "month", base_url="https://kodji.test", client=fw.client()
+    )
+    answers = iter(
+        [
+            httpx.Response(
+                400, json={"status": "error", "message": "No transaction was found for this id"}
+            ),
+            httpx.Response(
+                200,
+                json={
+                    "status": "success",
+                    "data": _paid_payload(out.tx_ref, 12_000, status="pending"),
+                },
+            ),
+            httpx.Response(
+                200, json={"status": "success", "data": _paid_payload(out.tx_ref, 12_000)}
+            ),
+        ]
+    )
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return next(answers)
+
+    slept = []
+    monkeypatch.setattr(billing.time, "sleep", lambda s: slept.append(s))
+    flaky = FlutterwaveClient(
+        "k", base_url=API, client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    res = confirm(out.tx_ref, client=flaky, attempts=4, delay_s=2.0)
+    assert res.outcome == "activated"
+    assert len(calls) == 3 and slept == [2.0, 2.0]

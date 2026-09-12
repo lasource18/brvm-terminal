@@ -65,7 +65,12 @@ def checkout_return(
     status: str = "",
     tx_ref: str = "",
     transaction_id: str = "",
+    reference: str = "",
+    trxref: str = "",
 ):
+    # Flutterwave comes back with ?status&tx_ref&transaction_id; Paystack
+    # with ?reference&trxref (no status, no id). Same page either way.
+    tx_ref = tx_ref or reference or trxref
     if not tx_ref:
         return RedirectResponse(url="/pricing", status_code=303)
     # A cancelled checkout comes back with no transaction id and nothing
@@ -74,26 +79,51 @@ def checkout_return(
     if status.lower() in ("cancelled", "canceled", "failed") and not transaction_id:
         result = billing_svc.abandon(tx_ref, reason=status.lower())
     else:
-        result = billing_svc.confirm(tx_ref, transaction_id=transaction_id or None)
+        # The customer is watching this page: ask a few times over ~6 s
+        # before saying "in progress", since a test-mode mobile money
+        # charge is recorded a few seconds after the redirect.
+        result = billing_svc.confirm(
+            tx_ref, transaction_id=transaction_id or None, attempts=4, delay_s=2.0
+        )
     ctx = {
         **base_ctx(request),
         "outcome": result.outcome,
         "period_end_day": (result.period_end_utc or "")[:10] or None,
         "provider_status": status,
+        # The pending page re-checks itself by reloading this URL.
+        "recheck_url": str(request.url),
     }
     code = 200 if result.outcome in ("activated", "already", "pending") else 402
     return templates.TemplateResponse(request, "billing_return.html", ctx, status_code=code)
 
 
-@router.post("/billing/webhook")
-async def webhook(request: Request):
+async def _webhook(request: Request, provider: str | None) -> Response:
     body = await request.body()
-    result = billing_svc.handle_webhook(request.headers.get("verif-hash"), body)
+    try:
+        result = billing_svc.handle_webhook(request.headers, body, provider=provider)
+    except billing_svc.BillingError:
+        return PlainTextResponse("unknown provider", status_code=404)
     if not result.accepted:
         return PlainTextResponse("unauthorized", status_code=401)
     outcome = result.confirmation.outcome if result.confirmation else "-"
-    log.info("billing: webhook %s (%s)", result.action, outcome)
+    log.info("billing: %s webhook %s (%s)", provider or "default", result.action, outcome)
     return PlainTextResponse("ok")
+
+
+@router.post("/billing/webhook")
+async def webhook(request: Request):
+    """The configured provider's webhook (BILLING_PROVIDER)."""
+    return await _webhook(request, None)
+
+
+@router.post("/billing/webhook/{provider}")
+async def webhook_for(request: Request, provider: str):
+    """One URL per provider so both can be registered at once and the
+    switch is an `.env` change: /billing/webhook/flutterwave and
+    /billing/webhook/paystack."""
+    if provider not in billing_svc.PROVIDERS:
+        return PlainTextResponse("unknown provider", status_code=404)
+    return await _webhook(request, provider)
 
 
 @router.get("/billing", response_class=HTMLResponse)
@@ -106,5 +136,14 @@ def billing_page(request: Request):
     return templates.TemplateResponse(
         request,
         "billing.html",
-        {**base_ctx(request), "billing": status, "fmt_xof": billing_svc.fmt_xof},
+        {
+            **base_ctx(request),
+            "billing": status,
+            "fmt_xof": billing_svc.fmt_xof,
+            "billing_open": settings.has_billing,
+            "signed_in": True,
+            "plan": status.plan,
+            "price_month": billing_svc.fmt_xof(billing_svc.PERIODS["month"].price_xof),
+            "price_year": billing_svc.fmt_xof(billing_svc.PERIODS["year"].price_xof),
+        },
     )
