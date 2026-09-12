@@ -1,9 +1,10 @@
 """One-shot delivery worker for `just alerts-deliver`.
 
-Drains the `alert_events` queue via the configured Discord webhook.
-No-ops (with a warning) when DISCORD_WEBHOOK_URL is unset — events pile
-up in the DB with `delivered_utc IS NULL` and `delivery_status='skipped'`,
-which is fine for a fresh install without notifications.
+Drains the `alert_events` queue: Web Push to every device a member of
+the owning account enabled, email to members with none (PR-AA). With
+neither VAPID keys nor email configured it marks the batch `skipped`
+(with a warning), which is fine for a fresh install without
+notifications.
 """
 
 from __future__ import annotations

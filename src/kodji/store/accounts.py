@@ -238,6 +238,20 @@ def set_plan(
     conn.commit()
 
 
+def members(conn: sqlite3.Connection, account_id: int) -> list[sqlite3.Row]:
+    """Every member as `(user_id, email)` rows, oldest first — the
+    recipient list alert delivery fans out over."""
+    return conn.execute(
+        """
+        SELECT u.id AS user_id, u.email FROM users u
+        JOIN account_members m ON m.user_id = u.id
+        WHERE m.account_id = ?
+        ORDER BY m.created_utc, u.id
+        """,
+        (account_id,),
+    ).fetchall()
+
+
 def member_emails(conn: sqlite3.Connection, account_id: int) -> list[str]:
     """Every member's address — who billing mail goes to."""
     return [

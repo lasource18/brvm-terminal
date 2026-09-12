@@ -1,0 +1,19 @@
+{
+  "name": "Kodji Terminal",
+  "short_name": "Kodji",
+  "description": "Terminal de marché BRVM : cotations, actualités, résumés et alertes.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0f14",
+  "theme_color": "#0b0f14",
+  "lang": "fr",
+  "categories": ["finance", "news"],
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

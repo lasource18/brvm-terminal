@@ -1,0 +1,31 @@
+{# Deliberately NOT extending base.html.
+
+   The service worker precaches this page at install and serves it for any
+   navigation that has no network, so the copy on disk outlives the session
+   that fetched it. Rendering the topbar would freeze that session's email
+   into it — wrong, and on a shared device someone else's. The nav links
+   would be dead offline anyway. So: no identity, no nav, no data. #}
+<!doctype html>
+<html lang="{{ locale or 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ "Offline"|t }} · kodji-terminal</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b0f14">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand"><a href="/">kodji-terminal</a></span>
+    <span class="spacer"></span>
+    <span class="badge closed">{{ "Offline"|t }}</span>
+  </div>
+  <main>
+    <div class="upgrade-wall offline-wall">
+      <h2>{{ "No connection"|t }}</h2>
+      <p>{{ "kodji-terminal needs the network for quotes and news — nothing here is cached, so that a stale price never looks current."|t }}</p>
+      <a class="upgrade-cta" href="/">{{ "Try again"|t }}</a>
+    </div>
+  </main>
+</body>
+</html>

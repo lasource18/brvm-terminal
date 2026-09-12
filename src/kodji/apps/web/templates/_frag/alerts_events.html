@@ -9,7 +9,8 @@
           <span class="status {{ (e.delivery_status or 'queued') }}">
             {% if e.delivery_status == 'ok' %}{{ "delivered"|t }}
             {% elif e.delivery_status == 'failed' %}{{ "failed (retry)"|t }}
-            {% elif e.delivery_status == 'skipped' %}{{ "skipped (no webhook)"|t }}
+            {% elif e.delivery_status == 'skipped' %}{{ "skipped"|t }}
+            {% elif e.delivery_status == 'permanent_failure' %}{{ "failed"|t }}
             {% else %}{{ "queued"|t }}
             {% endif %}
           </span>

@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from kodji import __version__
 from kodji.apps.web._common import STATIC_DIR
-from kodji.apps.web.routes import api, auth, billing, fragments, pages
+from kodji.apps.web.routes import api, auth, billing, fragments, pages, push
 from kodji.config import settings
 from kodji.db import assert_schema_current
 from kodji.jobs.scheduler import build_scheduler
@@ -49,6 +49,7 @@ app = FastAPI(title="kodji-terminal", version=__version__, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth.router)
 app.include_router(billing.router)
+app.include_router(push.router)
 app.include_router(pages.router)
 app.include_router(fragments.router)
 app.include_router(api.router)

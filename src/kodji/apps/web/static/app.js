@@ -106,3 +106,89 @@
       if (empty) empty.textContent = "Could not load chart: " + e;
     });
 })();
+
+// --- PWA shell + Web Push (PR-AA) ---------------------------------------
+// The worker is registered on every page so the app is installable from
+// anywhere; the subscribe UI only exists on /alerts (#push-panel).
+(function () {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("/sw.js").catch(function () {});
+
+  var panel = document.getElementById("push-panel");
+  if (!panel || panel.dataset.enabled !== "true") return;
+  var status = document.getElementById("push-status");
+  var btnOn = document.getElementById("push-enable");
+  var btnOff = document.getElementById("push-disable");
+  var devices = document.getElementById("push-devices");
+  var say = function (key) { if (status) status.textContent = panel.dataset["s" + key] || ""; };
+
+  // iOS Safari only exposes PushManager to a page opened from the Home
+  // Screen; in the plain browser the API is simply absent, so the hint
+  // is the only useful thing to show.
+  var isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  if (!("PushManager" in window) || !("Notification" in window)) {
+    say(isIOS && !standalone ? "Ios" : "Unsupported");
+    return;
+  }
+
+  function keyBytes(b64url) {
+    var pad = "=".repeat((4 - (b64url.length % 4)) % 4);
+    var raw = atob((b64url + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function render(sub) {
+    if (Notification.permission === "denied") {
+      say("Denied"); btnOn.hidden = true; btnOff.hidden = true; return;
+    }
+    say(sub ? "On" : "Off");
+    btnOn.hidden = !!sub;
+    btnOff.hidden = !sub;
+  }
+
+  function post(method, body) {
+    return fetch("/api/push/subscribe", {
+      method: method,
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(body),
+    }).then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+  }
+
+  navigator.serviceWorker.ready.then(function (reg) {
+    reg.pushManager.getSubscription().then(render);
+
+    btnOn.addEventListener("click", function () {
+      btnOn.disabled = true;
+      Notification.requestPermission().then(function (perm) {
+        if (perm !== "granted") { render(null); btnOn.disabled = false; return; }
+        return reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: keyBytes(panel.dataset.publicKey),
+        }).then(function (sub) {
+          return post("POST", sub.toJSON()).then(function (res) {
+            if (devices) devices.textContent = res.devices;
+            render(sub);
+          });
+        });
+      }).catch(function () { say("Error"); }).then(function () { btnOn.disabled = false; });
+    });
+
+    btnOff.addEventListener("click", function () {
+      btnOff.disabled = true;
+      reg.pushManager.getSubscription().then(function (sub) {
+        if (!sub) { render(null); return; }
+        var endpoint = sub.endpoint;
+        return sub.unsubscribe().then(function () {
+          return post("DELETE", { endpoint: endpoint }).then(function (res) {
+            if (devices) devices.textContent = res.devices;
+          });
+        }).then(function () { render(null); });
+      }).catch(function () { say("Error"); }).then(function () { btnOff.disabled = false; });
+    });
+  });
+})();

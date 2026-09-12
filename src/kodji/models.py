@@ -225,6 +225,22 @@ class AlertEvent(BaseModel):
     delivery_status: AlertDeliveryStatus | None = None
 
 
+class PushSubscription(BaseModel):
+    """One browser or phone that asked for Web Push (PR-AA). Keyed on the
+    user, not the account — push is per device, and an account's alerts
+    fan out to every device of every member."""
+
+    id: int | None = None
+    user_id: int
+    endpoint: str
+    p256dh: str                              # client ECDH public key, base64url
+    auth: str                                # client auth secret, base64url
+    user_agent: str = ""
+    created_utc: str | None = None
+    last_used_utc: str | None = None
+    last_error: str | None = None
+
+
 # --- Daily brief (Phase 6b) ------------------------------------------------
 
 

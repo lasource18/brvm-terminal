@@ -120,8 +120,9 @@ def _alerts_evaluate_job() -> dict:
 
 
 def _alerts_deliver_job() -> dict:
-    """Drain the queued events via Discord webhook. No-ops (with a
-    warning) when DISCORD_WEBHOOK_URL is unset."""
+    """Drain the queued events: Web Push to every device a member
+    enabled, email to members with none. No-ops (with a warning) when
+    neither VAPID keys nor email are configured."""
     return deliver_alerts().as_dict()
 
 

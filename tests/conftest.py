@@ -157,6 +157,10 @@ def _client(monkeypatch, tmp_path, *, sign_in: bool):
     monkeypatch.setenv("BILLING_PROVIDER", "flutterwave")
     monkeypatch.setenv("PAYSTACK_SECRET_KEY", "")
     monkeypatch.setenv("PAYSTACK_PUBLIC_KEY", "")
+    # PR-AA: a developer's VAPID pair would flip the /alerts page from
+    # "not configured" to live buttons. Tests that need push set their own.
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", "")
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "")
     reset_module_state()
     _seed(db_path)
 

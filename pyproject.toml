@@ -23,6 +23,7 @@ dependencies = [
     "markdown-it-py>=3.0",
     "textual>=0.85",
     "textual-plotext>=0.5",
+    "cryptography>=50.0.1",
 ]
 
 [dependency-groups]

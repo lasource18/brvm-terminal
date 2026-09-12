@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0b0f14"/>
+  <rect x="24" y="24" width="464" height="464" rx="80" fill="none" stroke="#1c2530" stroke-width="8"/>
+  <polyline points="96,352 176,272 240,320 336,192 416,160" fill="none" stroke="#7cd992" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="368,160 416,160 416,208" fill="none" stroke="#7cd992" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="96" y="448" font-family="JetBrains Mono, Menlo, monospace" font-size="96" font-weight="700" fill="#ffb454">kodji</text>
+</svg>

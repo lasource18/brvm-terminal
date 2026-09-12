@@ -257,14 +257,41 @@ _FR: dict[str, str] = {
 
     # ---- alerts ----
     "Rules evaluate every 15 min during market hours, hourly otherwise. "
-    "Fired events land in the queue below and get pushed to Discord "
-    "within ~5 min when":
-        "Les règles sont évaluées toutes les 15 min pendant les heures de "
-        "marché, sinon toutes les heures. Les événements déclenchés "
-        "arrivent dans la file ci-dessous et sont envoyés vers Discord "
-        "sous ~5 min lorsque",
-    "is configured.": "est configuré.",
-    "no webhook": "aucun webhook",
+    "Fired events land in the queue below and reach you within ~5 min: "
+    "as a notification on every device you enable here, by email otherwise.":
+        "Les règles sont évaluées toutes les 15 min pendant la séance, chaque heure "
+        "sinon. Les événements déclenchés arrivent dans la file ci-dessous et vous "
+        "parviennent sous ~5 min : en notification sur chaque appareil activé ici, "
+        "par e-mail sinon.",
+    # ---- Web Push panel (PR-AA) ----
+    "Notifications": "Notifications",
+    "not configured": "non configuré",
+    "Enable on this device": "Activer sur cet appareil",
+    "Disable on this device": "Désactiver sur cet appareil",
+    "devices on file": "appareil(s) enregistré(s)",
+    "This browser cannot receive notifications.":
+        "Ce navigateur ne peut pas recevoir de notifications.",
+    "On iPhone and iPad, add kodji to the Home Screen first (Share → Add to Home Screen) "
+    "and open it from there — iOS only delivers notifications to installed apps.":
+        "Sur iPhone et iPad, ajoutez d'abord kodji à l'écran d'accueil (Partager → "
+        "Sur l'écran d'accueil) et ouvrez-le depuis là — iOS ne livre les notifications "
+        "qu'aux applications installées.",
+    "Notifications are blocked for this site in the browser settings.":
+        "Les notifications sont bloquées pour ce site dans les réglages du navigateur.",
+    "Notifications are on for this device.": "Les notifications sont activées sur cet appareil.",
+    "Notifications are off for this device.": "Les notifications sont désactivées sur cet appareil.",
+    "Could not enable notifications.": "Impossible d'activer les notifications.",
+    "Web Push is off on this server: set VAPID keys in .env (just vapid-keygen). "
+    "Until then, alerts go out by email.":
+        "Le Web Push est désactivé sur ce serveur : renseignez les clés VAPID dans .env "
+        "(just vapid-keygen). D'ici là, les alertes partent par e-mail.",
+    # ---- offline page (PR-AA) ----
+    "Offline": "Hors ligne",
+    "No connection": "Pas de connexion",
+    "kodji-terminal needs the network for quotes and news — nothing here is cached, "
+    "so that a stale price never looks current.":
+        "kodji-terminal a besoin du réseau pour les cours et les actualités — rien n'est "
+        "mis en cache ici, pour qu'un cours périmé ne paraisse jamais à jour.",
     "Rules": "Règles",
     "Add a rule": "Ajouter une règle",
     "Kind": "Type",
@@ -296,7 +323,7 @@ _FR: dict[str, str] = {
         "Aucune règle pour le moment — ajoutez-en une ci-dessous.",
     "delivered": "envoyé",
     "failed (retry)": "échec (nouvelle tentative)",
-    "skipped (no webhook)": "ignoré (aucun webhook)",
+    "skipped": "ignoré",
     "queued": "en file",
     "No events yet.": "Aucun événement pour le moment.",
 
