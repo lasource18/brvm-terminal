@@ -640,16 +640,27 @@ clears — with a recovery notice — at the next scheduled run that succeeds.
 
 User alerts leave by Web Push to every phone or browser a member enabled
 on `/alerts`, and by email to members with no device on file. Discord is
-ops-only. To turn push on, once per deployment, as `kodji`:
+ops-only.
+
+**Deploy the code first.** `scripts/vapid_keygen.py` and migration 0022
+ship with PR-AA, so on a box that has not pulled it yet the command below
+fails with `can't open file '/opt/kodji-terminal/scripts/vapid_keygen.py'`.
+Run "Updating the app" above, then come back here.
+
+To turn push on, once per deployment, as `kodji`:
 
 ```bash
-cd /opt/kodji-terminal && export PATH="$HOME/.local/bin:$PATH"
+sudo -iu kodji
+cd /opt/kodji-terminal
+git pull --ff-only                                 # must include PR-AA
+uv sync --no-dev                                   # PR-AA adds `cryptography`
 uv run --no-dev python scripts/vapid_keygen.py     # prints the two .env lines
 nano .env                                          # paste VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
 uv run --no-dev python scripts/migrate.py          # 0022_push_subscriptions
+exit
 ```
 
-then `systemctl restart kodji-terminal` as root. **Keep the pair.** The
+then `sudo systemctl restart kodji-terminal` as root. **Keep the pair.** The
 public key is baked into every browser subscription, so a rotated pair
 means every device must enable notifications again. Check with
 `curl -s https://kodji.app/api/push/config` (`"enabled": true`), then
