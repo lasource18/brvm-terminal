@@ -12,6 +12,8 @@ API the alerts page's "enable on this device" button talks to.
   worker byte-for-byte, which is what makes browsers install it.
 * `/offline` — the page the worker shows when a navigation has no
   network. Precached at install.
+* `/favicon.ico` — browsers and link unfurlers request this path whether
+  or not the HTML declares it, so serving it is what stops the 404s.
 
 The subscribe API needs a session (a device is tied to a user) and the
 paid plan (alerts are paid; a free account has nothing to receive).
@@ -35,6 +37,7 @@ router = APIRouter()
 
 _MANIFEST = STATIC_DIR / "manifest.webmanifest"
 _SW = STATIC_DIR / "sw.js"
+_FAVICON = STATIC_DIR / "icons" / "favicon.ico"
 
 
 @router.get("/manifest.webmanifest")
@@ -59,6 +62,17 @@ def service_worker() -> Response:
             "Cache-Control": "no-cache, max-age=0",
             "Service-Worker-Allowed": "/",
         },
+    )
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """The logo changes about once in the product's life, so this is
+    cached for a day; the versioned `/static` URLs carry the churn."""
+    return Response(
+        _FAVICON.read_bytes(),
+        media_type="image/x-icon",
+        headers={"Cache-Control": "public, max-age=86400"},
     )
 
 

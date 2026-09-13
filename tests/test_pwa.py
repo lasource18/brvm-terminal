@@ -79,11 +79,43 @@ class TestShell:
         for dead_offline in ('href="/news"', 'href="/alerts"', 'href="/billing"', "search-input"):
             assert dead_offline not in r.text
 
+    def test_favicon_is_served_from_the_root(self, client):
+        """Browsers and unfurlers request /favicon.ico whether or not the
+        HTML declares it."""
+        r = client.get("/favicon.ico")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/")
+        # ICO header: reserved=0, type=1 (icon), then the image count.
+        assert r.content[:4] == b"\x00\x00\x01\x00"
+        assert int.from_bytes(r.content[4:6], "little") == 3   # 16, 32, 48
+
+    def test_pages_declare_the_favicon_set(self, client):
+        body = client.get("/").text
+        assert '<link rel="icon" href="/favicon.ico" sizes="32x32">' in body
+        assert '<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">' in body
+        assert 'rel="apple-touch-icon"' in body
+
     def test_pages_link_the_manifest(self, client):
         body = client.get("/").text
         assert '<link rel="manifest" href="/manifest.webmanifest">' in body
         assert '<meta name="theme-color" content="#0b0f14">' in body
         assert 'rel="apple-touch-icon"' in body
+
+    def test_icons_are_the_generated_set(self, client):
+        """`just logo` writes every one of these; a half-run that left an
+        old icon behind would ship a mixed brand."""
+        from kodji.apps.web._common import STATIC_DIR
+
+        icons = STATIC_DIR / "icons"
+        for name in (
+            "icon.svg", "icon-192.png", "icon-512.png", "icon-maskable-512.png",
+            "apple-touch-icon.png", "badge-96.png", "favicon.ico",
+            "favicon-16.png", "favicon-32.png", "favicon-48.png",
+        ):
+            assert (icons / name).is_file(), name
+        svg = (icons / "icon.svg").read_text()
+        assert "#ffb454" in svg and "#0b0f14" in svg   # the site's own tokens
+        assert "font" not in svg.lower()               # the K is paths, not text
 
     def test_app_js_registers_the_worker(self, client):
         assert 'serviceWorker.register("/sw.js")' in client.get(f"/static/app.js?v={STATIC_VERSION}").text

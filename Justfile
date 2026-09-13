@@ -34,6 +34,12 @@ migrate-check:
 claim-owner email:
     uv run python scripts/claim_owner.py {{email}}
 
+# Regenerate the logo: app icons + favicons into static/icons/ and the
+# marketing exports into brand/. One geometric K, no font. Needs
+# `brew install librsvg`. See brand/README.md.
+logo:
+    uv run python scripts/logo.py
+
 # PR-AA: print a fresh VAPID key pair for .env (VAPID_PUBLIC_KEY /
 # VAPID_PRIVATE_KEY). Generate once per deployment; rotating the pair
 # silently invalidates every device that already enabled notifications.

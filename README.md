@@ -931,6 +931,29 @@ tests, day-2 operations — is
 [`docs/deploy-kodji-app.md`](./docs/deploy-kodji-app.md). It is written
 to be followed top to bottom.
 
+## Brand and icons
+
+The mark is the letter **K** in the site's accent `#ffb454` on its
+background `#0b0f14`, drawn as vector paths — no font, so it renders the
+same everywhere.
+
+```bash
+just logo        # needs `brew install librsvg`
+```
+
+One script, `scripts/logo.py`, writes both sets from the same geometry, so
+the favicon and the Home Screen icon can never drift apart:
+
+- `src/kodji/apps/web/static/icons/` — what the app serves: the PWA icons
+  the manifest names, `favicon.ico` (16/32/48) served at the root, the
+  apple-touch icon, and the monochrome notification badge.
+- `brand/` — marketing exports, not served: SVG masters, 1024px PNGs, a
+  1200×630 social card, and light/dark/white variants of the bare glyph.
+  See [`brand/README.md`](./brand/README.md) for which file to use where.
+
+Do not hand-edit the outputs. Change the colours or geometry at the top of
+the script and rerun.
+
 ## Data sources
 
 Phase 1 goes scraper-first — the "BRVM Market Data API" referenced in
