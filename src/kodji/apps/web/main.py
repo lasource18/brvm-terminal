@@ -70,6 +70,8 @@ async def _count_pageview(request: Request, call_next):
             status=response.status_code,
             ip=analytics.client_ip(request.headers, getattr(request.client, "host", None)),
             user_agent=request.headers.get("user-agent", ""),
+            accept=request.headers.get("accept", ""),
+            accept_language=request.headers.get("accept-language", ""),
             referer=request.headers.get("referer"),
             locale=getattr(state, "kodji_locale", None),
             signed_in=bool(getattr(state, "kodji_signed_in", False)),

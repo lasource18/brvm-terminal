@@ -15,7 +15,7 @@ from kodji.apps.web._common import (
     base_ctx,
     templates,
 )
-from kodji.apps.web._gating import is_paid, refuse_if_unpaid
+from kodji.apps.web._gating import is_paid, refuse_if_not_owner, refuse_if_unpaid
 from kodji.clock import is_market_open, utc_iso
 from kodji.config import settings
 from kodji.db import connect
@@ -25,6 +25,7 @@ from kodji.services import (
     alerts as alerts_svc,
 )
 from kodji.services import analyst_notes as notes_svc
+from kodji.services import analytics as analytics_svc
 from kodji.services import billing as billing_svc
 from kodji.services import bonds as bonds_svc
 from kodji.services import brief as brief_svc
@@ -468,6 +469,40 @@ def legal_page(request: Request, page: str):
             "period_year": year.label_fr if locale == "fr" else year.label_en,
             "guarantee_days": settings.refund_guarantee_days,
             "session_days": settings.session_ttl_days,
+        },
+    )
+
+
+# Windows the page offers. Not free-form: `days` reaches a date filter.
+_STATS_WINDOWS = (7, 14, 30, 90)
+
+
+@router.get("/ops/stats", response_class=HTMLResponse)
+def ops_stats(request: Request, days: int = 14):
+    """Audience figures, for the operator only.
+
+    Deliberately not linked from anywhere. `refuse_if_not_owner` answers
+    404 rather than 403, so the page does not confirm its own existence
+    to a signed-in customer.
+    """
+    if (refused := refuse_if_not_owner(request)) is not None:
+        return refused
+    if days not in _STATS_WINDOWS:
+        days = 14
+    s = analytics_svc.summary(days=days)
+    return templates.TemplateResponse(
+        request,
+        "ops_stats.html",
+        {
+            **base_ctx(request),
+            "s": s,
+            "days": days,
+            "windows": _STATS_WINDOWS,
+            # `or 1` keeps the bar width divisor safe on an empty window.
+            "peak": max((d["views"] for d in s.days), default=1) or 1,
+            "pricing_pct": round(100 * s.pricing_visitors / s.visitors) if s.visitors else 0,
+            "login_pct": round(100 * s.signup_visitors / s.visitors) if s.visitors else 0,
+            "retain_days": settings.analytics_retain_days,
         },
     )
 

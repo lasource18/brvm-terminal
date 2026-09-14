@@ -950,9 +950,29 @@ Read the numbers accordingly: **a visitor is counted once per day, so two
 days' visitor counts cannot be added together.**
 
 Only successful full-page HTML GETs count. Fragments, `/health`, static
-assets, the API and obvious crawlers are excluded, and the counter
-swallows its own errors so it can never fail a page render. Rows are
-pruned after `ANALYTICS_RETAIN_DAYS` (180) by a daily job.
+assets and the API are excluded, and the counter swallows its own errors
+so it can never fail a page render. Rows are pruned after
+`ANALYTICS_RETAIN_DAYS` (180) by a daily job.
+
+**Crawlers are judged twice.** A name match (`_BOTS`) is a crawler we can
+identify and is never recorded. Anything else is judged by how it asks:
+a browser doing a top-level navigation always sends `Accept-Language` and
+an `Accept` that names HTML, and almost nothing automated does both.
+Requests failing that are recorded but flagged, kept out of the headline
+figures, and reported as the number excluded — so an unnamed crawler
+shows up as a discrepancy instead of quietly inflating the numbers. They
+are flagged rather than dropped on purpose: the user agent is not stored,
+so a dropped request could never be reviewed and a wrong rule would be
+undetectable.
+
+`robots.txt` keeps crawlers off the endpoints and per-account pages.
+Quote, news and company pages stay indexable — they are what anyone
+searching "cours SNTS BRVM" needs to find.
+
+There is also an owner-only page at **`/ops/stats`**, deliberately
+unlinked, showing the same figures with a per-day bar and a window
+switcher. Anyone who is not signed in on the operator's account gets a
+404, not a 403 — an operations page should not confirm its own existence.
 
 Plausible and Umami were the alternatives. Hosted Plausible sends visitor
 data offsite and costs money; self-hosting it wants ClickHouse, and Umami

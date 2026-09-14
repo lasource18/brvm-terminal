@@ -1,0 +1,31 @@
+# kodji-terminal
+#
+# The quote, news and company pages are the reason anyone searches for
+# this site — "cours SNTS BRVM" should find us — so they stay indexable.
+# What is disallowed below is everything that is not content: endpoints
+# that return JSON or HTML fragments, and pages that are per-account and
+# would only ever serve a crawler a sign-in redirect or a payment wall.
+#
+# Cloudflare appends its own managed section blocking AI crawlers; that
+# is configured in the dashboard, not here.
+
+User-agent: *
+
+# Not content: data endpoints and HTMX fragments.
+Disallow: /api/
+Disallow: /_frag/
+
+# Not content: per-account pages. A crawler gets a redirect or a 402.
+Disallow: /login
+Disallow: /billing
+Disallow: /watchlists
+Disallow: /alerts
+Disallow: /ops/
+
+# Not content: plumbing.
+Disallow: /lang/
+Disallow: /offline
+
+# Politeness for crawlers that honour it. Every page here is rendered
+# from SQLite on a 4 GB box shared with the scrapers and the job runner.
+Crawl-delay: 5

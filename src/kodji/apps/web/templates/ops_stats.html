@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ "Audience"|t }} · kodji-terminal{% endblock %}
+{% block content %}
+  <h1 class="page-title">{{ "Audience"|t }}</h1>
+
+  <p class="dim" style="margin: -4px 0 16px;">
+    {{ "Counted on this server. No cookie, no third-party script, and no IP address or browser is stored."|t }}
+    <span class="dim">·</span>
+    {% for w in windows %}
+      <a href="/ops/stats?days={{ w }}" {% if w == days %}class="lang-active"{% endif %}>{{ w }}{{ "d"|t }}</a>{% if not loop.last %}<span class="dim"> · </span>{% endif %}
+    {% endfor %}
+  </p>
+
+  <div class="panels panels-4">
+    <div class="panel">
+      <h2>{{ "Views"|t }}</h2>
+      <div class="panel-body"><div class="stat-big">{{ s.views }}</div></div>
+    </div>
+    <div class="panel">
+      <h2>{{ "Visitors"|t }}</h2>
+      <div class="panel-body"><div class="stat-big">{{ s.visitors }}</div></div>
+    </div>
+    <div class="panel">
+      <h2>{{ "Reached plans"|t }}</h2>
+      <div class="panel-body">
+        <div class="stat-big">{{ s.pricing_visitors }}</div>
+        <div class="dim">{{ pricing_pct }}% {{ "of visitors"|t }}</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>{{ "Reached sign-in"|t }}</h2>
+      <div class="panel-body">
+        <div class="stat-big">{{ s.signup_visitors }}</div>
+        <div class="dim">{{ login_pct }}% {{ "of visitors"|t }}</div>
+      </div>
+    </div>
+  </div>
+
+  {# The exclusion is shown as a number rather than applied silently: a
+     heuristic that is wrong should be visible, not invisible. #}
+  {% if s.suspected_views %}
+    <p class="dim" style="margin-top: 12px;">
+      {{ "Excluded from the figures above:"|t }}
+      <strong>{{ s.suspected_views }}</strong> {{ "views from"|t }}
+      <strong>{{ s.suspected_visitors }}</strong>
+      {{ "requests that did not look like a browser — no Accept-Language, or not asking for HTML."|t }}
+    </p>
+  {% endif %}
+
+  {% if not s.views %}
+    <p class="dim" style="margin-top: 20px;">{{ "Nothing recorded in this window yet."|t }}</p>
+  {% else %}
+    <h2 class="section-title" style="margin-top: 28px;">{{ "By day"|t }}</h2>
+    <div class="panel">
+      <table class="quotes">
+        <thead><tr>
+          <th>{{ "Date"|t }}</th><th>{{ "Views"|t }}</th><th>{{ "Visitors"|t }}</th>
+          <th>{{ "Signed in"|t }}</th><th>{{ "From app"|t }}</th><th class="bar-cell"></th>
+        </tr></thead>
+        <tbody>
+          {% for d in s.days %}
+            <tr>
+              <td>{{ d.day }}</td>
+              <td>{{ d.views }}</td>
+              <td>{{ d.visitors }}</td>
+              <td>{{ d.signed_in_views or 0 }}</td>
+              <td>{{ d.pwa_views or 0 }}</td>
+              {# Width relative to the busiest day in the window, so the
+                 shape of the traffic reads without a chart library. #}
+              <td class="bar-cell"><span class="bar" style="width: {{ (100 * d.views / peak)|round|int }}%"></span></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panels desc-panels" style="margin-top: 28px;">
+      <div class="panel">
+        <h2>{{ "Top pages"|t }}</h2>
+        <table class="quotes">
+          <thead><tr><th>{{ "Path"|t }}</th><th>{{ "Views"|t }}</th><th>{{ "Visitors"|t }}</th></tr></thead>
+          <tbody>
+            {% for p in s.paths %}
+              <tr><td><a href="{{ p.path }}">{{ p.path }}</a></td><td>{{ p.views }}</td><td>{{ p.visitors }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="panel">
+        <h2>{{ "Referrers"|t }}</h2>
+        {% if s.referrers %}
+          <table class="quotes">
+            <thead><tr><th>{{ "Host"|t }}</th><th>{{ "Views"|t }}</th><th>{{ "Visitors"|t }}</th></tr></thead>
+            <tbody>
+              {% for r in s.referrers %}
+                <tr><td>{{ r.referrer_host }}</td><td>{{ r.views }}</td><td>{{ r.visitors }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <div class="panel-body dim">{{ "Everyone arrived directly or with no referrer."|t }}</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <h2 class="section-title" style="margin-top: 28px;">{{ "Language served"|t }}</h2>
+    <div class="panel">
+      <table class="quotes">
+        <thead><tr><th>{{ "Locale"|t }}</th><th>{{ "Views"|t }}</th><th>{{ "Visitors"|t }}</th></tr></thead>
+        <tbody>
+          {% for l in s.locales %}
+            <tr><td>{{ l.locale or "—" }}</td><td>{{ l.views }}</td><td>{{ l.visitors }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+
+  <p class="dim" style="margin-top: 28px;">
+    {{ "A visitor is counted once per day, so two days' visitor counts cannot be added together. Counters are deleted after"|t }}
+    {{ retain_days }} {{ "days."|t }}
+  </p>
+{% endblock %}
