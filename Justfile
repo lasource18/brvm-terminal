@@ -34,6 +34,11 @@ migrate-check:
 claim-owner email:
     uv run python scripts/claim_owner.py {{email}}
 
+# Pageview summary from the first-party counters (no third-party account).
+# `just stats --days 30` for a wider window. See services/analytics.py.
+stats *args:
+    uv run python scripts/stats.py {{args}}
+
 # Regenerate the logo: app icons + favicons into static/icons/ and the
 # marketing exports into brand/. One geometric K, no font. Needs
 # `brew install librsvg`. See brand/README.md.

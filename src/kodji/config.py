@@ -187,6 +187,12 @@ class Settings(BaseSettings):
     # you — see `services/accounts.current_account_id`.
     auth_required: bool = False
 
+    # --- Analytics — first-party, no cookie, no IP stored ---
+    # How long a pageview row is kept. Six months is enough to compare a
+    # launch against the season after it; the rows are ~120 bytes and the
+    # daily prune job keeps the table from growing without bound.
+    analytics_retain_days: int = 180
+
     # --- Ops alerting (PR-AB) ---
     # Where the job watchdog sends "a scheduled job silently didn't run".
     # Goes out through the same mailer as sign-in mail (a few messages a

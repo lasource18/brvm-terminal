@@ -16,6 +16,7 @@
     <li><strong>Vos données d'usage</strong> : listes de suivi, règles d'alerte, préférences. Elles vous appartiennent et servent uniquement à faire fonctionner le service.</li>
     <li><strong>Paiements</strong> : la référence, le montant, la période, le moyen de paiement (par ex. « mobile money ») et l'identifiant de transaction transmis par le prestataire de paiement. Nous ne recevons jamais votre numéro de carte ni votre numéro mobile money ; ils sont saisis chez le prestataire.</li>
     <li><strong>Journaux techniques</strong> : adresses IP et requêtes, conservés brièvement à des fins de sécurité et de diagnostic.</li>
+    <li><strong>Mesure d'audience</strong> : nous comptons les pages consultées sur notre propre serveur, sans cookie, sans script tiers et sans envoyer quoi que ce soit à l'extérieur. Nous enregistrons la page, la date, la langue affichée et, le cas échéant, le <em>domaine</em> du site référent — jamais l'URL complète. Pour distinguer deux visiteurs sans les identifier, nous calculons une empreinte à sens unique à partir de votre adresse IP, de votre navigateur et d'un sel aléatoire valable une seule journée ; ce sel est détruit au changement de jour, de sorte que l'empreinte ne peut plus être recalculée ni rattachée à une autre journée. Ni votre adresse IP ni votre navigateur ne sont conservés. Ces compteurs sont supprimés après {{ analytics_days }} jours.</li>
   </ul>
 
   <h2>3. Ce que nous ne faisons pas</h2>
@@ -54,6 +55,7 @@
     <li><strong>Your usage data</strong>: watchlists, alert rules, preferences. They are yours and are used only to run the service.</li>
     <li><strong>Payments</strong>: the reference, amount, period, payment method (e.g. "mobile money") and transaction id passed back by the payment provider. We never receive your card number or mobile money number; they are entered at the provider.</li>
     <li><strong>Technical logs</strong>: IP addresses and requests, kept briefly for security and diagnostics.</li>
+    <li><strong>Audience measurement</strong>: we count page views on our own server, with no cookie, no third-party script and nothing sent anywhere else. We record the page, the date, the language shown and, where there is one, the referring site's <em>domain</em> — never the full URL. To tell two visitors apart without identifying them we compute a one-way fingerprint from your IP address, your browser and a random salt that is valid for a single day; that salt is destroyed when the day rolls over, so the fingerprint can no longer be recomputed or matched to any other day. Neither your IP address nor your browser is kept. These counters are deleted after {{ analytics_days }} days.</li>
   </ul>
 
   <h2>3. What we do not do</h2>

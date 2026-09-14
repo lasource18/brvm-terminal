@@ -931,6 +931,34 @@ tests, day-2 operations — is
 [`docs/deploy-kodji-app.md`](./docs/deploy-kodji-app.md). It is written
 to be followed top to bottom.
 
+## Analytics
+
+Pageviews are counted **first-party and server-side**, into the same
+SQLite file. No third-party script, no analytics cookie, and no IP
+address or user agent is ever stored.
+
+```bash
+just stats              # last 14 days
+just stats --days 30
+```
+
+A visitor is counted via `sha256(salt + ip + user_agent + day)`, where the
+salt is random, belongs to one UTC day, and is overwritten when the day
+rolls. Once it is gone that day's hashes cannot be re-derived from an IP
+nor matched against another day — they become opaque per-day counters.
+Read the numbers accordingly: **a visitor is counted once per day, so two
+days' visitor counts cannot be added together.**
+
+Only successful full-page HTML GETs count. Fragments, `/health`, static
+assets, the API and obvious crawlers are excluded, and the counter
+swallows its own errors so it can never fail a page render. Rows are
+pruned after `ANALYTICS_RETAIN_DAYS` (180) by a daily job.
+
+Plausible and Umami were the alternatives. Hosted Plausible sends visitor
+data offsite and costs money; self-hosting it wants ClickHouse, and Umami
+wants Node plus Postgres — none of which fits a 4 GB box with a < 500 MB
+RSS budget. See `src/kodji/services/analytics.py`.
+
 ## Language
 
 The interface is French first — the audience is majority francophone —

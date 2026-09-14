@@ -24,6 +24,7 @@ from kodji.logging import get
 from kodji.services.alerts import deliver_pending as deliver_alerts
 from kodji.services.alerts import evaluate_all as evaluate_alerts
 from kodji.services.analyst_notes import generate_for_all as generate_analyst_notes
+from kodji.services.analytics import prune as prune_pageviews
 from kodji.services.auth import purge_expired as purge_expired_sessions
 from kodji.services.billing import expire_lapsed as expire_lapsed_plans
 from kodji.services.billing import remind_expiring as remind_expiring_plans
@@ -160,6 +161,16 @@ def _analyst_notes_job() -> dict:
     so Friday's close, news tags, and Friday's brief have all landed —
     plenty of time for the notes to be ready before Monday's open."""
     return generate_analyst_notes().as_dict()
+
+
+def _analytics_prune_job() -> dict:
+    """Drop pageviews past the retention window (ANALYTICS_RETAIN_DAYS).
+
+    The rows are tiny, but nothing that grows per visit should grow for
+    ever, and a shorter window is also the honest thing to promise on the
+    privacy page.
+    """
+    return {"pruned": prune_pageviews()}
 
 
 def _sessions_purge_job() -> dict:
@@ -354,6 +365,7 @@ def build_scheduler() -> BackgroundScheduler:
     # Session/challenge purge: daily at 03:30 Abidjan, deep in the quiet
     # window between the hourly snapshot and the morning jobs.
     _add(sched, "sessions_purge_daily", _sessions_purge_job, _cron(hour="3", minute="30"), **daily)
+    _add(sched, "analytics_prune_daily", _analytics_prune_job, _cron(hour="3", minute="40"), **daily)
     # PR-Z: lapsed paid periods, hourly at :50 — cheap indexed query, and
     # an expiry should not wait a day to be acknowledged. Reminders once a
     # day at 08:00 Abidjan, when a renewal is most likely to be acted on.

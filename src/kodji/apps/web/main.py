@@ -19,6 +19,7 @@ from kodji.config import settings
 from kodji.db import assert_schema_current
 from kodji.jobs.scheduler import build_scheduler
 from kodji.logging import get
+from kodji.services import analytics
 from kodji.services.accounts import NotAuthenticated
 
 log = get(__name__)
@@ -45,6 +46,40 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="kodji-terminal", version=__version__, lifespan=lifespan)
+
+@app.middleware("http")
+async def _count_pageview(request: Request, call_next):
+    """Record one row per full-page render (see `services/analytics`).
+
+    Runs outermost so it sees the final status, and reads the locale and
+    plan that `base_ctx` stashed on `request.state` rather than repeating
+    those lookups. `record` swallows its own errors — a counter must
+    never be able to fail a page.
+    """
+    response = await call_next(request)
+    if analytics.should_record(
+        path=request.url.path,
+        method=request.method,
+        status=response.status_code,
+        content_type=response.headers.get("content-type", ""),
+        is_htmx=request.headers.get("hx-request", "").lower() == "true",
+    ):
+        state = request.state
+        analytics.record(
+            path=request.url.path,
+            status=response.status_code,
+            ip=analytics.client_ip(request.headers, getattr(request.client, "host", None)),
+            user_agent=request.headers.get("user-agent", ""),
+            referer=request.headers.get("referer"),
+            locale=getattr(state, "kodji_locale", None),
+            signed_in=bool(getattr(state, "kodji_signed_in", False)),
+            plan=getattr(state, "kodji_plan", None),
+            # The manifest's start_url carries `?source=pwa`, so this marks
+            # the entry hit from an installed app.
+            is_pwa=request.query_params.get("source") == "pwa",
+        )
+    return response
+
 
 @app.middleware("http")
 async def _vary_on_accept_language(request: Request, call_next):
