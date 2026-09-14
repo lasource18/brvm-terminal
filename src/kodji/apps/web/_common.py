@@ -148,6 +148,12 @@ def base_ctx(request: Request) -> dict:
     """Common template context injected into every full-page render."""
     locale = resolve_locale(request)
     identity = accounts_svc.identity_for(request)
+    plan = _plan_for(identity)
+    # Handed to the analytics middleware, which runs after this and would
+    # otherwise repeat both lookups on every page render.
+    request.state.kodji_locale = locale
+    request.state.kodji_signed_in = identity is not None
+    request.state.kodji_plan = plan if identity is not None else None
     return {
         "version": __version__,
         "abidjan_now": now_abidjan().strftime("%Y-%m-%d %H:%M %Z"),
@@ -162,7 +168,7 @@ def base_ctx(request: Request) -> dict:
         "identity": identity,
         # Drives which nav links the topbar offers (PR-Y). Resolved from
         # the identity already in hand rather than re-reading the cookie.
-        "is_paid": _plan_for(identity) == PAID_PLAN,
+        "is_paid": plan == PAID_PLAN,
         # Footer: support address (the sign-in reply-to) and the legal links.
         "contact_email": settings.email_reply_to,
         "static_v": STATIC_VERSION,

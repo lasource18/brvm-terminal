@@ -58,6 +58,13 @@ def reset_module_state() -> None:
         _history.clear_cache()
     except ImportError:
         pass
+    # The analytics salt is cached per process per day; a test that swaps
+    # the DB path must not keep the previous DB's salt.
+    try:
+        from kodji.services import analytics as _analytics
+        _analytics.reset_salt_cache()
+    except ImportError:
+        pass
     # Memoized Anthropic SDK client — built against whatever
     # ANTHROPIC_API_KEY was in effect at first call.
     try:
