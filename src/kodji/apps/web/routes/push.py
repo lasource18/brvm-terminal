@@ -4,6 +4,8 @@ Three root-level files a browser expects at fixed paths, and the JSON
 API the alerts page's "enable on this device" button talks to.
 
 * `/manifest.webmanifest` — the installable-app descriptor.
+  Its icon URLs carry the static digest, so a new logo is a new URL
+  rather than whatever Cloudflare and an installed PWA still hold.
 * `/sw.js` — the service worker. Served from the root, not `/static/`,
   because a worker's scope cannot exceed its own path and it must
   control every page. The `__STATIC_V__` placeholder is replaced with
@@ -42,8 +44,9 @@ _FAVICON = STATIC_DIR / "icons" / "favicon.ico"
 
 @router.get("/manifest.webmanifest")
 def manifest() -> Response:
+    body = _MANIFEST.read_text(encoding="utf-8").replace("__STATIC_V__", STATIC_VERSION)
     return Response(
-        _MANIFEST.read_bytes(),
+        body,
         media_type="application/manifest+json",
         headers={"Cache-Control": "public, max-age=3600"},
     )

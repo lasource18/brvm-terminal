@@ -14,9 +14,9 @@
   {# The canonical minimal favicon set: .ico at the root for old browsers
      and anything that guesses, SVG for everyone current, apple-touch for
      the iOS Home Screen. Android reads the manifest above instead. #}
-  <link rel="icon" href="/favicon.ico" sizes="32x32">
-  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="icon" href="/favicon.ico?v={{ static_v }}" sizes="32x32">
+  <link rel="icon" href="/static/icons/icon.svg?v={{ static_v }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v={{ static_v }}">
   <link rel="stylesheet" href="/static/style.css?v={{ static_v }}">
   <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
   <script src="/static/app.js?v={{ static_v }}" defer></script>

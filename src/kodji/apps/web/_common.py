@@ -29,19 +29,27 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 def _static_version() -> str:
-    """Short digest of the shipped CSS/JS, appended as `?v=` to their URLs.
+    """Short digest of every shipped asset, appended as `?v=` to its URL.
 
     Cloudflare caches /static for hours per edge location and phones
     cache it longer; without this a deploy that changes the stylesheet
     leaves users on the old layout until the caches expire. A new digest
     is a new URL, fetched fresh everywhere. Computed once at import.
+
+    The icons are in here for a reason. #97 covered only the CSS and JS,
+    and when the logo landed in #101 Cloudflare went on serving the old
+    `icon-192.png` from cache — the icon URLs are fixed, named by the
+    manifest, and nothing about them had changed. An installed PWA can
+    hold a stale icon far longer than the four-hour edge TTL.
     """
     import hashlib
 
     h = hashlib.sha256()
-    for name in ("style.css", "app.js"):
-        f = STATIC_DIR / name
+    files = [STATIC_DIR / "style.css", STATIC_DIR / "app.js"]
+    files += sorted((STATIC_DIR / "icons").glob("*"))
+    for f in files:
         if f.is_file():
+            h.update(f.name.encode())
             h.update(f.read_bytes())
     return h.hexdigest()[:10]
 
