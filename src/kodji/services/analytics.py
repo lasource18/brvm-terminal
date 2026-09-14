@@ -65,7 +65,12 @@ log = get(__name__)
 # Paths that are not pages. `/health` is hit every 5 minutes by the uptime
 # monitor and would swamp everything else.
 _SKIP_PREFIXES = ("/static/", "/api/", "/_frag/", "/lang/", "/billing/webhook")
-_SKIP_EXACT = {"/health", "/favicon.ico", "/sw.js", "/manifest.webmanifest"}
+# `/offline` is HTML, so unlike the others it is not excluded by content
+# type. It is the service worker's fallback page, reachable only when the
+# network is gone or by something that parsed `sw.js` and followed the
+# URL — which is how it turned up in production traffic. Never a reader
+# choosing to read it, so never a pageview.
+_SKIP_EXACT = {"/health", "/favicon.ico", "/sw.js", "/manifest.webmanifest", "/offline", "/robots.txt"}
 
 # Substring match on a lowercased user agent. Not exhaustive and cannot
 # be — `looks_automated` is what catches the ones nobody has named yet.

@@ -36,6 +36,8 @@ class TestWhatCounts:
         "path",
         [
             "/health",                    # the uptime monitor, every 5 minutes
+            "/offline",                   # the worker's fallback, not a page anyone chose
+            "/robots.txt",
             "/favicon.ico",
             "/sw.js",
             "/manifest.webmanifest",
@@ -227,6 +229,8 @@ class TestRecordingThroughTheApp:
 
     def test_assets_fragments_and_health_are_not_counted(self, client):
         client.get("/health")
+        client.get("/offline")
+        client.get("/robots.txt")
         client.get("/favicon.ico")
         client.get("/sw.js")
         client.get("/manifest.webmanifest")
