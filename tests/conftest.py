@@ -168,7 +168,12 @@ def _client(monkeypatch, tmp_path, *, sign_in: bool):
 
     with patch("kodji.apps.web.main.build_scheduler") as bs:
         bs.return_value.get_jobs.return_value = []
-        with TestClient(app) as c:
+        # Pinned to English. Since the locale fix a visitor with no cookie
+        # and no header gets French (the audience is majority francophone),
+        # but these tests assert on page behaviour, not language, and the
+        # source strings are English. Locale resolution itself is covered in
+        # test_i18n.py, which sets the header explicitly.
+        with TestClient(app, headers={"Accept-Language": "en"}) as c:
             if sign_in:
                 _sign_in_as_operator(c, db_path)
             yield c
