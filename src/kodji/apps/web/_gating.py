@@ -31,11 +31,11 @@ prompt, rather than a login wall in front of public market data.
 from __future__ import annotations
 
 from fastapi import Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from kodji.apps.web._common import base_ctx, templates
 from kodji.services import accounts as accounts_svc
-from kodji.store.accounts import PAID_PLAN
+from kodji.store.accounts import DEFAULT_ACCOUNT_ID, PAID_PLAN
 
 # 402 is the honest code: the request is well-formed and the resource
 # exists, payment is what is missing. It is unusual enough on the wire
@@ -86,6 +86,31 @@ def upgrade_response(request: Request, *, feature: str) -> Response:
     return templates.TemplateResponse(
         request, template, ctx, status_code=PAYMENT_REQUIRED
     )
+
+
+def is_owner(request: Request) -> bool:
+    """Whether this request is the operator.
+
+    The operator is whoever signed in on `DEFAULT_ACCOUNT_ID` — the
+    account migration 0017 assigned every pre-multi-tenancy row to, and
+    the one `just claim-owner` attaches the deployer's address to. There
+    is no admin role and one is not worth inventing for a single-operator
+    product; if teams ever arrive, this is the function that grows a
+    `role` check rather than every caller.
+    """
+    identity = accounts_svc.identity_for(request)
+    return identity is not None and identity.account_id == DEFAULT_ACCOUNT_ID
+
+
+def refuse_if_not_owner(request: Request) -> Response | None:
+    """None when the caller is the operator, else a 404.
+
+    404 and not 403: an operations page should not confirm its own
+    existence to someone who cannot open it.
+    """
+    if is_owner(request):
+        return None
+    return PlainTextResponse("Not Found", status_code=404)
 
 
 def refuse_if_unpaid(request: Request, *, feature: str) -> Response | None:

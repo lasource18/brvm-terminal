@@ -23,16 +23,17 @@ def insert_view(
     signed_in: bool,
     plan: str | None,
     is_pwa: bool,
+    is_suspected_bot: bool = False,
 ) -> None:
     conn.execute(
         """
         INSERT INTO pageviews
             (ts_utc, day, path, status, referrer_host, visitor_hash,
-             locale, signed_in, plan, is_pwa)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             locale, signed_in, plan, is_pwa, is_suspected_bot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (ts_utc, day, path, status, referrer_host, visitor_hash,
-         locale, int(signed_in), plan, int(is_pwa)),
+         locale, int(signed_in), plan, int(is_pwa), int(is_suspected_bot)),
     )
     conn.commit()
 
@@ -63,17 +64,22 @@ def put_salt(conn: sqlite3.Connection, day: str, salt: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# Appended to every aggregate's WHERE. Headline figures are human traffic;
+# `suspected_totals` is the only read that looks at the other side.
+_HUMAN = "AND is_suspected_bot = 0"
+
+
 def daily_totals(conn: sqlite3.Connection, since_day: str) -> list[sqlite3.Row]:
     """Views and distinct visitors per day, newest first."""
     return conn.execute(
-        """
+        f"""
         SELECT day,
                COUNT(*)                     AS views,
                COUNT(DISTINCT visitor_hash) AS visitors,
                SUM(signed_in)               AS signed_in_views,
                SUM(is_pwa)                  AS pwa_views
         FROM pageviews
-        WHERE day >= ?
+        WHERE day >= ? {_HUMAN}
         GROUP BY day
         ORDER BY day DESC
         """,
@@ -83,12 +89,12 @@ def daily_totals(conn: sqlite3.Connection, since_day: str) -> list[sqlite3.Row]:
 
 def top_paths(conn: sqlite3.Connection, since_day: str, limit: int = 15) -> list[sqlite3.Row]:
     return conn.execute(
-        """
+        f"""
         SELECT path,
                COUNT(*)                     AS views,
                COUNT(DISTINCT visitor_hash) AS visitors
         FROM pageviews
-        WHERE day >= ?
+        WHERE day >= ? {_HUMAN}
         GROUP BY path
         ORDER BY views DESC, path
         LIMIT ?
@@ -99,12 +105,12 @@ def top_paths(conn: sqlite3.Connection, since_day: str, limit: int = 15) -> list
 
 def top_referrers(conn: sqlite3.Connection, since_day: str, limit: int = 15) -> list[sqlite3.Row]:
     return conn.execute(
-        """
+        f"""
         SELECT referrer_host,
                COUNT(*)                     AS views,
                COUNT(DISTINCT visitor_hash) AS visitors
         FROM pageviews
-        WHERE day >= ? AND referrer_host IS NOT NULL
+        WHERE day >= ? {_HUMAN} AND referrer_host IS NOT NULL
         GROUP BY referrer_host
         ORDER BY views DESC, referrer_host
         LIMIT ?
@@ -117,12 +123,12 @@ def locale_split(conn: sqlite3.Connection, since_day: str) -> list[sqlite3.Row]:
     """Which language visitors actually get — the check on whether the
     Accept-Language negotiation is doing what it was meant to."""
     return conn.execute(
-        """
+        f"""
         SELECT locale,
                COUNT(*)                     AS views,
                COUNT(DISTINCT visitor_hash) AS visitors
         FROM pageviews
-        WHERE day >= ?
+        WHERE day >= ? {_HUMAN}
         GROUP BY locale
         ORDER BY views DESC
         """,
@@ -133,8 +139,8 @@ def locale_split(conn: sqlite3.Connection, since_day: str) -> list[sqlite3.Row]:
 def visitors_on_path(conn: sqlite3.Connection, since_day: str, path: str) -> int:
     return int(
         conn.execute(
-            "SELECT COUNT(DISTINCT visitor_hash) FROM pageviews "
-            "WHERE day >= ? AND path = ?",
+            f"SELECT COUNT(DISTINCT visitor_hash) FROM pageviews "
+            f"WHERE day >= ? {_HUMAN} AND path = ?",
             (since_day, path),
         ).fetchone()[0]
     )
@@ -143,10 +149,20 @@ def visitors_on_path(conn: sqlite3.Connection, since_day: str, path: str) -> int
 def total_visitors(conn: sqlite3.Connection, since_day: str) -> int:
     return int(
         conn.execute(
-            "SELECT COUNT(DISTINCT visitor_hash) FROM pageviews WHERE day >= ?",
+            f"SELECT COUNT(DISTINCT visitor_hash) FROM pageviews WHERE day >= ? {_HUMAN}",
             (since_day,),
         ).fetchone()[0]
     )
+
+
+def suspected_totals(conn: sqlite3.Connection, since_day: str) -> tuple[int, int]:
+    """`(views, visitors)` that the headline figures left out."""
+    row = conn.execute(
+        "SELECT COUNT(*), COUNT(DISTINCT visitor_hash) FROM pageviews "
+        "WHERE day >= ? AND is_suspected_bot = 1",
+        (since_day,),
+    ).fetchone()
+    return int(row[0]), int(row[1])
 
 
 def prune(conn: sqlite3.Connection, before_day: str) -> int:

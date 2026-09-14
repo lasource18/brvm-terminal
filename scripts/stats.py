@@ -52,6 +52,9 @@ def main() -> int:
 
     print(f"\nkodji — {args.days} days since {s.since_day}\n")
     if not s.views:
+        if s.suspected_views:
+            print(f"  No human pageviews — {s.suspected_views} request(s) looked automated.\n")
+            return 0
         print("  No pageviews recorded yet.\n")
         print("  If the app is deployed and being visited, check that the")
         print("  migration ran (0023_analytics) and that you are not the only")
@@ -60,7 +63,15 @@ def main() -> int:
 
     views = f"{s.views} view" + ("" if s.views == 1 else "s")
     visitors = f"{s.visitors} visitor" + ("" if s.visitors == 1 else "s")
-    print(f"  {views} from {visitors}\n")
+    print(f"  {views} from {visitors}")
+    if s.suspected_views:
+        print(
+            f"  excluding {s.suspected_views} view"
+            + ("" if s.suspected_views == 1 else "s")
+            + f" from {s.suspected_visitors} suspected crawler"
+            + ("" if s.suspected_visitors == 1 else "s")
+        )
+    print()
 
     print("By day")
     _table(

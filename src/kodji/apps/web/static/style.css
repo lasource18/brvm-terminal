@@ -621,3 +621,11 @@ table.kv th, table.kv td { white-space: normal; }
 .push-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 12px; }
 .push-row button { font-size: 12px; padding: 4px 10px; }
 .offline-wall { text-align: center; }
+
+/* --- /ops/stats (owner only) --- */
+.stat-big { font-size: 26px; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.2; }
+.panel-body .dim { font-size: 11px; }
+/* Traffic shape without a chart library: width relative to the busiest
+   day in the window. The cell is the widest column so the bar has room. */
+table.quotes th.bar-cell, table.quotes td.bar-cell { width: 34%; padding-left: 14px; }
+.bar { display: block; height: 8px; min-width: 1px; background: var(--accent); opacity: 0.55; }

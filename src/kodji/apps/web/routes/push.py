@@ -16,6 +16,9 @@ API the alerts page's "enable on this device" button talks to.
   network. Precached at install.
 * `/favicon.ico` — browsers and link unfurlers request this path whether
   or not the HTML declares it, so serving it is what stops the 404s.
+* `/robots.txt` — keeps crawlers off the endpoints and per-account pages
+  that are not content. Cloudflare appends its own managed AI-crawler
+  section to whatever the origin returns.
 
 The subscribe API needs a session (a device is tied to a user) and the
 paid plan (alerts are paid; a free account has nothing to receive).
@@ -40,6 +43,7 @@ router = APIRouter()
 _MANIFEST = STATIC_DIR / "manifest.webmanifest"
 _SW = STATIC_DIR / "sw.js"
 _FAVICON = STATIC_DIR / "icons" / "favicon.ico"
+_ROBOTS = STATIC_DIR / "robots.txt"
 
 
 @router.get("/manifest.webmanifest")
@@ -76,6 +80,15 @@ def favicon() -> Response:
         _FAVICON.read_bytes(),
         media_type="image/x-icon",
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+@router.get("/robots.txt", include_in_schema=False)
+def robots() -> Response:
+    return Response(
+        _ROBOTS.read_text(encoding="utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

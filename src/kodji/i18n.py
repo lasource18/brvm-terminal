@@ -295,6 +295,38 @@ _FR: dict[str, str] = {
     "Until then, alerts go out by email.":
         "Le Web Push est désactivé sur ce serveur : renseignez les clés VAPID dans .env "
         "(just vapid-keygen). D'ici là, les alertes partent par e-mail.",
+    # ---- /ops/stats (owner only) ----
+    "Audience": "Audience",
+    "Counted on this server. No cookie, no third-party script, and no IP address or browser is stored.":
+        "Mesuré sur ce serveur. Aucun cookie, aucun script tiers, et ni votre adresse IP "
+        "ni votre navigateur ne sont conservés.",
+    "d": "j",
+    "Views": "Vues",
+    "Visitors": "Visiteurs",
+    "Reached plans": "Ont vu les offres",
+    "Reached sign-in": "Ont vu la connexion",
+    "of visitors": "des visiteurs",
+    "Excluded from the figures above:": "Exclu des chiffres ci-dessus :",
+    "views from": "vues provenant de",
+    "requests that did not look like a browser — no Accept-Language, or not asking for HTML.":
+        "requêtes qui ne ressemblaient pas à un navigateur — pas d'en-tête Accept-Language, "
+        "ou ne demandant pas de HTML.",
+    "Nothing recorded in this window yet.": "Rien d'enregistré sur cette période.",
+    "By day": "Par jour",
+    "Signed in": "Connectés",
+    "From app": "Depuis l'app",
+    "Top pages": "Pages les plus vues",
+    "Path": "Chemin",
+    "Referrers": "Sites référents",
+    "Host": "Domaine",
+    "Everyone arrived directly or with no referrer.":
+        "Tout le monde est arrivé directement ou sans référent.",
+    "Language served": "Langue affichée",
+    "Locale": "Langue",
+    "A visitor is counted once per day, so two days' visitor counts cannot be added together. Counters are deleted after":
+        "Un visiteur est compté une fois par jour : les nombres de visiteurs de deux "
+        "journées ne peuvent pas être additionnés. Les compteurs sont supprimés après",
+    "days.": "jours.",
     # ---- offline page (PR-AA) ----
     "Offline": "Hors ligne",
     "No connection": "Pas de connexion",

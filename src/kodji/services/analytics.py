@@ -11,10 +11,25 @@ tag.
 
 **Why server-side rather than a JS beacon.** Nothing to block, nothing to
 consent to, and it still counts a reader whose browser refuses scripts.
-The cost is that crawlers have to be filtered by hand (`_BOTS`) and that
-nothing client-side — scroll depth, time on page — can ever be measured.
-For "did anyone visit, where did they come from, did they reach the
-pricing page" that trade is worth it.
+The cost is that crawlers must be recognised from the request alone, and
+that nothing client-side — scroll depth, time on page — can ever be
+measured. For "did anyone visit, where did they come from, did they reach
+the pricing page" that trade is worth it.
+
+**Crawlers are judged twice.** A name match against `_BOTS` is a
+*definite* bot and is never recorded; that list only ever catches
+crawlers already known, so it cannot be the whole answer. The second
+test is behavioural and needs no name: a browser performing a top-level
+navigation always sends `Accept-Language` and an `Accept` that asks for
+HTML, and almost nothing automated does both. Requests failing that are
+recorded but flagged `is_suspected_bot`, and excluded from headline
+figures which report how many they left out.
+
+Flagging rather than dropping is the point. The user agent is not stored,
+so a dropped request cannot be reviewed afterwards and a wrong rule would
+be undetectable. A flagged one is still on disk, still countable once the
+rule is corrected, and visible as a number that does not match the
+headline.
 
 **How a visitor is counted without identifying them.** `visitor_hash` is
 `sha256(salt + ip + user_agent + day)`, where the salt is random and
@@ -53,7 +68,7 @@ _SKIP_PREFIXES = ("/static/", "/api/", "/_frag/", "/lang/", "/billing/webhook")
 _SKIP_EXACT = {"/health", "/favicon.ico", "/sw.js", "/manifest.webmanifest"}
 
 # Substring match on a lowercased user agent. Not exhaustive and cannot
-# be: it is a floor that keeps the obvious crawlers out of the counts.
+# be — `looks_automated` is what catches the ones nobody has named yet.
 _BOTS = (
     "bot", "crawl", "spider", "slurp", "curl", "wget", "python-requests",
     "httpx", "headlesschrome", "phantomjs", "monitoring", "uptime",
@@ -122,8 +137,34 @@ def client_ip(headers: dict[str, str], fallback: str | None) -> str:
 
 
 def is_bot(user_agent: str) -> bool:
+    """A crawler we can name. Never recorded at all."""
     ua = user_agent.lower()
     return not ua or any(token in ua for token in _BOTS)
+
+
+def looks_automated(accept: str, accept_language: str) -> bool:
+    """A crawler we cannot name, judged by how it asks rather than who it
+    says it is. Recorded, but flagged.
+
+    Two headers every browser sends on a top-level navigation and most
+    automated clients omit:
+
+    * `Accept-Language` — a browser always states one, even if only
+      `en-US`. curl, python-requests, Googlebot and most scrapers send
+      none at all. This is the single strongest signal available without
+      JavaScript.
+    * `Accept` — a browser asks for HTML by name. `*/*`, the curl
+      default, is not something a navigating browser sends.
+
+    Deliberately NOT used: the `Sec-Fetch-*` headers. They are a cleaner
+    signal on a current browser and absent on every older one, and this
+    audience is on phones that are not all current. Missing them would
+    mark real readers as crawlers, and under-counting West African
+    visitors is the one failure this must not have.
+    """
+    if not accept_language.strip():
+        return True
+    return "text/html" not in accept.lower()
 
 
 def should_record(path: str, method: str, status: int, content_type: str, is_htmx: bool) -> bool:
@@ -167,6 +208,8 @@ def record(
     ip: str,
     user_agent: str,
     referer: str | None,
+    accept: str = "",
+    accept_language: str = "",
     locale: str | None,
     signed_in: bool,
     plan: str | None,
@@ -179,6 +222,7 @@ def record(
     try:
         if is_bot(user_agent):
             return False
+        suspected = looks_automated(accept, accept_language)
         day = _today()
         with connect(_db_path()) as conn:
             salt = _salt_for(conn, day)
@@ -194,6 +238,7 @@ def record(
                 signed_in=signed_in,
                 plan=plan,
                 is_pwa=is_pwa,
+                is_suspected_bot=suspected,
             )
         return True
     except Exception as e:  # pragma: no cover - defensive
@@ -228,6 +273,10 @@ class Summary:
     views: int
     pricing_visitors: int
     signup_visitors: int
+    # What the figures above deliberately leave out, so the exclusion is
+    # a number on the page rather than an invisible decision.
+    suspected_views: int = 0
+    suspected_visitors: int = 0
 
 
 def _rows(rows) -> list[dict]:
@@ -238,6 +287,7 @@ def summary(days: int = 14) -> Summary:
     since = (datetime.now(UTC) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     with connect(_db_path()) as conn:
         daily = _rows(repo.daily_totals(conn, since))
+        suspected = repo.suspected_totals(conn, since)
         return Summary(
             since_day=since,
             days=daily,
@@ -248,4 +298,6 @@ def summary(days: int = 14) -> Summary:
             views=sum(d["views"] for d in daily),
             pricing_visitors=repo.visitors_on_path(conn, since, "/pricing"),
             signup_visitors=repo.visitors_on_path(conn, since, "/login"),
+            suspected_views=suspected[0],
+            suspected_visitors=suspected[1],
         )
