@@ -12,6 +12,7 @@ re-derived once the salt has rotated.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -293,3 +294,24 @@ class TestSummaryAndPrune:
         rows = _views(settings.db_path)
         assert len(rows) == 1
         assert rows[0]["visitor_hash"] == "new"
+
+
+class TestStatsRendering:
+    """The CLI is the only way these numbers are ever read, so its
+    formatting is part of the feature."""
+
+    def test_a_real_zero_is_not_an_em_dash(self):
+        """`0 signed in` and `no figure` are different claims."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "kodji_stats", Path(__file__).resolve().parents[1] / "scripts" / "stats.py"
+        )
+        assert spec and spec.loader
+        stats = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stats)
+
+        assert stats._cell(0) == "0"
+        assert stats._cell(5) == "5"
+        assert stats._cell(None) == "—"
+        assert stats._cell("") == "—"

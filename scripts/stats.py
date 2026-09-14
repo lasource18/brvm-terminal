@@ -22,17 +22,25 @@ sys.path.insert(0, str(ROOT / "src"))
 from kodji.services import analytics  # noqa: E402
 
 
+def _cell(value: object) -> str:
+    """Render one cell. A real zero prints as `0`, not as the em dash —
+    "nobody was signed in" and "we have no figure" are different claims
+    and a dash for both makes the table lie quietly.
+    """
+    return "—" if value is None or value == "" else str(value)
+
+
 def _table(rows: list[dict], columns: list[tuple[str, str]], empty: str) -> None:
     if not rows:
         print(f"  {empty}")
         return
     widths = {
-        key: max(len(header), *(len(str(r.get(key, "") or "—")) for r in rows))
+        key: max(len(header), *(len(_cell(r.get(key))) for r in rows))
         for key, header in columns
     }
     print("  " + "  ".join(h.ljust(widths[k]) for k, h in columns))
     for r in rows:
-        print("  " + "  ".join(str(r.get(k, "") or "—").ljust(widths[k]) for k, _ in columns))
+        print("  " + "  ".join(_cell(r.get(k)).ljust(widths[k]) for k, _ in columns))
 
 
 def main() -> int:
@@ -50,7 +58,9 @@ def main() -> int:
         print("  visitor arriving with a filtered user agent.\n")
         return 0
 
-    print(f"  {s.views} views from {s.visitors} visitors\n")
+    views = f"{s.views} view" + ("" if s.views == 1 else "s")
+    visitors = f"{s.visitors} visitor" + ("" if s.visitors == 1 else "s")
+    print(f"  {views} from {visitors}\n")
 
     print("By day")
     _table(
