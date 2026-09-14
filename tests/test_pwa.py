@@ -42,9 +42,15 @@ class TestShell:
         assert m["name"] == "Kodji Terminal"
         assert m["display"] == "standalone"
         assert m["start_url"].startswith("/")
-        # Every icon the manifest names must exist and be reachable.
+        # Every icon the manifest names must exist and be reachable, and
+        # must carry the static digest: the URLs are fixed and an installed
+        # PWA caches them, so an unstamped icon survives a logo change
+        # (which is exactly what happened to icon-192.png after #101).
+        assert "__STATIC_V__" not in r.text
         for icon in m["icons"]:
-            assert (STATIC_DIR / icon["src"].removeprefix("/static/")).is_file()
+            path, _, query = icon["src"].partition("?")
+            assert query == f"v={STATIC_VERSION}", icon["src"]
+            assert (STATIC_DIR / path.removeprefix("/static/")).is_file()
             assert client.get(icon["src"]).status_code == 200
 
     def test_service_worker_is_served_from_the_root(self, client):
@@ -91,15 +97,39 @@ class TestShell:
 
     def test_pages_declare_the_favicon_set(self, client):
         body = client.get("/").text
-        assert '<link rel="icon" href="/favicon.ico" sizes="32x32">' in body
-        assert '<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">' in body
-        assert 'rel="apple-touch-icon"' in body
+        v = STATIC_VERSION
+        assert f'<link rel="icon" href="/favicon.ico?v={v}" sizes="32x32">' in body
+        assert f'href="/static/icons/icon.svg?v={v}" type="image/svg+xml"' in body
+        assert f'rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v={v}"' in body
+
+    def test_worker_stamps_the_icons_it_references(self, client):
+        """The worker precaches an icon and names one on every notification;
+        unstamped, both outlive a logo change."""
+        body = client.get("/sw.js").text
+        assert "/static/icons/icon-192.png?v=${VERSION}" in body
+        assert "/static/icons/badge-96.png?v=${VERSION}" in body
+        assert '"/static/icons/icon-192.png"' not in body
 
     def test_pages_link_the_manifest(self, client):
         body = client.get("/").text
         assert '<link rel="manifest" href="/manifest.webmanifest">' in body
         assert '<meta name="theme-color" content="#0b0f14">' in body
         assert 'rel="apple-touch-icon"' in body
+
+    def test_digest_covers_the_icons(self):
+        """A logo change must move the digest — that is what busts the
+        edge cache and every installed PWA."""
+        from kodji.apps.web import _common
+
+        before = _common._static_version()
+        icon = STATIC_DIR / "icons" / "icon-192.png"
+        original = icon.read_bytes()
+        try:
+            icon.write_bytes(original + b"// nudge")
+            assert _common._static_version() != before
+        finally:
+            icon.write_bytes(original)
+        assert _common._static_version() == before
 
     def test_icons_are_the_generated_set(self, client):
         """`just logo` writes every one of these; a half-run that left an
