@@ -2,10 +2,16 @@
 
 Deliberately simple: a nested dict `TRANSLATIONS[locale][source_string]`
 looked up at render time by the `t` Jinja filter. Missing keys fall back
-to the source string — that's how new templates ship in English by
-default and get French coverage incrementally without ever crashing
-render. Source strings ARE the keys (as in `gettext`) so adding a new
-label doesn't need a separate id registry.
+to the source string, so a template with no French entry yet renders its
+English source rather than crashing. Source strings ARE the keys (as in
+`gettext`) so adding a new label doesn't need a separate id registry.
+
+Note the two senses of "default" that this module keeps apart. The
+*source* language is English — that is what a template author writes and
+what the catalogue is keyed on. The *reader's* default is French
+(`DEFAULT_LOCALE`), because the audience is majority francophone. A new
+template shipping without French coverage is therefore a bug, not a
+backlog item: it shows English to the people least likely to read it.
 
 Kept as a plain Python module (not `.po` catalogs) because:
 - single-user, ~two locales, and coverage is small enough that a full
@@ -24,7 +30,11 @@ from typing import Literal
 
 Locale = Literal["en", "fr"]
 SUPPORTED_LOCALES: tuple[Locale, ...] = ("en", "fr")
-DEFAULT_LOCALE: Locale = "en"
+# French, because the audience is majority francophone (decided 2026-09-02)
+# and this is what a visitor gets when nothing else says otherwise. Source
+# strings in the templates stay English — they are catalogue keys, not the
+# default a reader sees.
+DEFAULT_LOCALE: Locale = "fr"
 
 
 # French translations. Source string → French copy. Add entries as
@@ -705,6 +715,45 @@ def normalize(candidate: str | None) -> Locale:
     if code in SUPPORTED_LOCALES:
         return code  # type: ignore[return-value]
     return DEFAULT_LOCALE
+
+
+def from_accept_language(header: str | None) -> Locale | None:
+    """Best supported locale from an `Accept-Language` header, or None.
+
+    None means "this header told us nothing useful" — an empty header, or
+    one asking only for languages we do not speak — so the caller falls
+    back to `DEFAULT_LOCALE` rather than to English.
+
+    Quality values are honoured, because `fr;q=0.9,en;q=0.8` is a
+    francophone with English as a second choice and serving them English
+    would be exactly wrong. Ties go to the earlier entry, as the header
+    orders by preference.
+    """
+    if not header:
+        return None
+    best: tuple[float, int, Locale] | None = None
+    for position, part in enumerate(header.split(",")):
+        tag, _, params = part.strip().partition(";")
+        tag = tag.strip().lower()
+        # `*` means "anything", which is no preference at all.
+        if not tag or tag == "*":
+            continue
+        quality = 1.0
+        for param in params.split(";"):
+            key, _, value = param.strip().partition("=")
+            if key.strip() == "q":
+                try:
+                    quality = float(value)
+                except ValueError:
+                    quality = 0.0
+        if quality <= 0:            # q=0 is an explicit refusal
+            continue
+        code = tag.split("-", 1)[0]
+        if code in SUPPORTED_LOCALES:
+            candidate = (quality, -position, code)
+            if best is None or candidate > best:
+                best = candidate    # type: ignore[assignment]
+    return best[2] if best else None
 
 
 def translate(source: str, locale: Locale = DEFAULT_LOCALE) -> str:

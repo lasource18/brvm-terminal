@@ -74,16 +74,85 @@ class TestLangRoute:
             assert r.headers["location"] == "/"
 
 
+class TestAcceptLanguage:
+    """The header decides for a visitor who has no cookie yet — which is
+    every visitor exactly once, including on launch day."""
+
+    def test_empty_or_useless_headers_yield_nothing(self):
+        for header in (None, "", "   ", "*", "de", "de-DE,pt;q=0.8"):
+            assert i18n.from_accept_language(header) is None
+
+    def test_simple_match(self):
+        assert i18n.from_accept_language("fr") == "fr"
+        assert i18n.from_accept_language("en") == "en"
+
+    def test_region_variants_strip_to_base(self):
+        assert i18n.from_accept_language("fr-CI") == "fr"
+        assert i18n.from_accept_language("en-GB,en;q=0.9") == "en"
+
+    def test_quality_values_decide(self):
+        # A francophone with English as a second choice must not get English.
+        assert i18n.from_accept_language("fr-FR,fr;q=0.9,en;q=0.8") == "fr"
+        assert i18n.from_accept_language("en-US,en;q=0.9,fr;q=0.8") == "en"
+        assert i18n.from_accept_language("en;q=0.3,fr;q=0.7") == "fr"
+
+    def test_unsupported_languages_are_skipped_not_matched(self):
+        assert i18n.from_accept_language("de,fr;q=0.5") == "fr"
+        assert i18n.from_accept_language("zh-CN,ja;q=0.9,en;q=0.1") == "en"
+
+    def test_q_zero_is_a_refusal(self):
+        assert i18n.from_accept_language("en;q=0, fr;q=0.5") == "fr"
+        assert i18n.from_accept_language("fr;q=0") is None
+
+    def test_ties_go_to_the_earlier_entry(self):
+        assert i18n.from_accept_language("fr,en") == "fr"
+        assert i18n.from_accept_language("en,fr") == "en"
+
+    def test_malformed_q_does_not_raise(self):
+        assert i18n.from_accept_language("fr;q=banana,en;q=0.5") == "en"
+
+
 class TestLocaleRenderFlow:
-    def test_default_locale_renders_english(self, client):
-        r = client.get("/")
+    def test_a_cold_visitor_gets_french(self, client):
+        """No cookie and nothing useful in the header: the audience is
+        majority francophone, so the default is French, not the English
+        source strings. (The fixture pins `Accept-Language: en`, so this
+        clears it — an empty header and an absent one take the same path.)
+        """
+        r = client.get("/", headers={"Accept-Language": ""})
         assert r.status_code == 200
+        assert "Aperçu" in r.text
+        assert ">Overview<" not in r.text
+
+    def test_a_french_browser_gets_french(self, client):
+        r = client.get("/", headers={"Accept-Language": "fr-CI,fr;q=0.9,en;q=0.8"})
+        assert "Aperçu" in r.text
+
+    def test_an_english_browser_still_gets_english(self, client):
+        """The minority is served properly rather than being handed French
+        because the majority is francophone."""
+        r = client.get("/", headers={"Accept-Language": "en-CA,en;q=0.9"})
         assert "Overview" in r.text
         assert "Aperçu" not in r.text
 
-    def test_cookie_switches_to_french(self, client):
-        # Round-trip: set cookie via /lang/fr, then follow-up request
-        # renders French for translated topbar entries.
+    def test_the_cookie_beats_the_header(self, client):
+        client.get("/lang/en?next=/", follow_redirects=False)
+        r = client.get("/", headers={"Accept-Language": "fr-FR,fr;q=0.9"})
+        assert "Overview" in r.text
+
+    def test_html_varies_on_accept_language(self, client):
+        """A shared cache must not hand a French render to an English
+        browser. Static assets must NOT carry it, or the CDN would keep a
+        copy of every asset per browser language."""
+        assert "Accept-Language" in client.get("/").headers.get("vary", "")
+        css = client.get("/static/style.css")
+        assert "Accept-Language" not in css.headers.get("vary", "")
+
+    def test_cookie_switches_language(self, client):
+        # Round-trip: set the cookie via /lang/{code}, then a follow-up
+        # request renders that language for translated topbar entries.
+        client.get("/lang/en?next=/", follow_redirects=False)
+        assert "Overview" in client.get("/").text
         client.get("/lang/fr?next=/", follow_redirects=False)
         r = client.get("/")
         assert "Aperçu" in r.text

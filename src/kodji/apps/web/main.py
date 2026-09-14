@@ -46,6 +46,24 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="kodji-terminal", version=__version__, lifespan=lifespan)
 
+@app.middleware("http")
+async def _vary_on_accept_language(request: Request, call_next):
+    """Tell shared caches that HTML depends on `Accept-Language`.
+
+    Scoped to HTML on purpose. A blanket `Vary` would land on `/static`
+    too, and Cloudflare would then keep a separate copy of every asset
+    per browser language — the opposite of what the version-stamped URLs
+    are for.
+    """
+    response = await call_next(request)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        existing = response.headers.get("vary")
+        response.headers["vary"] = (
+            f"{existing}, Accept-Language" if existing else "Accept-Language"
+        )
+    return response
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(auth.router)
 app.include_router(billing.router)

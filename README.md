@@ -931,6 +931,25 @@ tests, day-2 operations — is
 [`docs/deploy-kodji-app.md`](./docs/deploy-kodji-app.md). It is written
 to be followed top to bottom.
 
+## Language
+
+The interface is French first — the audience is majority francophone —
+with English available. What a given request renders is resolved in this
+order:
+
+1. `?lang=fr` / `?lang=en` on the URL (an explicit, shareable override)
+2. the `brvm_lang` cookie, set by the FR|EN toggle in the topbar
+3. the browser's `Accept-Language`, quality values honoured
+4. French
+
+Step 3 is what a first-time visitor hits, since they have no cookie yet.
+An anglophone browser gets English; everyone else gets French.
+
+Source strings in the templates are English because they are the
+catalogue keys (`src/kodji/i18n.py`). That is not the same as the
+reader's default — a page shipping without French coverage is a bug, not
+a backlog item.
+
 ## Brand and icons
 
 The mark is the letter **K** in the site's accent `#ffb454` on its

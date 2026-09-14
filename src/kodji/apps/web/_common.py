@@ -12,7 +12,7 @@ from jinja2.runtime import Context
 from kodji import __version__
 from kodji.clock import is_market_open, now_abidjan
 from kodji.config import settings
-from kodji.i18n import DEFAULT_LOCALE, Locale, normalize, translate
+from kodji.i18n import DEFAULT_LOCALE, Locale, from_accept_language, normalize, translate
 from kodji.services import accounts as accounts_svc
 from kodji.store.accounts import FREE_PLAN, PAID_PLAN
 
@@ -126,12 +126,22 @@ def resolve_locale(request: Request) -> Locale:
     """Resolve the effective locale for this request.
 
     Priority: `?lang=` query (explicit user action) → cookie (persisted
-    preference) → default. Query wins so a shareable URL can force a
-    locale without clobbering the cookie."""
+    preference) → the browser's `Accept-Language` → `DEFAULT_LOCALE`.
+    Query wins so a shareable URL can force a locale without clobbering
+    the cookie.
+
+    The header step is the one that matters on launch day. Without it a
+    first-time visitor — no cookie yet, which is every visitor once —
+    fell through to the default, and the whole francophone audience met
+    the product in English.
+    """
     qs = request.query_params.get("lang")
     if qs:
         return normalize(qs)
-    return normalize(request.cookies.get(LANG_COOKIE))
+    cookie = request.cookies.get(LANG_COOKIE)
+    if cookie:
+        return normalize(cookie)
+    return from_accept_language(request.headers.get("accept-language")) or DEFAULT_LOCALE
 
 
 def base_ctx(request: Request) -> dict:
